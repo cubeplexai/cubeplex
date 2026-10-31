@@ -4259,6 +4259,7 @@
         "cost_input": 0.3,
         "cost_output": 0.6,
         "efforts": [
+          "low",
           "high",
           "max"
         ],
@@ -4279,6 +4280,7 @@
         "cost_input": 0.3,
         "cost_output": 0.6,
         "efforts": [
+          "low",
           "high",
           "max"
         ],
@@ -24761,7 +24763,7 @@
       },
       "anthropic/claude-sonnet-5.5": {
         "context": 1000000,
-        "cost_cache_read": 0.2,
+        "cost_cache_read": 0.1,
         "cost_cache_write": 2.5,
         "cost_input": 2,
         "cost_output": 10,
@@ -34828,6 +34830,27 @@
         ],
         "reasoning": true
       },
+      "openai-gpt-6.1-terra": {
+        "context": 1050000,
+        "cost_cache_read": 0.05,
+        "cost_input": 1,
+        "cost_output": 5,
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
+        "input": [
+          "image",
+          "text"
+        ],
+        "output": 128000,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
       "openai-gpt-image-1": {
         "cost_cache_read": 1.25,
         "cost_input": 5,
@@ -36591,26 +36614,6 @@
         ],
         "reasoning": true
       },
-      "databricks/databricks-deepseek-v4-pro-0813": {
-        "context": 1000000,
-        "cost_cache_read": 0.132,
-        "cost_cache_write": 1.31999,
-        "cost_input": 1.32,
-        "cost_output": 3.959999,
-        "efforts": [
-          "low",
-          "high",
-          "max"
-        ],
-        "input": [
-          "text"
-        ],
-        "output": 384000,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
       "databricks/databricks-gpt-oss-120b": {
         "context": 131072,
         "cost_cache_read": 0.015001,
@@ -36686,29 +36689,6 @@
           "text"
         ],
         "output": 32768,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
-      "databricks/databricks-inkling": {
-        "context": 1000000,
-        "cost_cache_read": 0.1,
-        "cost_cache_write": 1.00002,
-        "cost_input": 1,
-        "cost_output": 4.05,
-        "efforts": [
-          "minimal",
-          "low",
-          "medium",
-          "high",
-          "max"
-        ],
-        "input": [
-          "image",
-          "text"
-        ],
-        "output": 1048576,
         "output_modalities": [
           "text"
         ],
@@ -42457,7 +42437,7 @@
         "reasoning": true
       },
       "glm-4-5-flash": {
-        "context": 200000,
+        "context": 131072,
         "input": [
           "text"
         ],
@@ -42482,7 +42462,7 @@
         "reasoning": true
       },
       "glm-4-7-flash": {
-        "context": 200000,
+        "context": 202752,
         "input": [
           "text"
         ],
@@ -42493,7 +42473,7 @@
         "reasoning": true
       },
       "glm-4-7-flashx": {
-        "context": 200000,
+        "context": 202752,
         "cost_cache_read": 0.063,
         "cost_input": 0.07,
         "cost_output": 0.4,
@@ -42507,7 +42487,7 @@
         "reasoning": true
       },
       "glm-5-1": {
-        "context": 202000,
+        "context": 202745,
         "cost_cache_read": 0.165,
         "cost_input": 0.825,
         "cost_output": 3.301,
@@ -42527,7 +42507,7 @@
         "reasoning": true
       },
       "glm-5-2": {
-        "context": 1000000,
+        "context": 1048576,
         "cost_cache_read": 1.4,
         "cost_input": 1.4,
         "cost_output": 4.4,
@@ -42548,7 +42528,7 @@
         "reasoning": true
       },
       "glm-5-3": {
-        "context": 1000000,
+        "context": 1048576,
         "cost_cache_read": 1.4,
         "cost_input": 1.4,
         "cost_output": 4.4,
@@ -42567,7 +42547,7 @@
         "reasoning": true
       },
       "glm-5-3-flash": {
-        "context": 1000000,
+        "context": 1048576,
         "cost_cache_read": 0.075,
         "cost_input": 0.075,
         "cost_output": 0.25,
@@ -42589,7 +42569,7 @@
         "reasoning": true
       },
       "kimi-k2-6": {
-        "context": 256000,
+        "context": 262144,
         "cost_cache_read": 0.1788,
         "cost_input": 0.8939,
         "cost_output": 3.7131,
@@ -42611,7 +42591,7 @@
         "reasoning": true
       },
       "kimi-k2-7-code": {
-        "context": 256000,
+        "context": 262144,
         "cost_cache_read": 0.95,
         "cost_input": 0.95,
         "cost_output": 4,
@@ -42627,7 +42607,7 @@
         "reasoning": true
       },
       "kimi-k2-7-code-highspeed": {
-        "context": 256000,
+        "context": 262144,
         "cost_cache_read": 1.9,
         "cost_input": 1.9,
         "cost_output": 8,
@@ -42643,7 +42623,7 @@
         "reasoning": true
       },
       "kimi-k3": {
-        "context": 1000000,
+        "context": 1048576,
         "cost_cache_read": 3,
         "cost_input": 3,
         "cost_output": 15,
@@ -42743,7 +42723,7 @@
         "reasoning": true
       },
       "minimax-m3": {
-        "context": 1000000,
+        "context": 1048576,
         "cost_cache_read": 0.045,
         "cost_input": 0.225,
         "cost_output": 0.9,
@@ -42759,7 +42739,7 @@
         "reasoning": true
       },
       "minimax-m3-1-flash": {
-        "context": 1000000,
+        "context": 1048576,
         "cost_cache_read": 0.01125,
         "cost_input": 0.1125,
         "cost_output": 0.45,
@@ -42781,7 +42761,7 @@
         "reasoning": true
       },
       "mistral-small-4": {
-        "context": 256000,
+        "context": 262144,
         "cost_cache_read": 0.15,
         "cost_input": 0.15,
         "cost_output": 0.6,
@@ -42884,7 +42864,7 @@
         "reasoning": true
       },
       "qwen3-5-122b-a10b": {
-        "context": 256000,
+        "context": 258048,
         "cost_cache_read": 0.115,
         "cost_input": 0.115,
         "cost_output": 0.917,
@@ -42906,7 +42886,7 @@
         "reasoning": true
       },
       "qwen3-5-27b": {
-        "context": 256000,
+        "context": 258048,
         "cost_cache_read": 0.086,
         "cost_input": 0.086,
         "cost_output": 0.688,
@@ -42928,7 +42908,7 @@
         "reasoning": true
       },
       "qwen3-5-35b-a3b": {
-        "context": 256000,
+        "context": 258048,
         "cost_cache_read": 0.057,
         "cost_input": 0.057,
         "cost_output": 0.459,
@@ -42950,7 +42930,7 @@
         "reasoning": true
       },
       "qwen3-5-397b-a17b": {
-        "context": 256000,
+        "context": 258048,
         "cost_cache_read": 0.172,
         "cost_input": 0.172,
         "cost_output": 1.032,
@@ -43016,7 +42996,7 @@
         "reasoning": true
       },
       "qwen3-5-flash": {
-        "context": 1000000,
+        "context": 995904,
         "cost_cache_read": 0.09,
         "cost_input": 0.09,
         "cost_output": 0.368,
@@ -43032,7 +43012,7 @@
         "reasoning": true
       },
       "qwen3-5-plus": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 0.36,
         "cost_input": 0.36,
         "cost_output": 2.21,
@@ -43048,7 +43028,7 @@
         "reasoning": true
       },
       "qwen3-6-27b": {
-        "context": 256000,
+        "context": 229376,
         "cost_cache_read": 0.412564,
         "cost_input": 0.412564,
         "cost_output": 2.475384,
@@ -43090,7 +43070,7 @@
         "reasoning": true
       },
       "qwen3-6-flash": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 0.25,
         "cost_input": 0.25,
         "cost_output": 1.5,
@@ -43112,7 +43092,7 @@
         "reasoning": true
       },
       "qwen3-6-plus": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 0.5,
         "cost_input": 0.5,
         "cost_output": 3,
@@ -43134,7 +43114,7 @@
         "reasoning": true
       },
       "qwen3-7-flash": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 0.006,
         "cost_input": 0.03,
         "cost_output": 0.13,
@@ -43156,7 +43136,7 @@
         "reasoning": true
       },
       "qwen3-7-max": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 2.5,
         "cost_input": 2.5,
         "cost_output": 7.5,
@@ -43176,7 +43156,7 @@
         "reasoning": true
       },
       "qwen3-7-plus": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 0.4,
         "cost_input": 0.4,
         "cost_output": 1.6,
@@ -43218,7 +43198,7 @@
         "reasoning": true
       },
       "qwen3-8-flash": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 0.16,
         "cost_input": 0.16,
         "cost_output": 0.47,
@@ -43240,7 +43220,7 @@
         "reasoning": true
       },
       "qwen3-8-max": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 2,
         "cost_input": 2,
         "cost_output": 6,
@@ -43262,7 +43242,7 @@
         "reasoning": true
       },
       "qwen3-8-max-0902": {
-        "context": 1000000,
+        "context": 983616,
         "cost_cache_read": 2,
         "cost_input": 2,
         "cost_output": 6,
@@ -43284,7 +43264,7 @@
         "reasoning": true
       },
       "qwen3-8-omni-flash": {
-        "context": 1000000,
+        "context": 1006592,
         "cost_cache_read": 0.3,
         "cost_input": 0.3,
         "cost_output": 0.94,
@@ -43307,7 +43287,7 @@
         "reasoning": true
       },
       "seed-2-0-code": {
-        "context": 256000,
+        "context": 229096,
         "cost_cache_read": 0.4,
         "cost_input": 0.4,
         "cost_output": 2.4,
@@ -43328,7 +43308,7 @@
         "reasoning": true
       },
       "seed-2-0-lite": {
-        "context": 256000,
+        "context": 229096,
         "cost_cache_read": 0.31,
         "cost_input": 0.31,
         "cost_output": 2.5,
@@ -43349,7 +43329,7 @@
         "reasoning": true
       },
       "seed-2-0-mini": {
-        "context": 256000,
+        "context": 229156,
         "cost_cache_read": 0.12,
         "cost_input": 0.12,
         "cost_output": 0.5,
@@ -43370,7 +43350,7 @@
         "reasoning": true
       },
       "seed-2-0-pro": {
-        "context": 256000,
+        "context": 229096,
         "cost_cache_read": 0.63,
         "cost_input": 0.63,
         "cost_output": 3.79,
@@ -43391,7 +43371,7 @@
         "reasoning": true
       },
       "seed-2-1-turbo": {
-        "context": 256000,
+        "context": 229093,
         "cost_cache_read": 0.63,
         "cost_input": 0.63,
         "cost_output": 3.13,
@@ -55179,8 +55159,8 @@
       },
       "moonshotai/Kimi-K2.6": {
         "context": 262144,
-        "cost_cache_read": 0.1365,
-        "cost_input": 0.6825,
+        "cost_cache_read": 0.1831,
+        "cost_input": 0.6821,
         "cost_output": 3.5,
         "input": [
           "image",
@@ -59512,7 +59492,7 @@
         "reasoning": true
       },
       "deepseek/deepseek-v4-pro": {
-        "context": 1024000,
+        "context": 1048576,
         "cost_cache_read": 0.135,
         "cost_input": 1.6,
         "cost_output": 3.2,
@@ -59522,7 +59502,7 @@
         "input": [
           "text"
         ],
-        "output": 384000,
+        "output": 393216,
         "output_modalities": [
           "text"
         ],
@@ -59541,7 +59521,7 @@
         "input": [
           "text"
         ],
-        "output": 393216,
+        "output": 943718,
         "output_modalities": [
           "text"
         ],
@@ -60191,9 +60171,9 @@
       },
       "google/gemma-4-26b-a4b-it": {
         "context": 262144,
-        "cost_cache_read": 0.015,
-        "cost_input": 0.03,
-        "cost_output": 0.09,
+        "cost_cache_read": 0.011,
+        "cost_input": 0.022,
+        "cost_output": 0.066,
         "efforts": [
           "high"
         ],
@@ -60957,7 +60937,7 @@
         "reasoning": true
       },
       "minimax/minimax-m2.5": {
-        "context": 204800,
+        "context": 198000,
         "cost_cache_read": 0.03,
         "cost_input": 0.3,
         "cost_output": 1.2,
@@ -60967,7 +60947,7 @@
         "input": [
           "text"
         ],
-        "output": 131072,
+        "output": 32768,
         "output_modalities": [
           "text"
         ],
@@ -63076,68 +63056,6 @@
         ],
         "reasoning": true
       },
-      "poolside/laguna-s-2.1": {
-        "context": 1048576,
-        "cost_cache_read": 0.01,
-        "cost_input": 0.1,
-        "cost_output": 0.2,
-        "efforts": [
-          "high"
-        ],
-        "input": [
-          "text"
-        ],
-        "output": 131072,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
-      "poolside/laguna-s-2.1:free": {
-        "context": 262144,
-        "efforts": [
-          "high"
-        ],
-        "input": [
-          "text"
-        ],
-        "output": 32768,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
-      "poolside/laguna-xs-2.1": {
-        "context": 262144,
-        "cost_cache_read": 0.05,
-        "cost_input": 0.1,
-        "cost_output": 0.2,
-        "efforts": [
-          "high"
-        ],
-        "input": [
-          "text"
-        ],
-        "output": 32768,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
-      "poolside/laguna-xs-2.1:free": {
-        "context": 262144,
-        "efforts": [
-          "high"
-        ],
-        "input": [
-          "text"
-        ],
-        "output": 32768,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
       "prism-ml/ternary-bonsai-2-27b": {
         "context": 262144,
         "cost_cache_read": 0.0375,
@@ -63606,7 +63524,7 @@
           "text",
           "video"
         ],
-        "output": 81920,
+        "output": 65536,
         "output_modalities": [
           "text"
         ],
@@ -64785,10 +64703,10 @@
         "reasoning": true
       },
       "z-ai/glm-4.7": {
-        "context": 204800,
-        "cost_cache_read": 0.099,
-        "cost_input": 0.54,
-        "cost_output": 1.98,
+        "context": 202752,
+        "cost_cache_read": 0.11,
+        "cost_input": 0.6,
+        "cost_output": 2.2,
         "efforts": [
           "high"
         ],
@@ -65078,9 +64996,9 @@
       },
       "~deepseek/deepseek-flash-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.004,
-        "cost_input": 0.022,
-        "cost_output": 0.192,
+        "cost_cache_read": 0.013,
+        "cost_input": 0.0141,
+        "cost_output": 0.144,
         "efforts": [
           "low",
           "high",
@@ -65100,7 +65018,7 @@
         "context": 1048576,
         "cost_cache_read": 0.1,
         "cost_input": 0.1035,
-        "cost_output": 4,
+        "cost_output": 8,
         "efforts": [
           "low",
           "high",
@@ -65117,8 +65035,8 @@
       },
       "~deepseek/deepseek-v4-flash-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.0294,
-        "cost_input": 0.0304,
+        "cost_cache_read": 0.035,
+        "cost_input": 0.0566,
         "cost_output": 0.3,
         "efforts": [
           "low",
@@ -65184,9 +65102,9 @@
       },
       "~moonshotai/kimi-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.15,
-        "cost_input": 0.1529,
-        "cost_output": 9.3388,
+        "cost_cache_read": 0.07475,
+        "cost_input": 0.1495,
+        "cost_output": 7.15,
         "efforts": [
           "low",
           "high",
@@ -65353,9 +65271,9 @@
       },
       "~z-ai/glm-flash-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.018,
-        "cost_input": 0.018,
-        "cost_output": 0.1402,
+        "cost_cache_read": 0.0163,
+        "cost_input": 0.0163,
+        "cost_output": 0.1479,
         "efforts": [
           "low",
           "high",
@@ -66229,9 +66147,9 @@
       },
       "deepseek-v4.1-flash": {
         "context": 1050000,
-        "cost_cache_read": 0.0025,
-        "cost_input": 0.1,
-        "cost_output": 0.3,
+        "cost_cache_read": 0.0035,
+        "cost_input": 0.11,
+        "cost_output": 0.33,
         "efforts": [
           "low",
           "high",
@@ -66248,7 +66166,7 @@
         "reasoning": true
       },
       "deepseek-v4.1-flash-1017": {
-        "context": 1056784,
+        "context": 1050000,
         "cost_cache_read": 0.003,
         "cost_input": 0.15,
         "cost_output": 0.6,
@@ -68098,7 +68016,9 @@
         "cost_input": 2,
         "cost_output": 10,
         "efforts": [
+          "minimal",
           "low",
+          "medium",
           "high",
           "max"
         ],
@@ -68120,7 +68040,9 @@
         "cost_input": 4,
         "cost_output": 20,
         "efforts": [
+          "minimal",
           "low",
+          "medium",
           "high",
           "max"
         ],
@@ -75839,9 +75761,9 @@
       },
       "reka-ai/deepseek-v4.1-flash": {
         "context": 1048576,
-        "cost_cache_read": 0.0025,
-        "cost_input": 0.1,
-        "cost_output": 0.3,
+        "cost_cache_read": 0.0035,
+        "cost_input": 0.11,
+        "cost_output": 0.33,
         "efforts": [
           "minimal",
           "low",
@@ -75861,7 +75783,7 @@
       },
       "reka-ai/deepseek-v4.1-flash-1017": {
         "context": 1048576,
-        "cost_cache_read": 0.003,
+        "cost_cache_read": 0.0054,
         "cost_input": 0.15,
         "cost_output": 0.6,
         "efforts": [
@@ -75904,9 +75826,9 @@
       },
       "reka-ai/glm-5.3-flash": {
         "context": 1048576,
-        "cost_cache_read": 0.027,
-        "cost_input": 0.09,
-        "cost_output": 0.28,
+        "cost_cache_read": 0.028,
+        "cost_input": 0.18,
+        "cost_output": 0.6,
         "efforts": [
           "minimal",
           "low",
@@ -75939,6 +75861,26 @@
           "text"
         ]
       },
+      "runpod/glm-5.3": {
+        "context": 262144,
+        "cost_cache_read": 0.143,
+        "cost_input": 0.77,
+        "cost_output": 2.42,
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
+        "input": [
+          "text"
+        ],
+        "output": 131072,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
       "runpod/kimi-k3": {
         "context": 1048576,
         "cost_cache_read": 0.3,
@@ -75955,6 +75897,51 @@
           "image",
           "text",
           "video"
+        ],
+        "output": 1048576,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "runpod/kimi-k3.1-pro": {
+        "context": 1048576,
+        "cost_cache_read": 0.2,
+        "cost_input": 2,
+        "cost_output": 10,
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
+        "input": [
+          "image",
+          "text",
+          "video"
+        ],
+        "output": 1048576,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "runpod/kimi-k3.1-pro-highspeed": {
+        "context": 1048576,
+        "cost_cache_read": 0.2,
+        "cost_input": 4,
+        "cost_output": 20,
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
+        "input": [
+          "image",
+          "text"
         ],
         "output": 1048576,
         "output_modalities": [
@@ -76202,7 +76189,7 @@
         "reasoning": true
       },
       "sciforium/deepseek-v4.1-flash-1017": {
-        "context": 1056784,
+        "context": 1048576,
         "cost_cache_read": 0.003,
         "cost_input": 0.15,
         "cost_output": 0.6,
@@ -88509,9 +88496,9 @@
       },
       "deepseek/deepseek-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.022,
-        "cost_input": 0.66,
-        "cost_output": 1.98,
+        "cost_cache_read": 0.00903,
+        "cost_input": 0.2838,
+        "cost_output": 0.8514,
         "efforts": [
           "low",
           "high",
@@ -88651,9 +88638,9 @@
       },
       "deepseek/deepseek-v4-flash-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.005,
-        "cost_input": 0.1,
-        "cost_output": 0.6,
+        "cost_cache_read": 0.006,
+        "cost_input": 0.12,
+        "cost_output": 0.72,
         "efforts": [
           "low",
           "high",
@@ -88727,9 +88714,9 @@
       },
       "deepseek/deepseek-v4-pro-0813": {
         "context": 1048576,
-        "cost_cache_read": 0.022,
-        "cost_input": 0.66,
-        "cost_output": 1.98,
+        "cost_cache_read": 0.00903,
+        "cost_input": 0.2838,
+        "cost_output": 0.8514,
         "efforts": [
           "low",
           "high",
@@ -88746,9 +88733,9 @@
       },
       "deepseek/deepseek-v4-pro-0813:thinking": {
         "context": 1048576,
-        "cost_cache_read": 0.022,
-        "cost_input": 0.66,
-        "cost_output": 1.98,
+        "cost_cache_read": 0.00903,
+        "cost_input": 0.2838,
+        "cost_output": 0.8514,
         "efforts": [
           "low",
           "high",
@@ -88843,9 +88830,9 @@
       },
       "deepseek/deepseek-v4.1-flash-1017": {
         "context": 1048576,
-        "cost_cache_read": 0.005,
-        "cost_input": 0.1,
-        "cost_output": 0.6,
+        "cost_cache_read": 0.006,
+        "cost_input": 0.12,
+        "cost_output": 0.72,
         "efforts": [
           "low",
           "high",
@@ -88903,9 +88890,9 @@
       },
       "deepseek/deepseek-v4.1-flash-1017:thinking": {
         "context": 1048576,
-        "cost_cache_read": 0.005,
-        "cost_input": 0.1,
-        "cost_output": 0.6,
+        "cost_cache_read": 0.006,
+        "cost_input": 0.12,
+        "cost_output": 0.72,
         "efforts": [
           "low",
           "high",
@@ -90287,9 +90274,9 @@
       },
       "google/gemma-4-26b-a4b-it": {
         "context": 262144,
-        "cost_cache_read": 0.015,
-        "cost_input": 0.03,
-        "cost_output": 0.09,
+        "cost_cache_read": 0.008,
+        "cost_input": 0.016,
+        "cost_output": 0.048,
         "input": [
           "image",
           "text",
@@ -90318,9 +90305,9 @@
       },
       "google/gemma-4-26b-a4b-it:thinking": {
         "context": 262144,
-        "cost_cache_read": 0.015,
-        "cost_input": 0.03,
-        "cost_output": 0.09,
+        "cost_cache_read": 0.008,
+        "cost_input": 0.016,
+        "cost_output": 0.048,
         "input": [
           "image",
           "text",
@@ -91771,9 +91758,9 @@
       },
       "moonshotai/kimi-k2.6": {
         "context": 262144,
-        "cost_cache_read": 0.039,
-        "cost_input": 0.39,
-        "cost_output": 1.8,
+        "cost_cache_read": 0.0656,
+        "cost_input": 0.3895,
+        "cost_output": 1.64,
         "input": [
           "image",
           "text"
@@ -91785,9 +91772,9 @@
       },
       "moonshotai/kimi-k2.6:thinking": {
         "context": 262144,
-        "cost_cache_read": 0.039,
-        "cost_input": 0.39,
-        "cost_output": 1.8,
+        "cost_cache_read": 0.0656,
+        "cost_input": 0.3895,
+        "cost_output": 1.64,
         "input": [
           "image",
           "text"
@@ -91830,9 +91817,9 @@
       },
       "moonshotai/kimi-k3": {
         "context": 1048576,
-        "cost_cache_read": 0.13,
-        "cost_input": 0.276,
-        "cost_output": 9.94,
+        "cost_cache_read": 0.07475,
+        "cost_input": 0.1495,
+        "cost_output": 7.15,
         "efforts": [
           "low",
           "high",
@@ -93587,6 +93574,52 @@
         ],
         "reasoning": true
       },
+      "pqhaz/DeepSeek-V4.1-Flash-1017-heretic": {
+        "context": 512000,
+        "cost_cache_read": 0.012,
+        "cost_cache_write": 0.18,
+        "cost_input": 0.18,
+        "cost_output": 0.72,
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
+        "input": [
+          "image",
+          "text"
+        ],
+        "output": 128000,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "pqhaz/DeepSeek-V4.1-Flash-1017-heretic:thinking": {
+        "context": 512000,
+        "cost_cache_read": 0.012,
+        "cost_cache_write": 0.18,
+        "cost_input": 0.18,
+        "cost_output": 0.72,
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "max"
+        ],
+        "input": [
+          "image",
+          "text"
+        ],
+        "output": 128000,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
       "prism-ml/ternary-bonsai-2-27b": {
         "context": 262144,
         "cost_cache_read": 0.0375,
@@ -93857,9 +93890,9 @@
       },
       "qwen/qwen3-coder-next": {
         "context": 262144,
-        "cost_cache_read": 0.079764,
-        "cost_input": 0.250251,
-        "cost_output": 0.80293,
+        "cost_cache_read": 0.07,
+        "cost_input": 0.12,
+        "cost_output": 0.8,
         "input": [
           "text"
         ],
@@ -93924,7 +93957,7 @@
         "reasoning": true
       },
       "qwen/qwen3.5-122b-a10b": {
-        "context": 262144,
+        "context": 131072,
         "cost_cache_read": 0.103788,
         "cost_input": 0.26,
         "cost_output": 2.08,
@@ -93937,7 +93970,7 @@
         ]
       },
       "qwen/qwen3.5-122b-a10b:thinking": {
-        "context": 262144,
+        "context": 131072,
         "cost_cache_read": 0.103788,
         "cost_input": 0.26,
         "cost_output": 2.08,
@@ -94611,7 +94644,7 @@
         "reasoning": true
       },
       "qwen/qwen3.8-flash": {
-        "context": 991808,
+        "context": 1000000,
         "cost_cache_read": 0.016,
         "cost_cache_write": 0.2,
         "cost_input": 0.14,
@@ -95599,6 +95632,8 @@
         "cost_input": 0.5,
         "cost_output": 1.5,
         "efforts": [
+          "low",
+          "medium",
           "high"
         ],
         "input": [
@@ -95914,7 +95949,7 @@
       },
       "z-ai/glm-4.7-flash": {
         "context": 200000,
-        "cost_cache_read": 0.010672,
+        "cost_cache_read": 0.01,
         "cost_input": 0.07,
         "cost_output": 0.4,
         "input": [
@@ -95928,7 +95963,7 @@
       },
       "z-ai/glm-4.7-flash:thinking": {
         "context": 200000,
-        "cost_cache_read": 0.010672,
+        "cost_cache_read": 0.01,
         "cost_input": 0.07,
         "cost_output": 0.4,
         "input": [
@@ -96074,7 +96109,7 @@
       "z-ai/glm-5.2": {
         "context": 1048576,
         "cost_cache_read": 0.069,
-        "cost_input": 0.086,
+        "cost_input": 0.07,
         "cost_output": 1.4,
         "efforts": [
           "high",
@@ -96092,7 +96127,7 @@
       "z-ai/glm-5.2:thinking": {
         "context": 1048576,
         "cost_cache_read": 0.069,
-        "cost_input": 0.086,
+        "cost_input": 0.07,
         "cost_output": 1.4,
         "efforts": [
           "high",
@@ -109632,16 +109667,16 @@
       },
       "deepseek/deepseek-v4-pro": {
         "context": 1048576,
-        "cost_cache_read": 0.079025,
-        "cost_input": 0.9483,
-        "cost_output": 1.8966,
+        "cost_cache_read": 0.135,
+        "cost_input": 1.6,
+        "cost_output": 3.2,
         "efforts": [
           "high"
         ],
         "input": [
           "text"
         ],
-        "output": 384000,
+        "output": 393216,
         "output_modalities": [
           "text"
         ],
@@ -109649,9 +109684,9 @@
       },
       "deepseek/deepseek-v4-pro-0813": {
         "context": 1048576,
-        "cost_cache_read": 0.022,
-        "cost_input": 0.66,
-        "cost_output": 1.98,
+        "cost_cache_read": 0.11,
+        "cost_input": 0.115,
+        "cost_output": 4,
         "efforts": [
           "low",
           "high",
@@ -109660,7 +109695,7 @@
         "input": [
           "text"
         ],
-        "output": 393216,
+        "output": 943718,
         "output_modalities": [
           "text"
         ],
@@ -110947,12 +110982,12 @@
       "minimax/minimax-m2.5": {
         "context": 204800,
         "cost_cache_read": 0.03,
-        "cost_input": 0.3,
-        "cost_output": 1.2,
+        "cost_input": 0.27,
+        "cost_output": 0.95,
         "input": [
           "text"
         ],
-        "output": 131072,
+        "output": 32768,
         "output_modalities": [
           "text"
         ],
@@ -112989,56 +113024,6 @@
         ],
         "reasoning": true
       },
-      "poolside/laguna-s-2.1": {
-        "context": 1048576,
-        "cost_cache_read": 0.009,
-        "cost_input": 0.09,
-        "cost_output": 0.18,
-        "input": [
-          "text"
-        ],
-        "output": 131072,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
-      "poolside/laguna-s-2.1:free": {
-        "context": 262144,
-        "input": [
-          "text"
-        ],
-        "output": 32768,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
-      "poolside/laguna-xs-2.1": {
-        "context": 262144,
-        "cost_cache_read": 0.03,
-        "cost_input": 0.06,
-        "cost_output": 0.12,
-        "input": [
-          "text"
-        ],
-        "output": 32768,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
-      "poolside/laguna-xs-2.1:free": {
-        "context": 262144,
-        "input": [
-          "text"
-        ],
-        "output": 32768,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
       "prism-ml/ternary-bonsai-2-27b": {
         "context": 262144,
         "cost_cache_read": 0.0375,
@@ -113457,14 +113442,14 @@
       },
       "qwen/qwen3.6-27b": {
         "context": 262144,
-        "cost_input": 0.32,
-        "cost_output": 3.2,
+        "cost_input": 0.45,
+        "cost_output": 2.7,
         "input": [
           "image",
           "text",
           "video"
         ],
-        "output": 81920,
+        "output": 65536,
         "output_modalities": [
           "text"
         ],
@@ -113586,9 +113571,9 @@
       },
       "qwen/qwen3.8-27b": {
         "context": 1000000,
-        "cost_cache_read": 0.0375,
-        "cost_input": 0.15,
-        "cost_output": 1.875,
+        "cost_cache_read": 0.02,
+        "cost_input": 0.04,
+        "cost_output": 2.3,
         "efforts": [
           "low",
           "medium"
@@ -114572,9 +114557,9 @@
       },
       "z-ai/glm-4.7": {
         "context": 204800,
-        "cost_cache_read": 0.099,
-        "cost_input": 0.54,
-        "cost_output": 1.98,
+        "cost_cache_read": 0.11,
+        "cost_input": 0.6,
+        "cost_output": 2.2,
         "input": [
           "text"
         ],
@@ -114643,7 +114628,7 @@
         "context": 1048576,
         "cost_cache_read": 0.005,
         "cost_input": 0.006,
-        "cost_output": 7,
+        "cost_output": 6.8,
         "efforts": [
           "high"
         ],
@@ -114658,9 +114643,9 @@
       },
       "z-ai/glm-5.3": {
         "context": 1048576,
-        "cost_cache_read": 0.076,
-        "cost_input": 0.08,
-        "cost_output": 3.6,
+        "cost_cache_read": 0.0689,
+        "cost_input": 0.0699,
+        "cost_output": 1.4,
         "efforts": [
           "low",
           "high",
@@ -114677,9 +114662,9 @@
       },
       "z-ai/glm-5.3-flash": {
         "context": 1048576,
-        "cost_cache_read": 0.018,
-        "cost_input": 0.018,
-        "cost_output": 0.1402,
+        "cost_cache_read": 0.0163,
+        "cost_input": 0.0163,
+        "cost_output": 0.1479,
         "efforts": [
           "low",
           "high",
@@ -114846,9 +114831,9 @@
       },
       "~deepseek/deepseek-flash-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.004,
-        "cost_input": 0.022,
-        "cost_output": 0.192,
+        "cost_cache_read": 0.013,
+        "cost_input": 0.0141,
+        "cost_output": 0.144,
         "efforts": [
           "low",
           "high",
@@ -114868,7 +114853,7 @@
         "context": 1048576,
         "cost_cache_read": 0.1,
         "cost_input": 0.1035,
-        "cost_output": 4,
+        "cost_output": 8,
         "efforts": [
           "low",
           "high",
@@ -114885,8 +114870,8 @@
       },
       "~deepseek/deepseek-v4-flash-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.055,
-        "cost_input": 0.056,
+        "cost_cache_read": 0.035,
+        "cost_input": 0.0566,
         "cost_output": 0.3,
         "efforts": [
           "low",
@@ -114952,9 +114937,9 @@
       },
       "~moonshotai/kimi-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.15,
-        "cost_input": 0.1529,
-        "cost_output": 9.3388,
+        "cost_cache_read": 0.07475,
+        "cost_input": 0.1495,
+        "cost_output": 7.15,
         "efforts": [
           "low",
           "high",
@@ -115121,9 +115106,9 @@
       },
       "~z-ai/glm-flash-latest": {
         "context": 1048576,
-        "cost_cache_read": 0.018,
-        "cost_input": 0.018,
-        "cost_output": 0.1402,
+        "cost_cache_read": 0.0163,
+        "cost_input": 0.0163,
+        "cost_output": 0.1479,
         "efforts": [
           "low",
           "high",
@@ -122309,7 +122294,7 @@
         "input": [
           "text"
         ],
-        "output": 384000,
+        "output": 393216,
         "output_modalities": [
           "text"
         ],
@@ -140556,9 +140541,9 @@
       },
       "kimi-k3-1-pro": {
         "context": 1000000,
-        "cost_cache_read": 0.30000000000000004,
-        "cost_input": 3,
-        "cost_output": 15,
+        "cost_cache_read": 0.375,
+        "cost_input": 3.75,
+        "cost_output": 18.75,
         "efforts": [
           "low",
           "high",
@@ -140576,9 +140561,9 @@
       },
       "kimi-k3-1-pro-highspeed": {
         "context": 1000000,
-        "cost_cache_read": 0.6000000000000001,
-        "cost_input": 6,
-        "cost_output": 30,
+        "cost_cache_read": 0.75,
+        "cost_input": 7.5,
+        "cost_output": 37.5,
         "efforts": [
           "low",
           "high",
@@ -147075,17 +147060,6 @@
         ],
         "reasoning": true
       },
-      "poolside/laguna-s-2.1-free": {
-        "context": 256000,
-        "input": [
-          "text"
-        ],
-        "output": 32768,
-        "output_modalities": [
-          "text"
-        ],
-        "reasoning": true
-      },
       "quiverai/arrow-2": {
         "context": 131072,
         "cost_cache_read": 0.4,
@@ -150053,6 +150027,157 @@
           "image",
           "text",
           "video"
+        ],
+        "output": 131072,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      }
+    },
+    "wally": {
+      "deepseek-v4-flash-0731": {
+        "context": 1048576,
+        "cost_cache_read": 0.014,
+        "cost_input": 0.44,
+        "cost_output": 1.32,
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "input": [
+          "text"
+        ],
+        "output": 65536,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "deepseek-v4-pro-fast": {
+        "context": 1048576,
+        "cost_cache_read": 0.16,
+        "cost_input": 1.91,
+        "cost_output": 3.83,
+        "efforts": [
+          "high",
+          "max"
+        ],
+        "input": [
+          "text"
+        ],
+        "output": 65536,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "deepseek-v4.1-flash": {
+        "context": 1048576,
+        "cost_cache_read": 0.006,
+        "cost_input": 0.3,
+        "cost_output": 1.2,
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "input": [
+          "image",
+          "text"
+        ],
+        "output": 65536,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "deepseek-v4.1-flash-fast": {
+        "context": 1048576,
+        "cost_cache_read": 0.014,
+        "cost_input": 0.6,
+        "cost_output": 2.4,
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "input": [
+          "image",
+          "text"
+        ],
+        "output": 65536,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "glm-5.3-fast": {
+        "context": 1048576,
+        "cost_cache_read": 0.39,
+        "cost_input": 2.1,
+        "cost_output": 6.6,
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "input": [
+          "text"
+        ],
+        "output": 131072,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "glm-5.3-flash": {
+        "context": 1048576,
+        "cost_cache_read": 0.076,
+        "cost_input": 0.272,
+        "cost_output": 0.65,
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "input": [
+          "text"
+        ],
+        "output": 131072,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "kimi-k3": {
+        "context": 1048576,
+        "cost_cache_read": 0.3,
+        "cost_input": 3,
+        "cost_output": 15,
+        "efforts": [
+          "low",
+          "high",
+          "max"
+        ],
+        "input": [
+          "image",
+          "text"
+        ],
+        "output": 65536,
+        "output_modalities": [
+          "text"
+        ],
+        "reasoning": true
+      },
+      "minimax-m3": {
+        "context": 524287,
+        "cost_cache_read": 0.066,
+        "cost_input": 0.33,
+        "cost_output": 1.32,
+        "input": [
+          "text"
         ],
         "output": 131072,
         "output_modalities": [
@@ -154096,6 +154221,6 @@
       }
     }
   },
-  "retrieved_at": "2026-10-30T20:25:15+00:00",
+  "retrieved_at": "2026-10-31T19:43:47+00:00",
   "source": "https://models.dev/api.json"
 }
