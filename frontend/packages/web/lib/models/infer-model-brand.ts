@@ -51,6 +51,16 @@ const RULES: Rule[] = [
     namePatterns: [wordToken('chatgpt'), wordToken('gpt')],
   },
   {
+    brand: 'gemini',
+    idPatterns: [idPrefix('gemini'), idPrefix('gemma')],
+    namePatterns: [wordToken('gemini'), wordToken('gemma')],
+  },
+  {
+    brand: 'google',
+    idPatterns: [idPrefix('google')],
+    namePatterns: [wordToken('google')],
+  },
+  {
     brand: 'qwen',
     idPatterns: [idPrefix('qwen')],
     namePatterns: [wordToken('qwen')],

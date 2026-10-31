@@ -44,6 +44,103 @@ export const OpenaiIcon: BrandIcon = memo(function OpenaiIcon({ size = '1em', st
   )
 })
 
+export const GeminiIcon: BrandIcon = memo(function GeminiIcon({ size = '1em', style, ...props }) {
+  const baseId = useId()
+  const grad0 = `url(#${baseId}-0)`
+  const grad1 = `url(#${baseId}-1)`
+  const grad2 = `url(#${baseId}-2)`
+  const pathD =
+    'M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 ' +
+    '0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318' +
+    '.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 ' +
+    '3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 ' +
+    '14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 ' +
+    '01-2.003-.678z'
+
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>Gemini</title>
+      <path d={pathD} fill="#3186FF" />
+      <path d={pathD} fill={grad0} />
+      <path d={pathD} fill={grad1} />
+      <path d={pathD} fill={grad2} />
+      <defs>
+        <linearGradient
+          id={`${baseId}-0`}
+          gradientUnits="userSpaceOnUse"
+          x1="7"
+          x2="11"
+          y1="15.5"
+          y2="12"
+        >
+          <stop stopColor="#08B962" />
+          <stop offset="1" stopColor="#08B962" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient
+          id={`${baseId}-1`}
+          gradientUnits="userSpaceOnUse"
+          x1="8"
+          x2="11.5"
+          y1="5.5"
+          y2="11"
+        >
+          <stop stopColor="#F94543" />
+          <stop offset="1" stopColor="#F94543" stopOpacity="0" />
+        </linearGradient>
+        <linearGradient
+          id={`${baseId}-2`}
+          gradientUnits="userSpaceOnUse"
+          x1="3.5"
+          x2="17.5"
+          y1="13.5"
+          y2="12"
+        >
+          <stop stopColor="#FABC12" />
+          <stop offset="0.46" stopColor="#FABC12" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+    </svg>
+  )
+})
+
+export const GoogleIcon: BrandIcon = memo(function GoogleIcon({ size = '1em', style, ...props }) {
+  return (
+    <svg
+      height={size}
+      width={size}
+      viewBox="0 0 24 24"
+      style={{ flex: 'none', lineHeight: 1, ...style }}
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <title>Google</title>
+      <path
+        d="M23 12.245c0-.905-.075-1.565-.236-2.25h-10.54v4.083h6.186c-.124 1.014-.797 2.542-2.294 3.569l-.021.136 3.332 2.53.23.022C21.779 18.417 23 15.593 23 12.245z"
+        fill="#4285F4"
+      />
+      <path
+        d="M12.225 23c3.03 0 5.574-.978 7.433-2.665l-3.542-2.688c-.948.648-2.22 1.1-3.891 1.1a6.745 6.745 0 01-6.386-4.572l-.132.011-3.465 2.628-.045.124C4.043 20.531 7.835 23 12.225 23z"
+        fill="#34A853"
+      />
+      <path
+        d="M5.84 14.175A6.65 6.65 0 015.463 12c0-.758.138-1.491.361-2.175l-.006-.147-3.508-2.67-.115.054A10.831 10.831 0 001 12c0 1.772.436 3.447 1.197 4.938l3.642-2.763z"
+        fill="#FBBC05"
+      />
+      <path
+        d="M12.225 5.253c2.108 0 3.529.892 4.34 1.638l3.167-3.031C17.787 2.088 15.255 1 12.225 1 7.834 1 4.043 3.469 2.197 7.062l3.63 2.763a6.77 6.77 0 016.398-4.572z"
+        fill="#EB4335"
+      />
+    </svg>
+  )
+})
+
 export const QwenIcon: BrandIcon = memo(function QwenIcon({ size = '1em', style, ...props }) {
   const gradId = useId()
   const gradFill = `url(#${gradId})`
@@ -461,6 +558,9 @@ export const MinimaxIcon: BrandIcon = memo(function MinimaxIcon({ size = '1em', 
 export const BRAND_ICONS: Record<string, BrandIcon> = {
   anthropic: AnthropicIcon,
   openai: OpenaiIcon,
+  google: GoogleIcon,
+  gemini: GeminiIcon,
+  gemma: GeminiIcon,
   qwen: QwenIcon,
   deepseek: DeepseekIcon,
   doubao: DoubaoIcon,

@@ -9,6 +9,10 @@ describe('inferModelBrand', () => {
     expect(inferModelBrand('gpt4o')).toBe('openai')
     expect(inferModelBrand('o4-mini')).toBe('openai')
     expect(inferModelBrand('o1')).toBe('openai')
+    expect(inferModelBrand('gemini-2.5-flash')).toBe('gemini')
+    expect(inferModelBrand('gemini-1.5-pro')).toBe('gemini')
+    expect(inferModelBrand('gemma-2-27b-it')).toBe('gemini')
+    expect(inferModelBrand('google-custom-v1')).toBe('google')
     expect(inferModelBrand('qwen3-max')).toBe('qwen')
     expect(inferModelBrand('Qwen2.5-72B-Instruct')).toBe('qwen')
     expect(inferModelBrand('kimi-k2.5')).toBe('moonshot')
@@ -24,11 +28,13 @@ describe('inferModelBrand', () => {
   it('matches on model id even when gateway is a proxy', () => {
     // Caller should pass model_id only; full primary still works if model portion matches.
     expect(inferModelBrand(modelIdFromPrimary('openrouter/claude-sonnet-4-6'))).toBe('anthropic')
+    expect(inferModelBrand(modelIdFromPrimary('google/gemini-2.5-flash'))).toBe('gemini')
     expect(inferModelBrand(modelIdFromPrimary('my-corp-vllm/Qwen2.5-72B-Instruct'))).toBe('qwen')
   })
 
   it('can use display name when model id is opaque', () => {
     expect(inferModelBrand('ft-abc123', 'Claude Sonnet fine-tune')).toBe('anthropic')
+    expect(inferModelBrand('ft-custom-456', 'Gemini Pro fine-tune')).toBe('gemini')
   })
 
   it('does not false-positive on brand substrings mid-id', () => {
