@@ -137,6 +137,7 @@ export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
 
         <Link
           href="/settings/profile"
+          prefetch={false}
           className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
         >
           <UserIcon className="size-3.5 text-muted-foreground" />

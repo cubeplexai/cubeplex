@@ -55,13 +55,7 @@ export const nextConfig: NextConfig = {
   },
   experimental: {
     proxyClientMaxBodySize: ATTACHMENT_PROXY_BODY_LIMIT,
-    optimizePackageImports: [
-      '@lobehub/icons',
-      '@base-ui/react',
-      '@dicebear/core',
-      '@dicebear/styles',
-      'recharts',
-    ],
+    optimizePackageImports: ['@base-ui/react', '@dicebear/core', '@dicebear/styles', 'recharts'],
   },
   async headers() {
     return [
