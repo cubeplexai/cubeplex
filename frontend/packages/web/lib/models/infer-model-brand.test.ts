@@ -29,6 +29,16 @@ describe('inferModelBrand', () => {
     expect(inferModelBrand('nemotron-4-340b')).toBe('nvidia')
     expect(inferModelBrand('step-2-16k')).toBe('stepfun')
     expect(inferModelBrand('baichuan-4')).toBe('baichuan')
+    expect(inferModelBrand('hunyuan-pro')).toBe('hunyuan')
+    expect(inferModelBrand('ernie-4.0-turbo')).toBe('wenxin')
+    expect(inferModelBrand('wenxin-3.5')).toBe('wenxin')
+    expect(inferModelBrand('spark-4.0-ultra')).toBe('spark')
+    expect(inferModelBrand('iflytek-spark-max')).toBe('spark')
+    expect(inferModelBrand('yi-large')).toBe('yi')
+    expect(inferModelBrand('01-ai/yi-1.5-9b')).toBe('yi')
+    expect(inferModelBrand('internlm2.5-20b-chat')).toBe('internlm')
+    expect(inferModelBrand('phi-4')).toBe('phi')
+    expect(inferModelBrand('phi-3.5-mini')).toBe('phi')
   })
 
   it('matches on model id even when gateway is a proxy', () => {

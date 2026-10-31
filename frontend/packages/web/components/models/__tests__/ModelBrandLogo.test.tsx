@@ -50,6 +50,33 @@ describe('ModelBrandLogo', () => {
 
     rerender(<ModelBrandLogo brand="nvidia" label="Nemotron" />)
     expect(container.querySelector('title')?.textContent).toBe('Nvidia')
+
+    rerender(<ModelBrandLogo brand="hunyuan" label="Hunyuan Pro" />)
+    expect(container.querySelector('title')?.textContent).toBe('Hunyuan')
+
+    rerender(<ModelBrandLogo brand="wenxin" label="ERNIE 4.0" />)
+    expect(container.querySelector('title')?.textContent).toBe('Wenxin')
+
+    rerender(<ModelBrandLogo brand="spark" label="Spark Ultra" />)
+    expect(container.querySelector('title')?.textContent).toBe('Spark')
+
+    rerender(<ModelBrandLogo brand="yi" label="Yi Large" />)
+    expect(container.querySelector('title')?.textContent).toBe('Yi')
+
+    rerender(<ModelBrandLogo brand="internlm" label="InternLM 2.5" />)
+    expect(container.querySelector('title')?.textContent).toBe('InternLM')
+
+    rerender(<ModelBrandLogo brand="microsoft" label="Microsoft Model" />)
+    expect(container.querySelector('title')?.textContent).toBe('Microsoft')
+
+    rerender(<ModelBrandLogo brand="phi" label="Phi-4" />)
+    expect(container.querySelector('title')?.textContent).toBe('Microsoft')
+
+    rerender(<ModelBrandLogo brand="siliconcloud" label="SiliconCloud" />)
+    expect(container.querySelector('title')?.textContent).toBe('SiliconCloud')
+
+    rerender(<ModelBrandLogo brand="azure" label="Azure OpenAI" />)
+    expect(container.querySelector('title')?.textContent).toBe('Azure')
   })
 
   it('falls back to CPU icon for unknown brand or null', () => {

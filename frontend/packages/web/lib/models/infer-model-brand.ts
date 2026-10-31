@@ -125,6 +125,36 @@ const RULES: Rule[] = [
     idPatterns: [idPrefix('baichuan')],
     namePatterns: [wordToken('baichuan')],
   },
+  {
+    brand: 'hunyuan',
+    idPatterns: [idPrefix('hunyuan')],
+    namePatterns: [wordToken('hunyuan')],
+  },
+  {
+    brand: 'wenxin',
+    idPatterns: [idPrefix('ernie'), idPrefix('wenxin')],
+    namePatterns: [wordToken('ernie'), wordToken('wenxin')],
+  },
+  {
+    brand: 'spark',
+    idPatterns: [idPrefix('spark'), idPrefix('iflytek')],
+    namePatterns: [wordToken('spark'), wordToken('iflytek'), wordToken('xinghuo')],
+  },
+  {
+    brand: 'yi',
+    idPatterns: [idPrefix('yi'), idPrefix('01-ai'), idPrefix('zero-one')],
+    namePatterns: [wordToken('yi'), wordToken('01.ai'), wordToken('zeroone')],
+  },
+  {
+    brand: 'internlm',
+    idPatterns: [idPrefix('internlm')],
+    namePatterns: [wordToken('internlm')],
+  },
+  {
+    brand: 'phi',
+    idPatterns: [idPrefix('phi')],
+    namePatterns: [wordToken('phi')],
+  },
 ]
 
 /**
