@@ -41,6 +41,29 @@ function fixCjkBoldQuotes(text: string): string {
     .replace(/(["\u201d\u300d])\s*\*\*/g, '**$1')
 }
 
+/**
+ * Escape currency dollar signs (e.g. $100, $271,677.37, $.99) so remark-math does
+ * not misinterpret them as LaTeX math delimiters, while leaving code blocks,
+ * inline code, and true math formulas ($x = \pi$, $$E=mc^2$$) intact.
+ */
+export function escapeCurrencyDollars(text: string): string {
+  return text.replace(
+    /(```[\s\S]*?```|`[^`\n]*`)|(?<![\\$])\$(?!\$)(?=[0-9]|\.[0-9])/g,
+    (match, code) => (code ? match : '\\$'),
+  )
+}
+
+const MATH_INLINE_RE = /(?:^|[^\\])\$(?!\s)[^$\n]+?(?<!\s)\$(?!\$)/
+
+/**
+ * Check whether markdown text contains math (display math $$...$$ or inline math $...$).
+ */
+export function containsMath(text: string): boolean {
+  if (text.includes('$$')) return true
+  const textWithoutCode = text.replace(/(```[\s\S]*?```|`[^`\n]*`)/g, '')
+  return MATH_INLINE_RE.test(textWithoutCode)
+}
+
 export interface SandboxMarkdownContext {
   /** Absolute sandbox path of the markdown file being rendered. */
   filePath: string
@@ -76,7 +99,10 @@ function MarkdownWithCitationsImpl({
   // value is parsed once the main thread is idle. Combined with the outer
   // `memo`, an unchanged `children` short-circuits before this runs.
   const deferredChildren = useDeferredValue(children)
-  const md = useMemo(() => fixCjkBoldQuotes(deferredChildren), [deferredChildren])
+  const md = useMemo(
+    () => escapeCurrencyDollars(fixCjkBoldQuotes(deferredChildren)),
+    [deferredChildren],
+  )
   const hasCitations = useMemo(() => CITATION_RE.test(md), [md])
   const baseComponents = useMemo(
     () => ({ ...markdownComponents, ...(sandbox ? buildSandboxComponents(sandbox) : {}) }),
@@ -102,7 +128,7 @@ function MarkdownWithCitationsImpl({
     [baseComponents, conversationId],
   )
 
-  const hasMath = md.includes('$$')
+  const hasMath = useMemo(() => containsMath(md), [md])
   if (hasMath) {
     return (
       <div className={className}>
