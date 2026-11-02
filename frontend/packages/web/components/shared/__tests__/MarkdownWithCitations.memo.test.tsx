@@ -66,6 +66,23 @@ describe('MarkdownWithCitations math rendering', () => {
     expect(container.textContent).toContain('时，就会得到欧拉恒等式')
   })
 
+  it('renders single-digit and constant inline formulas ($1$, $0$) as KaTeX', async () => {
+    const text =
+      '它把数学中最关键的五个常数（$e$、$i$、$\\pi$、$1$、$0$）和基本运算完美地联系在了一起～'
+    const { container } = render(
+      <MarkdownWithCitations conversationId="conv-test">{text}</MarkdownWithCitations>,
+    )
+    await waitFor(() => expect(container.querySelectorAll('.katex')).toHaveLength(5))
+  })
+
+  it('renders formulas starting with digits ($1 + 1 = 2$, $2\\pi$) as KaTeX', async () => {
+    const text = 'Formula $1 + 1 = 2$ and $2\\pi$ in math'
+    const { container } = render(
+      <MarkdownWithCitations conversationId="conv-test">{text}</MarkdownWithCitations>,
+    )
+    await waitFor(() => expect(container.querySelectorAll('.katex')).toHaveLength(2))
+  })
+
   it('renders both inline math and currency correctly in the same text', async () => {
     const text = 'Formula $x = \\pi$ costs $50 to license, previously $40.'
     const { container } = render(
@@ -93,6 +110,9 @@ describe('escapeCurrencyDollars and containsMath helpers', () => {
       'Cost is \\$100 and tax is \\$5.50 or \\$.99',
     )
     expect(escapeCurrencyDollars('Already escaped: \\$100')).toBe('Already escaped: \\$100')
+    expect(escapeCurrencyDollars('售价$100元，或者 $50，最低$20。')).toBe(
+      '售价\\$100元，或者 \\$50，最低\\$20。',
+    )
   })
 
   it('does not escape double dollar blocks ($$1 + 1 = 2$$)', () => {
@@ -108,6 +128,12 @@ describe('escapeCurrencyDollars and containsMath helpers', () => {
   it('preserves true inline math expressions', () => {
     expect(escapeCurrencyDollars('Formula: $x = \\pi$ and $E=mc^2$')).toBe(
       'Formula: $x = \\pi$ and $E=mc^2$',
+    )
+    expect(escapeCurrencyDollars('Constants: $e$, $i$, $\\pi$, $1$, $0$')).toBe(
+      'Constants: $e$, $i$, $\\pi$, $1$, $0$',
+    )
+    expect(escapeCurrencyDollars('$1 + 1 = 2$ and $2\\pi$ and $100$')).toBe(
+      '$1 + 1 = 2$ and $2\\pi$ and $100$',
     )
   })
 
