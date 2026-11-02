@@ -722,7 +722,11 @@ export function MessageList({ conversationId }: MessageListProps) {
                         conversationId={conversationId}
                       />
                     )}
-                    <UserMessage content={getTextContent(msg)} timestamp={msg.timestamp} />
+                    <UserMessage
+                      content={getTextContent(msg)}
+                      timestamp={msg.timestamp}
+                      conversationId={conversationId}
+                    />
                   </>
                 )}
                 {msg.role === 'assistant' &&
