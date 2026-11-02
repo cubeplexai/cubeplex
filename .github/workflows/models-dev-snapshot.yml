@@ -1,15 +1,15 @@
 name: Refresh models.dev snapshot
 
 # Regenerates backend/cubeplex/llm/catalog/data/models_dev_snapshot.json from
-# https://models.dev/api.json. GitHub schedules cron in UTC; 16:00 UTC is
-# 00:00 Asia/Shanghai. Scheduled runs use the workflow on the default branch.
+# https://models.dev/api.json. GitHub schedules cron in UTC; Sunday 16:00 UTC is
+# Monday 00:00 Asia/Shanghai. Scheduled runs use the workflow on the default branch.
 # main requires a pull request, so a changed snapshot is pushed to
 # chore/models-dev-snapshot and opened as a PR. A run with no catalog change
 # does not commit.
 
 on:
   schedule:
-    - cron: '0 16 * * *'
+    - cron: '0 16 * * 0'
   workflow_dispatch:
 
 permissions:
@@ -69,4 +69,4 @@ jobs:
           fi
           gh pr create --base main --head "$branch" \
             --title "chore(models): refresh models.dev snapshot" \
-            --body "Daily models.dev provider snapshot. Merge to update discovery metadata."
+            --body "Weekly models.dev provider snapshot. Merge to update discovery metadata."
