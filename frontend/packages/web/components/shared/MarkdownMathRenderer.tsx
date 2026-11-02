@@ -13,7 +13,7 @@ import 'katex/dist/katex.min.css'
 const REMARK_PLUGINS_WITH_MATH: ComponentProps<typeof ReactMarkdown>['remarkPlugins'] = [
   [remarkGfm, { singleTilde: false }],
   remarkBreaks,
-  [remarkMath, { singleDollarTextMath: false }],
+  [remarkMath, { singleDollarTextMath: true }],
 ]
 
 const REHYPE_PLUGINS_WITH_MATH: ComponentProps<typeof ReactMarkdown>['rehypePlugins'] = [
