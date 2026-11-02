@@ -44,11 +44,11 @@ function fixCjkBoldQuotes(text: string): string {
 /**
  * Escape currency dollar signs (e.g. $100, $271,677.37, $.99) so remark-math does
  * not misinterpret them as LaTeX math delimiters, while leaving code blocks,
- * inline code, and true math formulas ($x = \pi$, $$E=mc^2$$) intact.
+ * inline code, and true math formulas ($x = \pi$, $1$, $0$, $1 + 1 = 2$, $$E=mc^2$$) intact.
  */
 export function escapeCurrencyDollars(text: string): string {
   return text.replace(
-    /(```[\s\S]*?```|`[^`\n]*`)|(?<![\\$])\$(?!\$)(?=[0-9]|\.[0-9])/g,
+    /(```[\s\S]*?```|`[^`\n]*`)|(?<![\\$])\$(?!\$)(?=(?:[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?|\.[0-9]+)(?!\$)(?:\s*[a-zA-Z]{2,}|\s*[\u4e00-\u9fa5]|[,.;:!?\)\}\]、。，]|\s*$))/g,
     (match, code) => (code ? match : '\\$'),
   )
 }
