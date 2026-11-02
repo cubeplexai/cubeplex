@@ -13,7 +13,7 @@ import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations
 import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { ToolCallGroup } from '@/components/chat/ToolCallGroup'
 import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
-import { proseClasses } from '@/lib/utils'
+import { cn, proseClasses } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -146,9 +146,14 @@ function SharedMessage({
       <div className="flex justify-end mb-3">
         <div
           className="max-w-[75%] rounded-2xl px-4 py-2.5 bg-primary/10 text-foreground
-          text-sm leading-relaxed whitespace-pre-wrap"
+          text-sm leading-relaxed break-words"
         >
-          {textContent}
+          <MarkdownWithCitations
+            className={cn(proseClasses, '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0')}
+            conversationId=""
+          >
+            {textContent}
+          </MarkdownWithCitations>
         </div>
       </div>
     )
