@@ -53,14 +53,14 @@ When designing how scripts in the sandbox call back to host tools, three IPC mod
 | :--- | :--- |
 | **Interactive Exec Stdin/Stdout Stream** | **Incompatible & Fragile.** OpenSandbox's `Commands.run` uses HTTP POST + SSE stream; it does not expose an interactive bidirectional stdin pipe. Multiplexing RPC messages over stdout/stdin also risks corruption and deadlocks if script output or warnings (`console.log`) interleave with JSON protocol frames. |
 | **Unix Domain Socket (UDS)** | **Cross-Node Failure.** `cubeplex-backend` and `OpenSandbox` pods are separate Pods, frequently scheduled across different physical Kubernetes Worker Nodes. UDS cannot cross network or physical host boundaries without a pod sidecar proxy. |
-| **Scoped Internal Bridge via Controlled Egress (Adopted)** | **Robust & Kubernetes-Native.** Follows CubePlex's existing egress pattern (like `credential-exchange proxy`). Sandboxes remain default-deny for general outbound traffic, with a dedicated NetworkPolicy route permitting access only to the internal Bridge service endpoint (`cubeplex-bridge:8318`). |
+| **Scoped Internal Bridge via Controlled Egress (Adopted)** | **Robust & Kubernetes-Native.** Follows CubePlex's existing egress pattern (like `credential-exchange proxy`). Sandboxes remain default-deny for general outbound traffic. The bridge's internal FQDN is injected via `build_network_policy` (`force_allow_hosts`), without port matching, routing to the existing Backend API service. |
 
 ### 2.3 Ephemeral Command Nonce & Zero Persistent Credentials
-To completely prevent credential theft by other processes sharing the sandbox (all running under the same UID 1000 `cubeplex` user):
-1. **No Static or Bearer Tokens:** The backend NEVER injects a general-purpose API token into the sandbox filesystem or process environment.
-2. **Ephemeral Command Nonce:** When `commands.run` invokes the runner, it injects a single-use, high-entropy `command_nonce` valid strictly for the duration of that specific command execution (bound to `run_id` and command PID).
-3. **Instant Invalidation:** The moment the `codemode` command terminates (success, failure, or 60s timeout), the backend immediately purges the nonce from Redis/memory. Any subsequent request using this nonce is rejected with HTTP 401.
-4. **Server-Side Default-Deny:** Even while the nonce is temporarily active, the Bridge rejects any tool call not in the strict `allowed_callers` whitelist (e.g., calling `execute`, `ask_user`, or shell tools via the bridge is unconditionally blocked).
+To isolate tool invocation privileges to the active execution turn:
+1. **No Static or Bearer Tokens:** The backend NEVER injects a general-purpose or persistent API token into the sandbox filesystem or process environment.
+2. **Ephemeral Command Nonce Delivery:** When `commands.run` invokes the runner, it injects a single-use, high-entropy `command_nonce` via `opts.envs`. The nonce is strictly bound to the `execution_id` returned by `commands.run` and the active `run_id`.
+3. **Cluster-Shared Redis Storage & Instant Invalidation:** The nonce record is stored exclusively in cluster-shared Redis (keyed by `execution_id` and `run_id` with a strict TTL matching command timeout, e.g., 60s). It is NEVER stored in local process memory, ensuring consistent validation across multi-replica backend pods. The moment the `codemode` command terminates, the backend immediately purges the nonce. Any lookup miss on any backend pod MUST fail-closed with HTTP 401 Unauthorized.
+4. **Server-Side Default-Deny Boundary:** While processes sharing the container under UID 1000 could inspect `/proc/<pid>/environ`, the actual security boundary is enforced on the server-side Bridge: all invocations are validated against the strict `allowed_callers` whitelist, unconditionally blocking access to `execute`, `ask_user`, or unapproved tools.
 
 ### 2.4 Storage Hierarchy & Lifecycle
 Files generated during Code Mode are categorized into three distinct lifecycles:
@@ -98,15 +98,15 @@ Files generated during Code Mode are categorized into three distinct lifecycles:
  │  - Launches `cubeplex-codemode-runner` in OpenSandbox     │
  │                                                           │
  │ Reverse Tool Dispatch Bridge:                             │
- │  - Listens on internal endpoint (:8318/v1/tool-call)      │
- │  - Validates Ephemeral Command Nonce & Command Lifecycle  │
+ │  - Listens on internal endpoint (e.g. /api/v1/codemode)   │
+ │  - Validates Ephemeral Command Nonce against Redis record │
  │  - Enforces Default-Deny Tool Whitelist & allowed_callers │
  │  - Executes real Native / MCP tools on behalf of script   │
  │  - Emits nested SSE events for UI observability           │
  │  - Atomically merges `store()` mutations into Checkpoint  │
  └─────────────────────────────▲─────────────────────────────┘
                                │ HTTP/JSON-RPC (X-CodeMode-Nonce)
-          Dedicated Internal   │ Controlled NetworkPolicy
+          Dedicated Internal   │ force_allow_hosts FQDN
           Bridge Route         │ (General egress remains default-deny)
                                │
 ═════════════════════════════════════════════════════════════════
@@ -164,9 +164,9 @@ The script executes as an `async` function body. Its completion return value is 
 | Global API | Type Signature | Description |
 | :--- | :--- | :--- |
 | `tools.<name>` | `(args: object) => Promise<any>` | Call an eligible tool using normalized identifier syntax. |
-| `tools[name]` | `(args: object) => Promise<any>` | Canonical access using the exact un-normalized tool name (e.g. `tools["mcp--linear-create-issue"]`). |
+| `tools[name]` | `(args: object) => Promise<any>` | Canonical access using the exact un-normalized tool name (e.g. `tools["linear__create_issue"]`). |
 | `text(value)` | `(value: any) => void` | Append formatted text/JSON to the model response. |
-| `image(data)` | `(data: string \| object) => void` | Save image to `/workspace/.codemode/media/` and return path. |
+| `image(data)` | `(data: string \| object) => Promise<string>` | Decodes and saves image to `/workspace/.codemode/media/` and resolves to the relative sandbox path. |
 | `store(k, v)` | `(key: string, value: any) => void` | Buffer state mutation for cross-call persistence. |
 | `load(k)` | `(key: string) => any` | Read previously persisted key from session store. |
 | `searchTools(q)` | `(query: string, opts?: {limit?: number}) => Promise<ToolSummary[]>` | BM25 search over all available workspace tools. |
@@ -235,33 +235,21 @@ To support real-time visualization of nested tool calls inside `codemode`:
 
 ### 5.1 CubeLoop Event Model Extensions
 
-Extend `ToolExecutionStartEvent` and `ToolExecutionEndEvent` with nesting metadata:
+Incrementally extend CubeLoop's existing `ToolExecutionStartEvent` and `ToolExecutionEndEvent` (in `cubeloop/agent/types.py`, which inherit from Pydantic `BaseModel` with a `type: Literal[...]` discriminator) by adding nesting metadata fields, while preserving all existing fields (`tool_call_id`, `tool_name`, `args: JsonObject`, `result: StructuredValue`, `is_error`, etc.):
 
 ```python
-class ToolExecutionStartEvent(BaseEvent):
-    run_id: str
-    tool_call_id: str
-    tool_name: str
-    args: dict[str, Any]
-    parent_tool_call_id: str | None = None  # Populated when invoked inside codemode
-    is_nested: bool = False
-
-class ToolExecutionEndEvent(BaseEvent):
-    run_id: str
-    tool_call_id: str
-    tool_name: str
-    result: AgentToolResult
-    parent_tool_call_id: str | None = None
-    is_nested: bool = False
+# Incremental fields added to cubeloop/agent/types.py:
+parent_tool_call_id: str | None = None  # Populated when invoked inside codemode
+is_nested: bool = False                 # True for tool calls originated from a script
 ```
 
 ### 5.2 Chat UI Rendering
 - The Chat UI renders a collapsible **Code Mode Execution Card** for the parent `codemode` call.
 - Nested events (`is_nested=True`) stream in real-time under a progressive execution tree:
   ```
-  ▼ 🛠️ Code Mode Execution (codemode)
-    ├─ ↳ [Done] Linear__list_issues (args: {limit: 50})
-    ├─ ↳ [Done] Notion__query (args: {filter: "active"})
+  ▼ Code Mode Execution (codemode)
+    ├─ ↳ [Done] linear__list_issues (args: {limit: 50})
+    ├─ ↳ [Done] notion__query (args: {filter: "active"})
     └─ ↳ [Running] Data aggregation & filtering...
   ```
 - Debug statements (`console.log`) are isolated into a collapsible `<console>` diagnostics block.
@@ -277,7 +265,7 @@ class ToolExecutionEndEvent(BaseEvent):
 
 ### Phase 2: OpenSandbox Integration & Reverse Bridge (`cubeplex`)
 - Implement `cubeplex-codemode-runner` in QuickJS for OpenSandbox image.
-- Configure controlled internal NetworkPolicy route for Bridge endpoint (`cubeplex-bridge:8318`).
+- Configure controlled internal FQDN route in `build_network_policy` (`force_allow_hosts`) for Bridge endpoint.
 - Implement Reverse Tool Dispatch Bridge in `cubeplex` with Ephemeral Command Nonce lifecycle.
 - Wire `CodeModeMiddleware` into `run_manager.py` middleware composition.
 - Connect `store` / `load` to `extra["codemode_store"]` in PostgreSQL checkpointer.
