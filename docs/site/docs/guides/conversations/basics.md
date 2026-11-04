@@ -75,7 +75,7 @@ while streaming). Type a space after `/` to write a literal leading slash.
 During a conversation, the agent can:
 
 - **Respond with text** — standard conversational replies with markdown formatting.
-- **Think** — show its reasoning process in a collapsible "thinking" block (when thinking is enabled).
+- **Think** — show its reasoning in a collapsible block when thinking is enabled. Thinking that sits next to tool calls is inside the collapsed tool summary; thinking with no tool calls stays its own block.
 - **Call tools** — invoke MCP connectors to reach external services (databases, APIs, SaaS products).
 - **Execute code** — run commands in a sandboxed environment.
 - **Generate artifacts** — produce downloadable files, live website previews, images, data files, and more. See [Artifacts](./artifacts.md).

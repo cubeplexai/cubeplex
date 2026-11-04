@@ -43,6 +43,7 @@ import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations
 import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { SkillSearchResults } from './tool-results/SkillSearchResults'
 import { ASSISTANT_CONTENT_MAX_CLASS } from '@/lib/chatLayout'
+import { foldToolActivity, type FoldPiece } from '@/lib/foldToolActivity'
 import { cn, proseClasses } from '@/lib/utils'
 
 interface ReasoningBlockProps {
@@ -638,37 +639,14 @@ function ContentBlockRenderer({
   return _exhaustive
 }
 
-/** Group consecutive tool_call blocks for compact rendering (subagent calls render individually) */
-function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] {
-  const result: (ContentBlock | ContentBlock[])[] = []
-  for (const block of blocks) {
-    if (
-      block.type === 'tool_call' &&
-      block.name !== 'subagent' &&
-      block.name !== 'save_artifact' &&
-      block.name !== 'generate_image' &&
-      block.name !== 'present_file' &&
-      block.name !== 'write_todos' &&
-      block.name !== 'show_widget' &&
-      !isSkillsFindCall(block)
-    ) {
-      const last = result[result.length - 1]
-      if (
-        Array.isArray(last) &&
-        last[0].type === 'tool_call' &&
-        (last[0] as ContentBlock & { name: string }).name !== 'subagent'
-      ) {
-        last.push(block)
-      } else {
-        result.push([block])
-      }
-    } else if (block.type === 'tool_call' && block.name === 'write_todos') {
-      continue
-    } else {
-      result.push(block)
+function activityKey(piece: Extract<FoldPiece, { kind: 'activity' }>, index: number): string {
+  for (const block of piece.blocks) {
+    if (block.type === 'tool_call') return block.id || `activity-${index}`
+    if (block.type === 'tool_call_streaming') {
+      return block.tool_call_id ?? `activity-${index}`
     }
   }
-  return result
+  return `activity-${index}`
 }
 
 function extractTodosFromMessage(msg: AssistantMessageType): TodoItem[] {
@@ -726,7 +704,9 @@ export function AssistantMessage({
     : undefined
 
   const _hasContent = blocks.length > 0
-  const grouped = groupBlocks(blocks)
+  const grouped = foldToolActivity(blocks)
+  const tailActivityStreaming =
+    isStreaming === true && grouped[grouped.length - 1]?.kind === 'activity'
 
   const currentRunId = useMessageStore((s) => s.currentRunId)
   const runChip = useTurnRunChip({
@@ -754,8 +734,12 @@ export function AssistantMessage({
   let subagentCounter = 0
   const subagentIndexMap = new Map<number, number>()
   for (let i = 0; i < grouped.length; i++) {
-    const item = grouped[i]
-    if (!Array.isArray(item) && item.type === 'tool_call' && item.name === 'subagent') {
+    const piece = grouped[i]
+    if (
+      piece.kind === 'block' &&
+      piece.block.type === 'tool_call' &&
+      piece.block.name === 'subagent'
+    ) {
       subagentCounter++
       subagentIndexMap.set(i, subagentCounter)
     }
@@ -765,22 +749,31 @@ export function AssistantMessage({
   // Count active subagents (streaming)
   const activeSubagentCount = subAgentStreams ? Object.keys(subAgentStreams).length : 0
 
-  const renderItem = (item: (typeof grouped)[number], i: number) => {
-    if (Array.isArray(item)) {
-      const tcBlocks = item as (ContentBlock & { type: 'tool_call' })[]
+  const renderItem = (piece: (typeof grouped)[number], i: number) => {
+    if (piece.kind === 'activity') {
+      const streaming = tailActivityStreaming && i === grouped.length - 1
       return (
         <ToolCallGroup
-          key={i}
-          blocks={tcBlocks}
+          key={activityKey(piece, i)}
+          blocks={piece.blocks}
           toolResultMap={toolResultMap}
-          isStreaming={isStreaming === true}
+          isStreaming={streaming}
           messageCreatedAt={msgCreatedAt}
           agentId={streamAgentId}
           pendingConfirmMap={pendingConfirmMap}
           onSandboxConfirm={onSandboxConfirm}
+          renderThinking={(block, { isLast }) => (
+            <ReasoningBlock
+              thinking={block.thinking}
+              isStreaming={streaming && isLast}
+              startedAt={block.started_at}
+              durationMs={block.duration_ms}
+            />
+          )}
         />
       )
     }
+    const item = piece.block
     return (
       <ContentBlockRenderer
         key={i}

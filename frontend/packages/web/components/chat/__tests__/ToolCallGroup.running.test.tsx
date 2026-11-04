@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ToolCallGroup } from '../ToolCallGroup'
 
@@ -60,5 +60,38 @@ describe('ToolCallGroup running execute chip', () => {
     expect(container.querySelector('.animate-spin')).toBeNull()
     expect(container.querySelector('.text-success-fg')).not.toBeNull()
     expect(screen.getByText(/execute/i)).toBeInTheDocument()
+  })
+
+  it('keeps thinking inside a collapsed summary until the group is expanded', () => {
+    const thinking = { type: 'thinking' as const, thinking: 'plan the edit' }
+    const second = { ...executeBlock, id: 'tc-2' }
+    render(
+      <ToolCallGroup
+        blocks={[thinking, executeBlock, thinking, second]}
+        toolResultMap={{
+          'tc-1': { content: 'done', receivedAt: 1 },
+          'tc-2': { content: 'done', receivedAt: 2 },
+        }}
+        isStreaming={false}
+        renderThinking={(block) => <span>{block.thinking}</span>}
+      />,
+    )
+    expect(screen.getByText(/toolCallsSummary/)).toBeInTheDocument()
+    expect(screen.queryByText('plan the edit')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    expect(screen.getAllByText('plan the edit')).toHaveLength(2)
+  })
+
+  it('leaves the current group open while it is still streaming', () => {
+    render(
+      <ToolCallGroup
+        blocks={[{ type: 'thinking', thinking: 'still working' }, executeBlock]}
+        toolResultMap={{}}
+        isStreaming
+        renderThinking={(block) => <span>{block.thinking}</span>}
+      />,
+    )
+    expect(screen.getByText('still working')).toBeInTheDocument()
   })
 })
