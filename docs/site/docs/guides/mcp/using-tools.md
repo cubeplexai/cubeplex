@@ -37,6 +37,8 @@ The agent can call multiple tools in a single turn. For example, if you ask:
 
 The agent may call both the GitHub and Linear connectors, then synthesize the results into one response.
 
+Consecutive tool calls collapse into one line that shows how many were called and how many finished. Thinking between those calls stays inside the line. A written answer ends the group, and later calls start another. Finished groups stay collapsed after you refresh the page. Expand a line to see each call and the thinking around it.
+
 ## Progressive disclosure
 
 When your workspace has many connectors enabled, CubePlex uses **progressive disclosure** to keep the agent efficient. When the combined tool definitions would take up too much of the model's context window, the system stops loading every tool upfront and instead:

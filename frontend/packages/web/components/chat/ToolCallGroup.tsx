@@ -13,10 +13,15 @@ import {
 import { AskUserResolvedCard } from './AskUserResolvedCard'
 import { ToolCallItem } from './ToolCallItem'
 import { toolResultIsRunning } from './toolResultStatus'
+import { getWriteFileSummary } from '@/lib/writeFilePreview'
+import { getStreamingParamSummary } from '@/lib/toolIcons'
 import { cn } from '@/lib/utils'
+import type { ActivityBlock } from '@/lib/foldToolActivity'
+
+type ThinkingBlock = Extract<ContentBlock, { type: 'thinking' }>
 
 interface ToolCallGroupProps {
-  blocks: (ContentBlock & { type: 'tool_call' })[]
+  blocks: ActivityBlock[]
   toolResultMap: Record<
     string,
     { content: string; receivedAt: number; startedAt?: number; details?: unknown }
@@ -27,6 +32,7 @@ interface ToolCallGroupProps {
   agentId?: string | null
   pendingConfirmMap?: Record<string, PendingConfirm>
   onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
+  renderThinking?: (block: ThinkingBlock, opts: { isLast: boolean }) => ReactNode
 }
 
 function extractAskQuestions(args: Record<string, unknown>): AskQuestion[] | null {
@@ -49,14 +55,55 @@ export function ToolCallGroup({
   agentId,
   pendingConfirmMap,
   onSandboxConfirm,
+  renderThinking,
 }: ToolCallGroupProps) {
   const t = useTranslations('chat')
-  // Multi-tool: open while streaming; after settle, collapsed by default.
+  // Open only while this group is the part still streaming. A finished
+  // group stays collapsed, including after refresh.
   const [userExpanded, setUserExpanded] = useState(false)
 
   // Resolve children first so we can drop the wrapper entirely if every
   // block renders null (e.g. an ask_user tool_call with no result yet).
   const children: ReactNode[] = blocks.map((block, i) => {
+    if (block.type === 'thinking') {
+      if (!renderThinking) return null
+      return (
+        <div key={`thinking-${i}`}>
+          {renderThinking(block, { isLast: i === blocks.length - 1 })}
+        </div>
+      )
+    }
+    if (block.type === 'tool_call_streaming') {
+      if (block.name === 'ask_user') return null
+      const supportsPreview = isWriteOrEditTool(block.name)
+      const toolCallId = block.tool_call_id ?? `streaming-${i}`
+      return (
+        <ToolCallItem
+          key={toolCallId}
+          name={block.name || 'tool'}
+          arguments={{}}
+          toolCallId={toolCallId}
+          summaryOverride={
+            supportsPreview && block.name === 'write'
+              ? getWriteFileSummary({}, block.args_text)
+              : getStreamingParamSummary(block.name || 'tool', block.args_text) || undefined
+          }
+          contentTypeOverride={supportsPreview ? block.name : undefined}
+          toolRef={
+            supportsPreview
+              ? {
+                  agent_id: agentId ?? null,
+                  tool_call_id: block.tool_call_id,
+                  index: block.index,
+                }
+              : undefined
+          }
+          timestamp={messageCreatedAt}
+          isPending
+          allowOpenWhenPending={supportsPreview}
+        />
+      )
+    }
     const result = toolResultMap[block.id] ?? null
     const isPending = isStreaming && (!result || toolResultIsRunning(result))
     if (block.name === 'ask_user' && result) {
@@ -101,18 +148,29 @@ export function ToolCallGroup({
 
   if (children.every((c) => c === null)) return null
 
-  const visibleCount = children.filter((c) => c != null).length
+  const visibleCount = blocks.reduce((count, block, index) => {
+    if (block.type === 'thinking' || children[index] == null) return count
+    return count + 1
+  }, 0)
+  const hasThinking = blocks.some((block) => block.type === 'thinking')
   const completedCount = blocks.filter(
-    (b) =>
-      b.name !== 'ask_user' && toolResultMap[b.id] && !toolResultIsRunning(toolResultMap[b.id]),
+    (block) =>
+      block.type === 'tool_call' &&
+      block.name !== 'ask_user' &&
+      toolResultMap[block.id] &&
+      !toolResultIsRunning(toolResultMap[block.id]),
   ).length
-  const pendingCount = blocks.filter(
-    (b) =>
-      b.name !== 'ask_user' &&
-      isStreaming &&
-      (!toolResultMap[b.id] || toolResultIsRunning(toolResultMap[b.id])),
-  ).length
-  const collapsible = visibleCount >= 2
+  const pendingCount = isStreaming
+    ? blocks.filter((block) => {
+        if (block.type === 'thinking' || block.name === 'ask_user') return false
+        if (block.type === 'tool_call_streaming') return true
+        const result = toolResultMap[block.id]
+        return !result || toolResultIsRunning(result)
+      }).length
+    : 0
+  // One bare tool stays a chip. Thinking, or a second tool, makes a fold so
+  // the reasoning sits inside the summary instead of between chips.
+  const collapsible = visibleCount >= 2 || (visibleCount >= 1 && hasThinking)
   const isExpanded = isStreaming || userExpanded
   const showList = !collapsible || isExpanded
 

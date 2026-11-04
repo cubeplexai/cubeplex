@@ -46,7 +46,7 @@ The thinking level is sticky across messages, like the preset. CubePlex stores i
 
 ### Viewing thinking output
 
-When thinking is enabled, the agent's response includes a collapsible **Thinking** block above the main answer. Expand it to see the reasoning chain. This is useful for:
+When thinking is enabled and the reply does not call tools, the response includes a collapsible **Thinking** block above the main answer. Expand it to see the reasoning chain. When the reply also calls tools, the thinking that happens around those calls sits inside the same collapsed line as the calls. That line shows how many tools were called and how many finished. It stays open while that part of the reply is still streaming, then collapses, and it stays collapsed after a refresh. A written answer ends the group; later calls start another. This is useful for:
 
 - Understanding how the agent approached a problem.
 - Catching logical errors in complex reasoning.

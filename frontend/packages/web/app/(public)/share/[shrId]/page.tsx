@@ -12,6 +12,7 @@ import {
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { ToolCallGroup } from '@/components/chat/ToolCallGroup'
+import { foldToolActivity, groupAssistantRuns } from '@/lib/foldToolActivity'
 import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 import { cn, proseClasses } from '@/lib/utils'
 
@@ -21,8 +22,6 @@ import { cn, proseClasses } from '@/lib/utils'
 
 type ToolCallBlock = Extract<ContentBlock, { type: 'tool_call' }>
 type ToolResultMap = Record<string, { content: string; receivedAt: number }>
-
-const HIDDEN_TOOLS = new Set(['show_widget', 'write_todos'])
 
 function buildToolResultMap(messages: Message[]): ToolResultMap {
   const map: ToolResultMap = {}
@@ -41,30 +40,6 @@ function buildToolResultMap(messages: Message[]): ToolResultMap {
   return map
 }
 
-/** Group consecutive non-special tool_call blocks for compact rendering. */
-function groupBlocks(
-  blocks: ContentBlock[],
-): Array<ContentBlock | { _group: true; blocks: ToolCallBlock[] }> {
-  const result: Array<ContentBlock | { _group: true; blocks: ToolCallBlock[] }> = []
-  for (const block of blocks) {
-    if (
-      block.type === 'tool_call' &&
-      !HIDDEN_TOOLS.has(block.name) &&
-      block.name !== 'save_artifact'
-    ) {
-      const last = result[result.length - 1]
-      if (last && '_group' in last) {
-        last.blocks.push(block as ToolCallBlock)
-      } else {
-        result.push({ _group: true, blocks: [block as ToolCallBlock] })
-      }
-    } else {
-      result.push(block)
-    }
-  }
-  return result
-}
-
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -78,14 +53,15 @@ function AssistantBlocks({
   toolResultMap: ToolResultMap
   messageCreatedAt?: string
 }) {
-  const grouped = groupBlocks(blocks)
+  const grouped = foldToolActivity(blocks)
   return (
     <div className="space-y-2 mb-3">
       {grouped.map((item, i) => {
-        if ('_group' in item) {
+        if (item.kind === 'activity') {
+          const firstTool = item.blocks.find((block) => block.type === 'tool_call')
           return (
             <ToolCallGroup
-              key={item.blocks[0].id ?? i}
+              key={firstTool && firstTool.type === 'tool_call' ? firstTool.id : i}
               blocks={item.blocks}
               toolResultMap={toolResultMap}
               isStreaming={false}
@@ -93,7 +69,7 @@ function AssistantBlocks({
             />
           )
         }
-        const block = item
+        const block = item.block
         if (block.type === 'text' && block.text.trim()) {
           return (
             <div
@@ -370,8 +346,12 @@ export default function SharePage({ params }: { params: Promise<{ shrId: string 
       {/* Messages */}
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-6">
         <div className="space-y-1">
-          {visibleMessages.map((msg, idx) => (
-            <SharedMessage key={msg.id ?? idx} message={msg} toolResultMap={toolResultMap} />
+          {groupAssistantRuns(visibleMessages).map((row, idx) => (
+            <SharedMessage
+              key={row.kind === 'assistant-run' ? row.merged.id : (row.message.id ?? idx)}
+              message={row.kind === 'assistant-run' ? row.merged : row.message}
+              toolResultMap={toolResultMap}
+            />
           ))}
         </div>
 

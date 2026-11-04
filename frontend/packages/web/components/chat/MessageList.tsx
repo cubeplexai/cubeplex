@@ -41,6 +41,7 @@ import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
 import { ASSISTANT_CONTENT_MAX_CLASS, CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
 import { lastTurnUsageByRun } from '@/lib/cost/helpers'
+import { groupAssistantRuns } from '@/lib/foldToolActivity'
 import { cn } from '@/lib/utils'
 
 interface MessageListProps {
@@ -514,6 +515,10 @@ export function MessageList({ conversationId }: MessageListProps) {
     }
   }, [backgroundEvents, messages])
 
+  // One run's assistant rows are separate checkpoint messages. Fold them back
+  // into the single activity the live stream showed, so refresh stays collapsed.
+  const historyRows = useMemo(() => groupAssistantRuns(messages ?? []), [messages])
+
   // --- Auto-scroll: keep chat pinned to bottom during streaming ---
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -665,81 +670,51 @@ export function MessageList({ conversationId }: MessageListProps) {
               </button>
             </div>
           )}
-          {(messages ?? []).map((msg) => (
-            // id="msg-{seq}" matches the conversation-search route's
-            // matched_message_seq (cubepi_messages.seq — see
-            // backend/cubeplex/search/worker.py). SearchResultRow links to
-            // #msg-N; the browser scrolls to this anchor when the user
-            // clicks a search hit. ``seq`` is missing only on the optimistic
-            // user bubble before the run is claimed — those are never search
-            // targets, so we just skip the anchor.
-            <Fragment key={msg.id}>
-              {(backgroundEventsByMessageId.get(msg.id) ?? []).map((event) => (
-                <BackgroundTaskEventItem
-                  key={`background:${event.id}`}
-                  event={event}
-                  conversationId={conversationId}
-                />
-              ))}
-              {msg.id === bannersBeforeHistoryId && (
-                <ModelChainBanners
-                  retryEvent={retryEvent}
-                  failoverEvents={failoverEvents}
-                  showRetry={isStreaming}
-                />
-              )}
-              <div id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
-                {msg.role === 'user' &&
-                  msg.metadata?.synthetic === true &&
-                  (msg.metadata.synthetic_source === 'compaction' ||
-                    msg.metadata.kind === 'compaction') && (
-                    <CompactionMarker
-                      source={
-                        typeof msg.metadata.compaction === 'object' &&
-                        msg.metadata.compaction !== null &&
-                        'source' in msg.metadata.compaction
-                          ? String((msg.metadata.compaction as { source?: string }).source ?? '')
-                          : undefined
-                      }
-                    />
-                  )}
-                {msg.role === 'user' && msg.metadata?.synthetic !== true && (
-                  <>
-                    {/* Sender identity is stamped on every user message (incl. 1:1)
-                    so a 1:1→group conversion attributes past messages, but the
-                    badge only shows in group chats. */}
-                    {isGroupChat &&
-                      msg.metadata?.sender_display_name &&
-                      msg.metadata?.sender_user_id && (
-                        <SenderBadge
-                          userId={msg.metadata.sender_user_id}
-                          displayName={msg.metadata.sender_display_name}
-                        />
-                      )}
-                    {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
-                      <MessageAttachments
-                        attachments={msg.metadata.attachments}
+          {historyRows.map((row) => {
+            if (row.kind === 'assistant-run') {
+              const msg = row.merged
+              const anchor = anchorByMessageId.get(msg.id)
+              const isAnchor = anchor !== undefined
+              const isLastRun = isAnchor && msg.id === lastAnchorMessageId
+              const toolResultMap = row.messages.reduce<typeof historicalToolResults>(
+                (acc, message) => Object.assign(acc, messageScopedToolResults[message.id]),
+                {},
+              )
+              return (
+                <Fragment key={row.messages[0].id}>
+                  {row.messages.flatMap((message) =>
+                    (backgroundEventsByMessageId.get(message.id) ?? []).map((event) => (
+                      <BackgroundTaskEventItem
+                        key={`background:${event.id}`}
+                        event={event}
                         conversationId={conversationId}
                       />
-                    )}
-                    <UserMessage
-                      content={getTextContent(msg)}
-                      timestamp={msg.timestamp}
-                      conversationId={conversationId}
+                    )),
+                  )}
+                  {row.messages.some((message) => message.id === bannersBeforeHistoryId) && (
+                    <ModelChainBanners
+                      retryEvent={retryEvent}
+                      failoverEvents={failoverEvents}
+                      showRetry={isStreaming}
                     />
-                  </>
-                )}
-                {msg.role === 'assistant' &&
-                  msg.id !== lastAssistantId &&
-                  (() => {
-                    const anchor = anchorByMessageId.get(msg.id)
-                    const isAnchor = anchor !== undefined
-                    const isLastRun = isAnchor && msg.id === lastAnchorMessageId
-                    return (
+                  )}
+                  <div>
+                    {/* #msg-{seq} matches cubepi_messages.seq for search deep links.
+                        Every row in the folded run keeps its own anchor. */}
+                    {row.messages.map((message) =>
+                      message.seq != null ? (
+                        <span
+                          key={message.seq}
+                          id={`msg-${message.seq}`}
+                          className="block h-0 overflow-hidden"
+                        />
+                      ) : null,
+                    )}
+                    {msg.id !== lastAssistantId && (
                       <HistoryAssistantMessage
                         message={msg}
                         subagentDataMap={subagentDataMap}
-                        toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
+                        toolResultMap={toolResultMap}
                         conversationId={conversationId}
                         workspaceId={workspaceId}
                         isGroupChat={isGroupChat}
@@ -756,11 +731,73 @@ export function MessageList({ conversationId }: MessageListProps) {
                         pendingConfirmMap={pendingConfirmMap}
                         onSandboxConfirm={handleSandboxConfirm}
                       />
-                    )
-                  })()}
-              </div>
-            </Fragment>
-          ))}
+                    )}
+                  </div>
+                </Fragment>
+              )
+            }
+            const msg = row.message
+            return (
+              <Fragment key={msg.id}>
+                {(backgroundEventsByMessageId.get(msg.id) ?? []).map((event) => (
+                  <BackgroundTaskEventItem
+                    key={`background:${event.id}`}
+                    event={event}
+                    conversationId={conversationId}
+                  />
+                ))}
+                {msg.id === bannersBeforeHistoryId && (
+                  <ModelChainBanners
+                    retryEvent={retryEvent}
+                    failoverEvents={failoverEvents}
+                    showRetry={isStreaming}
+                  />
+                )}
+                <div id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
+                  {msg.role === 'user' &&
+                    msg.metadata?.synthetic === true &&
+                    (msg.metadata.synthetic_source === 'compaction' ||
+                      msg.metadata.kind === 'compaction') && (
+                      <CompactionMarker
+                        source={
+                          typeof msg.metadata.compaction === 'object' &&
+                          msg.metadata.compaction !== null &&
+                          'source' in msg.metadata.compaction
+                            ? String((msg.metadata.compaction as { source?: string }).source ?? '')
+                            : undefined
+                        }
+                      />
+                    )}
+                  {msg.role === 'user' && msg.metadata?.synthetic !== true && (
+                    <>
+                      {/* Sender identity is stamped on every user message (incl. 1:1)
+                    so a 1:1→group conversion attributes past messages, but the
+                    badge only shows in group chats. */}
+                      {isGroupChat &&
+                        msg.metadata?.sender_display_name &&
+                        msg.metadata?.sender_user_id && (
+                          <SenderBadge
+                            userId={msg.metadata.sender_user_id}
+                            displayName={msg.metadata.sender_display_name}
+                          />
+                        )}
+                      {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
+                        <MessageAttachments
+                          attachments={msg.metadata.attachments}
+                          conversationId={conversationId}
+                        />
+                      )}
+                      <UserMessage
+                        content={getTextContent(msg)}
+                        timestamp={msg.timestamp}
+                        conversationId={conversationId}
+                      />
+                    </>
+                  )}
+                </div>
+              </Fragment>
+            )
+          })}
 
           {trailingBackgroundEvents.map((event) => (
             <BackgroundTaskEventItem
