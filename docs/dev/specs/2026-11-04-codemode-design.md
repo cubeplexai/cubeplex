@@ -1,12 +1,14 @@
 # Code Mode for Programmatic Tool Orchestration
 
-**Status:** Draft / Proposed Specification
+**Status:** Draft / Proposed Specification (Updated per design review)
 
 **Date:** 2026-11-04
 
 **Scope:** Agent Runtime, Tool Execution, OpenSandbox, Multi-tenant Server Safety
 
 **Issue:** [#724](https://github.com/cubeplexai/cubeplex/issues/724)
+
+**Pull Request:** [#729](https://github.com/cubeplexai/cubeplex/pull/729)
 
 **Related Designs:**
 - [MCP Progressive Disclosure](2026-05-27-mcp-progressive-disclosure-design.md)
@@ -18,34 +20,47 @@
 
 ## 1. Executive Summary & Problem Statement
 
-Currently, CubePlex Workspace Agents execute tools through standard model function calling:
-1. The model emits a tool call (e.g. `Linear__list_issues`).
-2. The runtime validates, audits, and executes the tool.
-3. The raw tool result (often dozens of kilobytes of JSON) is injected into the conversation context.
+Currently, CubePlex Workspace Agents execute tools through standard step-by-step model function calling:
+1. The model emits an individual tool call (e.g. `Linear__list_issues`).
+2. The runtime validates, audits, and executes the tool on the backend.
+3. The raw tool result (frequently dozens of kilobytes of JSON) is injected into the conversation context.
 4. The model consumes this output, reasons, and decides whether to emit the next tool call.
 
 ### The Bottlenecks
-- **Context Bloat & Token Inefficiency:** Intermediate payloads (e.g., retrieving 100 issues only to filter 3 matching tickets) flood the conversation context window, rapidly consuming token budget and increasing latency.
+- **Context Bloat & Token Inefficiency:** Intermediate payloads (e.g., retrieving 100 issues only to filter 3 matching tickets) flood the conversation context window, rapidly consuming token budgets and increasing inference latency.
 - **Round-Trip Latency (RTT):** Chaining 5 dependent tool calls requires 5 consecutive LLM generation turns.
 - **Fragile Control Flow:** Expressing branching, pagination loops, or fan-out aggregation through natural-language multi-turn prompts is non-deterministic and prone to hallucinations.
 
 ### The Solution: Code Mode
-Instead of calling tools individually across multiple model turns, the model writes a JavaScript/TypeScript script inside a single `codemode` tool call. The code runs inside an isolated execution environment, orchestrates tools programmatically (`tools.<name>(args)`), filters intermediate data locally, and returns only the final synthesized text and images to the model.
+Instead of calling tools individually across multiple model turns, the model writes a JavaScript/TypeScript script inside a single `codemode` tool call. The code runs inside an isolated execution environment, orchestrates tools programmatically (`tools.<name>(args)`), filters intermediate data locally, and returns only the final synthesized text or structured outputs to the model.
 
 ---
 
-## 2. Server-Side Multi-Tenant Reality & Key Constraints
+## 2. Server-Side Multi-Tenant Reality & Trust Boundaries
 
-Unlike single-user local CLI tools (e.g., `pi.dev`, Docker Agent) that execute code directly in a local host process:
+Unlike single-user local CLI tools (e.g., `pi.dev`, Docker Agent) that execute code directly in a user's local host process, CubePlex is a multi-tenant cloud platform. This introduces strict architectural constraints:
 
-1. **Strict Multi-Tenant Isolation:**
-   - LLM-authored code is untrusted. Running an embedded JS VM (such as QuickJS) directly inside the CubePlex Backend API process (`FastAPI`/Python) poses critical stability and security risks (e.g., CPU starvation, infinite loops, memory leaks, heap corruption, and cluster network access).
-   - **Architectural Principle:** Untrusted script execution MUST be delegated to the workspace's dedicated **OpenSandbox container**, completely separated from the Backend control plane.
-2. **Ephemeral Distributed Backend:**
-   - CubePlex Backend runs across multiple auto-scaling pods.
-   - Cross-call state (`store`/`load`) cannot rely on in-memory backend globals and must be durably stored in the PostgreSQL checkpoint store.
-3. **Storage & Multi-Modal Alignment:**
-   - Intermediate images or artifacts produced by scripts must reside directly in the workspace filesystem (`/workspace/tmp/`), where they can be accessed by the user, inspected via `view_images`, or registered with `save_artifact`.
+### 2.1 Untrusted Execution Enclosure
+- LLM-authored code is untrusted. Executing an embedded JS VM (such as QuickJS) directly inside the CubePlex Backend API process (`FastAPI`/Python) poses critical stability and security risks (CPU starvation, infinite loops, memory leaks, heap corruption, and cluster network access).
+- **Architectural Principle:** Untrusted script execution MUST be delegated to the workspace's dedicated **OpenSandbox container**, completely isolated from the Backend control plane.
+- **Runtime Engine:** The runner in the sandbox must be a strictly restricted **QuickJS** runtime with zero access to host filesystem, no access to `/proc`, and no child process spawning capabilities. Node.js is explicitly excluded from the sandbox runner due to its extensive host surface and inspection vectors.
+
+### 2.2 Communication & Network Isolation (Default-Deny Egress)
+- OpenSandbox pods operate under a **default-deny egress network policy**; pods cannot establish outbound TCP connections to the CubePlex Backend API.
+- The backend drives the sandbox exclusively via backend-initiated exec (`commands.run`), using framed `stdin` / `stdout` bidirectional IPC channels over the existing OpenSandbox connection.
+- **Zero Token in Sandbox:** The backend MUST NOT inject a general-purpose API Bearer Token into the sandbox environment or filesystem. All same-UID processes (`cubeplex`, uid 1000) sharing the container (including background commands and shell tools) could otherwise inspect `/proc/<pid>/environ` or the workspace disk to exfiltrate control plane credentials.
+
+### 2.3 Storage Hierarchy & Lifecycle
+Files generated during Code Mode are categorized into three distinct lifecycles:
+
+| Category | Storage Path | Persistence | Lifecycle & GC Rules |
+| :--- | :--- | :--- | :--- |
+| **Execution Ephemeral State** | `/tmp/codemode-run/` (tmpfs) | Non-persistent (Container memory) | QuickJS bytecode cache, anonymous pipes. Discarded immediately on script exit. |
+| **Overflow Output Logs** | `/workspace/.codemode/logs/` | Persistent (Workspace PVC) | Full output dumps when stdout exceeds `max_output_tokens`. Retained for 3 days; rolling GC capped at 50 MB. |
+| **Media Outputs** | `/workspace/.codemode/media/` | Persistent (Workspace PVC) | Decoded images/files from `image()`. Preserved across sandbox recycles for multi-turn inspection (`view_images`) or artifact registration (`save_artifact`). |
+| **User Deliverables** | `/workspace/projects/` | Persistent (Workspace PVC) | Explicitly registered by the user or agent via `save_artifact`. |
+
+*Note on `/workspace/.codemode/` vs `/workspace/tmp/`:* Using the dot-prefixed system directory `/workspace/.codemode/` prevents cluttering the user-visible file tree, protects internal logs from accidental `rm -rf /workspace/tmp/*` cleanup by users, and allows safe, scoped background garbage collection without touching user scratch files.
 
 ---
 
@@ -55,44 +70,45 @@ Unlike single-user local CLI tools (e.g., `pi.dev`, Docker Agent) that execute c
 ┌─────────────────────────────────────────────────────────────┐
 │                     Model Turn (LLM)                        │
 │                                                             │
-│  - Receives `codemode` tool (raw JS source input)           │
+│  - Receives `codemode` tool with JSON object schema         │
 │  - Receives Top-N inline tool stubs (TypeScript namespace)   │
 │  - Generates orchestration script                           │
 └──────────────────────────────┬──────────────────────────────┘
-                               │ tool_call: codemode(raw_code)
+                               │ tool_call: codemode({"code": "..."})
                                ▼
 ═════════════════════════════════════════════════════════════════
-                      CUBEPLEX BACKEND POD
+                      CUBEPLEX BACKEND
  ┌───────────────────────────────────────────────────────────┐
  │ CodeModeMiddleware (cubeloop)                             │
  │                                                           │
- │  - Intercepts `codemode` execution                        │
- │  - Generates short-lived IPC Bridge Token                 │
- │  - Dispatches execution request to OpenSandbox            │
- │  - Hosts Reverse Tool Dispatch Bridge:                    │
- │      * Validates token and caller identity                │
- │      * Enforces RBAC, Tool Policy & Egress rules          │
- │      * Executes real Native/MCP tool                      │
- │      * Emits nested SSE events for UI observability       │
- │  - Persists `store()` mutations into Checkpoint DB        │
+ │  - Unwraps `code` string from tool call arguments         │
+ │  - Launches `cubeplex-codemode-runner` in OpenSandbox     │
+ │    via framed stdin/stdout exec session                   │
+ │                                                           │
+ │ Reverse Tool Dispatch Bridge (Host Side):                 │
+ │  - Handles framed JSON-RPC requests from runner stdin     │
+ │  - Enforces Default-Deny Tool Whitelist & allowed_callers │
+ │  - Executes real Native / MCP tools on behalf of script   │
+ │  - Emits nested SSE events for UI observability           │
+ │  - Atomically merges `store()` mutations into Checkpoint  │
  └─────────────────────────────┬─────────────────────────────┘
-                               │
-            gRPC / Exec API    │ (Mutual authenticated IPC)
+                               │ Framed stdin / stdout
+            commands.run Exec  │ (Backend-initiated, zero egress hole)
                                ▼
 ═════════════════════════════════════════════════════════════════
                  WORKSPACE OPENSANDBOX POD
  ┌───────────────────────────────────────────────────────────┐
  │ OpenSandbox Code Runner (`cubeplex-codemode-runner`)      │
  │                                                           │
- │  - Lightweight QuickJS / isolated Node VM context         │
- │  - Memory Limit: 256 MB, CPU quota enforced by cgroups    │
+ │  - Sandboxed QuickJS VM (Memory limit: 256 MB)            │
+ │  - No access to host filesystem, /proc, or networking     │
  │  - Pre-injected Globals:                                  │
- │      * `tools.<normalized_name>(args)`                    │
- │      * `text(val)`, `image(block)`, `return val`          │
+ │      * `tools.<name>(args)` / `tools["name"](args)`       │
+ │      * `text(val)`, `image(data)`                         │
  │      * `store(key, val)`, `load(key)`                     │
  │      * `searchTools(query)`, `describeTool(name)`         │
- │      * `ALL_TOOLS`, `console.log(...)`                    │
- │  - Saves generated images/temp files to `/workspace/tmp/` │
+ │      * `ALL_TOOLS`, `console.log(...)`, `exit()`          │
+ │  - Writes media / overflow dumps to `/workspace/.codemode/`│
  └───────────────────────────────────────────────────────────┘
 ```
 
@@ -100,93 +116,157 @@ Unlike single-user local CLI tools (e.g., `pi.dev`, Docker Agent) that execute c
 
 ## 4. Detailed Design & Contracts
 
-### 4.1 Tool Signature & Input Contract
+### 4.1 Tool Parameter Schema (Provider & Runtime Compatibility)
 
-Following modern best practices (avoiding JSON escaping overhead for multi-line code):
-- **Tool Name:** `codemode`
-- **Input Type:** Raw string (`type: "string"`). No wrapping JSON object, no Markdown code fences (` ``` `).
-- **Execution Directives:** The script may begin with an optional options comment on the first line:
-  ```javascript
-  // @options: {"timeout_ms": 30000, "max_output_tokens": 4000}
-  ```
+OpenAI Chat, OpenAI Responses, and Anthropic APIs strictly require tool parameters to be a JSON Schema of `type: "object"`. Root `type: "string"` schemas are rejected by model providers and cannot be represented by CubeLoop's Pydantic-backed `AgentTool.parameters`.
+
+The tool parameter schema is therefore defined as a single-property object:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "description": "JavaScript/TypeScript code to execute in the QuickJS sandbox."
+    }
+  },
+  "required": ["code"]
+}
+```
+
+The host middleware unwraps `arguments["code"]` before streaming it to the sandbox runner, avoiding multi-level escaping inside the sandbox.
+
+An optional execution directive comment may be placed on the first line:
+```javascript
+// @options: {"timeout_ms": 30000, "max_output_tokens": 4000}
+```
 
 ### 4.2 Script Runtime Environment & Globals
 
-Inside the sandbox runtime, the script executes as an `async` function body (top-level `await` supported):
+The script executes as an `async` function body. Its completion return value is ignored; data MUST be emitted via `text()` or `image()`.
 
 | Global API | Type Signature | Description |
 | :--- | :--- | :--- |
-| `tools.<name>` | `(args: object) => Promise<any>` | Call an eligible tool. Tool names are normalized to valid JS identifiers (`[^a-zA-Z0-9_]` replaced by `_`). |
+| `tools.<name>` | `(args: object) => Promise<any>` | Call an eligible tool using normalized identifier syntax. |
+| `tools[name]` | `(args: object) => Promise<any>` | Canonical access using the exact un-normalized tool name (e.g. `tools["mcp--linear-create-issue"]`). |
 | `text(value)` | `(value: any) => void` | Append formatted text/JSON to the model response. |
-| `image(value)` | `(value: ImageBlock \| string) => void` | Output an image. Automatically writes raw bytes to `/workspace/tmp/` and passes structured multimodal blocks back to the model. |
-| `store(k, v)` | `(key: string, value: any) => void` | Save small JSON metadata across codemode calls in the conversation. |
-| `load(k)` | `(key: string) => any` | Read previously stored value. |
+| `image(data)` | `(data: string \| object) => void` | Save image to `/workspace/.codemode/media/` and return path. |
+| `store(k, v)` | `(key: string, value: any) => void` | Buffer state mutation for cross-call persistence. |
+| `load(k)` | `(key: string) => any` | Read previously persisted key from session store. |
 | `searchTools(q)` | `(query: string, opts?: {limit?: number}) => Promise<ToolSummary[]>` | BM25 search over all available workspace tools. |
-| `describeTool(n)`| `(name: string) => Promise<string \| undefined>` | Return the complete TypeScript declaration for an un-inlined tool. |
+| `describeTool(n)`| `(name: string) => Promise<string \| undefined>` | Return TypeScript declaration for an un-inlined tool. |
 | `ALL_TOOLS` | `Array<{name: string, description: string}>` | Complete catalog of available tools. |
 | `console.*` | `(...args: any[]) => void` | Diagnostic logging, surfaced in a separate `<console>` block. |
-| `exit()` | `() => void` | Immediately exit script with success. |
+| `exit()` | `() => void` | Terminate script execution immediately with success. |
 
-### 4.3 Tool Partitioning & Allowed Callers
+#### Identifier Normalization & Disambiguation Rules
+- Tool names are mapped to property names by converting non-alphanumeric characters to `_`.
+- If the normalized name starts with a digit, it is prefixed with `t_`.
+- If multiple tools collide to the same property name (e.g., `create-issue` and `create_issue`), the first registered tool retains the property name and subsequent tools receive a deterministic suffix (`_2`, `_3`).
+- `tools["Exact_Name"]` is always available and bypasses property name mapping.
 
-Tools registered in a workspace are categorized by execution safety and ergonomics:
+### 4.3 Default-Deny Access Policy & Tool Classification
 
-1. **`Direct-Only` (Excluded from Code Mode):**
+The reverse bridge enforces a strict **Default-Deny** whitelist based on each tool's `allowed_callers` attribute:
+
+1. **Eligible in Code Mode (`allowed_callers: ["code_mode", "direct"]`):**
+   - External MCP Tools (e.g. `Linear`, `Notion`, `GitHub`, `Jira`).
+   - Read-only native utility tools: `read`, `calculator`, `datetime`, `memory_search`.
+2. **Direct-Only / Forbidden in Code Mode (`allowed_callers: ["direct"]`):**
    - User interaction: `ask_user`.
-   - Workspace task planning: `write_todos`.
-   - Host shell interaction: `execute` (avoids nested shell quoting issues).
-2. **`Code-Mode-Only` or `Dual-Mode` (Direct + Code Mode):**
-   - All external MCP Tools (`Linear`, `Notion`, `GitHub`, `Jira`, etc.).
-   - Pure compute and read-only native tools: `read`, `calculator`, `datetime`, `memory_search`.
+   - Task planning: `write_todos`.
+   - Host shell & process execution: `execute`, `monitor`.
+   - Side-effecting / state-modifying operations: `write`, `edit`, `memory_save`, `memory_update`, `scheduled_tasks`, `save_artifact`, `present_file`, `subagent`, `persona_update`.
 
-### 4.4 Progressive Tool Discovery & Token Budgeting
+### 4.4 Non-Interactive Human-In-The-Loop (HITL) Model
 
-To prevent overwhelming the system prompt when dozens of MCP servers are loaded:
-- **Inline Declaration Budget:** Up to `3000` tokens of TypeScript declarations are statically embedded in the `codemode` description.
-- **Dynamic On-Demand Discovery:** For tools outside the inline budget, the model uses `searchTools(query)` or `describeTool(name)` within code mode before calling them.
+CubeLoop's `CheckpointedChannel` raises `HitlDurabilityNotGuaranteed` when awaited inside custom tool bodies, and the sandbox runner enforces a hard execution deadline (60s default, max 300s). Therefore:
+- Code Mode **does not support suspend-and-resume** of live sandbox processes.
+- If a script invokes an unlisted or unauthorized tool, the bridge immediately rejects the invocation with an actionable error message (`Error: Tool '<name>' is restricted to direct calling and requires confirmation`).
+- The model observes the rejection in the script output and may invoke the tool natively in the subsequent turn.
 
----
+### 4.5 State Persistence (`store` & `load`)
 
-## 5. Security, Isolation & Safety Guardrails
+To prevent collisions with CubeLoop's checkpointer data (which uses `cubepi_threads.extra` for compaction and pinned memory):
+- All Code Mode state is isolated under a dedicated namespace key: `extra["codemode_store"]`.
+- The runner buffers `store(k, v)` mutations in memory during execution.
+- If the script succeeds, the buffered mutations are flushed back over framed stdout and merged into `extra["codemode_store"]`.
+- If the runner fails, times out, or crashes, pending mutations are discarded.
 
-1. **Sandbox Enclosure:**
-   - All code executes in the OpenSandbox container under standard non-root privileges.
-   - Resource quotas: Max 256 MB memory, max 60s execution timeout (configurable up to 300s via `// @options`).
-2. **Reverse Bridge Authentication:**
-   - The Backend issues an ephemeral, single-turn IPC Bearer Token when dispatching `codemode`.
-   - The Sandbox Runner uses this token to communicate back to the Backend Bridge.
-   - The token expires immediately when the `codemode` execution terminates.
-3. **Output Defense:**
-   - Output buffer capped at 16 MB.
-   - Text items longer than `max_output_tokens` are head/tail truncated, with the full output retained in a temporary file under `/workspace/tmp/`.
-4. **HITL & Permissions:**
-   - Any sensitive tool invocation made via `tools.<name>` triggers the existing CubePlex tool approval and confirmation policies. If a call requires user approval, the execution is suspended or cleanly rejected with an actionable permission message.
+### 4.6 Multimodal Image Handling
 
----
+Current model provider converters (`OpenAIProvider`, `OpenAIResponsesProvider`, `AnthropicProvider`) and `agents/stream.py` only forward `TextContent` on tool results (images are supported only on user messages).
 
-## 6. Observability & User Experience (SSE & UI)
+- **Phase 1 & 2 Contract:** `image()` decodes image data, writes it to `/workspace/.codemode/media/img_<hash>.<ext>`, and returns the persistent sandbox path in the text output. The model can inspect the image in a subsequent turn using `view_images(paths=[...])` or register it via `save_artifact`.
+- **Phase 3 Evolution:** Extend provider converters and SSE serialization to support native `ImageContent` on tool results so images display directly within the Code Mode execution card.
 
-When an agent invokes `codemode`:
-1. The frontend receives a `ToolExecutionStartEvent` for `codemode`.
-2. As the script runs and calls `tools.Linear__list_issues(...)`, the Backend Bridge emits nested events:
-   - `ToolExecutionStartEvent(tool_name="Linear__list_issues", is_nested=True, parent_tool_call_id=...)`
-   - `ToolExecutionEndEvent(..., is_nested=True)`
-3. The Chat UI renders an expandable **Code Mode Execution Card**:
-   - Shows the generated code with syntax highlighting.
-   - Displays real-time progress steps for each nested tool call.
-   - Separates script output (`text()`, `image()`) from debug diagnostics (`<console>`).
+### 4.7 Architectural Decision: LLM Requests inside Code Mode
+
+**Decision:** Direct / recursive LLM chat requests (`models.chat()`) are **strictly prohibited** inside Code Mode.
+
+**Rationale:**
+1. Allowing scripts to invoke conversational LLMs introduces infinite recursive execution loops.
+2. Unbounded loops fan out dozens of model queries in parallel, creating severe token cost spikes.
+3. Sub-queries bypass workspace persona prompts, prompt caching policies, and audit trails.
+
+*Future Scope:* Dedicated, non-chat auxiliary models (e.g. `models.classify()` for structured batch scoring or text embeddings) may be considered in future releases, subject to strict concurrency bounds (max 4 parallel workers) and separate token budgets.
 
 ---
 
-## 7. Implementation Milestones
+## 5. Observability & User Experience (SSE & UI)
 
-- **Phase 1 (Harness / cubeloop):**
-  - Implement `CodeModeMiddleware`, TypeScript stub generator, and `allowed_callers` tool attribute in `cubeloop`.
-  - Implement standard QuickJS/Node script executor runner.
-- **Phase 2 (Backend & OpenSandbox Bridge):**
-  - Implement reverse dispatch IPC bridge in `cubeplex.backend`.
-  - Package `cubeplex-codemode-runner` into OpenSandbox image.
-  - Wire `run_manager.py` to route eligible tools through `CodeModeMiddleware`.
-- **Phase 3 (State & UI):**
-  - Persist `store()` data in PostgreSQL checkpointer.
-  - Emit nested SSE events and update frontend Chat components for nested tool execution visualization.
+To support real-time visualization of nested tool calls inside `codemode`:
+
+### 5.1 CubeLoop Event Model Extensions
+
+Extend `ToolExecutionStartEvent` and `ToolExecutionEndEvent` with nesting metadata:
+
+```python
+class ToolExecutionStartEvent(BaseEvent):
+    run_id: str
+    tool_call_id: str
+    tool_name: str
+    args: dict[str, Any]
+    parent_tool_call_id: str | None = None  # Populated when invoked inside codemode
+    is_nested: bool = False
+
+class ToolExecutionEndEvent(BaseEvent):
+    run_id: str
+    tool_call_id: str
+    tool_name: str
+    result: AgentToolResult
+    parent_tool_call_id: str | None = None
+    is_nested: bool = False
+```
+
+### 5.2 Chat UI Rendering
+- The Chat UI renders a collapsible **Code Mode Execution Card** for the parent `codemode` call.
+- Nested events (`is_nested=True`) stream in real-time under a progressive execution tree:
+  ```
+  ▼ 🛠️ Code Mode Execution (codemode)
+    ├─ ↳ [Done] Linear__list_issues (args: {limit: 50})
+    ├─ ↳ [Done] Notion__query (args: {filter: "active"})
+    └─ ↳ [Running] Data aggregation & filtering...
+  ```
+- Debug statements (`console.log`) are isolated into a collapsible `<console>` diagnostics block.
+
+---
+
+## 6. Implementation Milestones
+
+### Phase 1: Harness & Tool Engine (`cubeloop`)
+- Add `allowed_callers: list[str]` to `AgentTool`.
+- Implement `CodeModeMiddleware` with TypeScript stub generation and inline token budgeting (3000 tokens).
+- Add `parent_tool_call_id` and `is_nested` to CubeLoop tool execution events.
+
+### Phase 2: OpenSandbox Integration & Reverse Bridge (`cubeplex`)
+- Implement `cubeplex-codemode-runner` in QuickJS for OpenSandbox image.
+- Implement framed stdin/stdout Reverse Tool Dispatch Bridge in `cubeplex`.
+- Wire `CodeModeMiddleware` into `run_manager.py` middleware composition.
+- Connect `store` / `load` to `extra["codemode_store"]` in PostgreSQL checkpointer.
+
+### Phase 3: Frontend Visualization & Multimodal Streaming
+- Update `agents/stream.py` to serialize nested tool execution events over SSE.
+- Build collapsible Code Mode execution card and nested progress timeline in the Chat UI.
+- Extend model provider converters to forward `ImageContent` on tool result messages.
