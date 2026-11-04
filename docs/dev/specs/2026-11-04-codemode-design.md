@@ -38,29 +38,41 @@ Instead of calling tools individually across multiple model turns, the model wri
 
 ## 2. Server-Side Multi-Tenant Reality & Trust Boundaries
 
-Unlike single-user local CLI tools (e.g., `pi.dev`, Docker Agent) that execute code directly in a user's local host process, CubePlex is a multi-tenant cloud platform. This introduces strict architectural constraints:
+Unlike single-user local CLI tools (e.g., `pi.dev`, Docker Agent) that execute code directly in a user's local host process, CubePlex is a multi-tenant cloud platform deployed on Kubernetes. This introduces strict architectural constraints:
 
 ### 2.1 Untrusted Execution Enclosure
 - LLM-authored code is untrusted. Executing an embedded JS VM (such as QuickJS) directly inside the CubePlex Backend API process (`FastAPI`/Python) poses critical stability and security risks (CPU starvation, infinite loops, memory leaks, heap corruption, and cluster network access).
 - **Architectural Principle:** Untrusted script execution MUST be delegated to the workspace's dedicated **OpenSandbox container**, completely isolated from the Backend control plane.
 - **Runtime Engine:** The runner in the sandbox must be a strictly restricted **QuickJS** runtime with zero access to host filesystem, no access to `/proc`, and no child process spawning capabilities. Node.js is explicitly excluded from the sandbox runner due to its extensive host surface and inspection vectors.
 
-### 2.2 Communication & Network Isolation (Default-Deny Egress)
-- OpenSandbox pods operate under a **default-deny egress network policy**; pods cannot establish outbound TCP connections to the CubePlex Backend API.
-- The backend drives the sandbox exclusively via backend-initiated exec (`commands.run`), using framed `stdin` / `stdout` bidirectional IPC channels over the existing OpenSandbox connection.
-- **Zero Token in Sandbox:** The backend MUST NOT inject a general-purpose API Bearer Token into the sandbox environment or filesystem. All same-UID processes (`cubeplex`, uid 1000) sharing the container (including background commands and shell tools) could otherwise inspect `/proc/<pid>/environ` or the workspace disk to exfiltrate control plane credentials.
+### 2.2 Pod Topology & IPC Design Evaluation
 
-### 2.3 Storage Hierarchy & Lifecycle
+When designing how scripts in the sandbox call back to host tools, three IPC models were evaluated:
+
+| Model | Evaluation in CubePlex Kubernetes Deployment |
+| :--- | :--- |
+| **Interactive Exec Stdin/Stdout Stream** | **Incompatible & Fragile.** OpenSandbox's `Commands.run` uses HTTP POST + SSE stream; it does not expose an interactive bidirectional stdin pipe. Multiplexing RPC messages over stdout/stdin also risks corruption and deadlocks if script output or warnings (`console.log`) interleave with JSON protocol frames. |
+| **Unix Domain Socket (UDS)** | **Cross-Node Failure.** `cubeplex-backend` and `OpenSandbox` pods are separate Pods, frequently scheduled across different physical Kubernetes Worker Nodes. UDS cannot cross network or physical host boundaries without a pod sidecar proxy. |
+| **Scoped Internal Bridge via Controlled Egress (Adopted)** | **Robust & Kubernetes-Native.** Follows CubePlex's existing egress pattern (like `credential-exchange proxy`). Sandboxes remain default-deny for general outbound traffic, with a dedicated NetworkPolicy route permitting access only to the internal Bridge service endpoint (`cubeplex-bridge:8318`). |
+
+### 2.3 Ephemeral Command Nonce & Zero Persistent Credentials
+To completely prevent credential theft by other processes sharing the sandbox (all running under the same UID 1000 `cubeplex` user):
+1. **No Static or Bearer Tokens:** The backend NEVER injects a general-purpose API token into the sandbox filesystem or process environment.
+2. **Ephemeral Command Nonce:** When `commands.run` invokes the runner, it injects a single-use, high-entropy `command_nonce` valid strictly for the duration of that specific command execution (bound to `run_id` and command PID).
+3. **Instant Invalidation:** The moment the `codemode` command terminates (success, failure, or 60s timeout), the backend immediately purges the nonce from Redis/memory. Any subsequent request using this nonce is rejected with HTTP 401.
+4. **Server-Side Default-Deny:** Even while the nonce is temporarily active, the Bridge rejects any tool call not in the strict `allowed_callers` whitelist (e.g., calling `execute`, `ask_user`, or shell tools via the bridge is unconditionally blocked).
+
+### 2.4 Storage Hierarchy & Lifecycle
 Files generated during Code Mode are categorized into three distinct lifecycles:
 
 | Category | Storage Path | Persistence | Lifecycle & GC Rules |
 | :--- | :--- | :--- | :--- |
-| **Execution Ephemeral State** | `/tmp/codemode-run/` (tmpfs) | Non-persistent (Container memory) | QuickJS bytecode cache, anonymous pipes. Discarded immediately on script exit. |
+| **Execution Ephemeral State** | `/tmp/codemode-run/` (tmpfs) | Non-persistent (Container memory) | QuickJS bytecode cache, temporary pipes. Discarded immediately on script exit. |
 | **Overflow Output Logs** | `/workspace/.codemode/logs/` | Persistent (Workspace PVC) | Full output dumps when stdout exceeds `max_output_tokens`. Retained for 3 days; rolling GC capped at 50 MB. |
 | **Media Outputs** | `/workspace/.codemode/media/` | Persistent (Workspace PVC) | Decoded images/files from `image()`. Preserved across sandbox recycles for multi-turn inspection (`view_images`) or artifact registration (`save_artifact`). |
 | **User Deliverables** | `/workspace/projects/` | Persistent (Workspace PVC) | Explicitly registered by the user or agent via `save_artifact`. |
 
-*Note on `/workspace/.codemode/` vs `/workspace/tmp/`:* Using the dot-prefixed system directory `/workspace/.codemode/` prevents cluttering the user-visible file tree, protects internal logs from accidental `rm -rf /workspace/tmp/*` cleanup by users, and allows safe, scoped background garbage collection without touching user scratch files.
+*Note on `/workspace/.codemode/`:* Using the dot-prefixed system directory `/workspace/.codemode/` prevents cluttering the user-visible file tree, protects internal logs from accidental `rm -rf /workspace/tmp/*` cleanup by users, and allows safe, scoped background garbage collection without touching user scratch files.
 
 ---
 
@@ -82,32 +94,35 @@ Files generated during Code Mode are categorized into three distinct lifecycles:
  │ CodeModeMiddleware (cubeloop)                             │
  │                                                           │
  │  - Unwraps `code` string from tool call arguments         │
+ │  - Generates Ephemeral Command Nonce (ttl = command time) │
  │  - Launches `cubeplex-codemode-runner` in OpenSandbox     │
- │    via framed stdin/stdout exec session                   │
  │                                                           │
- │ Reverse Tool Dispatch Bridge (Host Side):                 │
- │  - Handles framed JSON-RPC requests from runner stdin     │
+ │ Reverse Tool Dispatch Bridge:                             │
+ │  - Listens on internal endpoint (:8318/v1/tool-call)      │
+ │  - Validates Ephemeral Command Nonce & Command Lifecycle  │
  │  - Enforces Default-Deny Tool Whitelist & allowed_callers │
  │  - Executes real Native / MCP tools on behalf of script   │
  │  - Emits nested SSE events for UI observability           │
  │  - Atomically merges `store()` mutations into Checkpoint  │
- └─────────────────────────────┬─────────────────────────────┘
-                               │ Framed stdin / stdout
-            commands.run Exec  │ (Backend-initiated, zero egress hole)
-                               ▼
+ └─────────────────────────────▲─────────────────────────────┘
+                               │ HTTP/JSON-RPC (X-CodeMode-Nonce)
+          Dedicated Internal   │ Controlled NetworkPolicy
+          Bridge Route         │ (General egress remains default-deny)
+                               │
 ═════════════════════════════════════════════════════════════════
                  WORKSPACE OPENSANDBOX POD
  ┌───────────────────────────────────────────────────────────┐
  │ OpenSandbox Code Runner (`cubeplex-codemode-runner`)      │
  │                                                           │
  │  - Sandboxed QuickJS VM (Memory limit: 256 MB)            │
- │  - No access to host filesystem, /proc, or networking     │
+ │  - No access to host filesystem, /proc, or public network │
  │  - Pre-injected Globals:                                  │
  │      * `tools.<name>(args)` / `tools["name"](args)`       │
  │      * `text(val)`, `image(data)`                         │
  │      * `store(key, val)`, `load(key)`                     │
  │      * `searchTools(query)`, `describeTool(name)`         │
  │      * `ALL_TOOLS`, `console.log(...)`, `exit()`          │
+ │  - Sends tool requests to Bridge via local internal route │
  │  - Writes media / overflow dumps to `/workspace/.codemode/`│
  └───────────────────────────────────────────────────────────┘
 ```
@@ -191,7 +206,7 @@ CubeLoop's `CheckpointedChannel` raises `HitlDurabilityNotGuaranteed` when await
 To prevent collisions with CubeLoop's checkpointer data (which uses `cubepi_threads.extra` for compaction and pinned memory):
 - All Code Mode state is isolated under a dedicated namespace key: `extra["codemode_store"]`.
 - The runner buffers `store(k, v)` mutations in memory during execution.
-- If the script succeeds, the buffered mutations are flushed back over framed stdout and merged into `extra["codemode_store"]`.
+- If the script succeeds, the buffered mutations are flushed back in the final execution payload and merged into `extra["codemode_store"]`.
 - If the runner fails, times out, or crashes, pending mutations are discarded.
 
 ### 4.6 Multimodal Image Handling
@@ -262,7 +277,8 @@ class ToolExecutionEndEvent(BaseEvent):
 
 ### Phase 2: OpenSandbox Integration & Reverse Bridge (`cubeplex`)
 - Implement `cubeplex-codemode-runner` in QuickJS for OpenSandbox image.
-- Implement framed stdin/stdout Reverse Tool Dispatch Bridge in `cubeplex`.
+- Configure controlled internal NetworkPolicy route for Bridge endpoint (`cubeplex-bridge:8318`).
+- Implement Reverse Tool Dispatch Bridge in `cubeplex` with Ephemeral Command Nonce lifecycle.
 - Wire `CodeModeMiddleware` into `run_manager.py` middleware composition.
 - Connect `store` / `load` to `extra["codemode_store"]` in PostgreSQL checkpointer.
 
