@@ -1,10 +1,10 @@
-# Code Mode: SDK-Driven Sandbox Execution & Agent Capability Delegation
+# In-Sandbox Agent Delegation via `cubeplex_context`
 
-**Status:** Draft / Architectural Redesign (Rev. 3)
+**Status:** Draft / Architectural Redesign (Rev. 4)
 
 **Date:** 2026-11-04
 
-**Scope:** Agent Runtime, OpenSandbox Environment, SDK-Driven Tool & Model Delegation
+**Scope:** OpenSandbox Environment, In-Sandbox SDK (`cubeplex_context`), Tool & Model Delegation
 
 **Issue:** [#724](https://github.com/cubeplexai/cubeplex/issues/724)
 
@@ -20,227 +20,260 @@
 
 ## 1. Executive Summary & Vision
 
-Existing implementations of "Code Mode" (e.g. `pi.dev`, Cloudflare Agents, Docker Agent) treat code execution primarily as an in-memory "tool calling macro": the model writes tiny snippets of JavaScript in an isolated, memory-only QuickJS sandbox purely to chain API calls and avoid round-trips.
+Existing "Code Mode" implementations in single-process CLI tools (e.g., `pi.dev`, Cloudflare Agents, Docker Agent) treat code execution as an isolated in-memory "tool calling macro". In those systems, the model writes JavaScript inside a synthetic, memory-only QuickJS VM with zero filesystem access purely to avoid network round-trips for API tool calls.
 
-In CubePlex, this single-process CLI model is both **unnecessary** and **counter-productive**:
-1. **Redundant Nested Sandboxing:** CubePlex already provisions an enterprise-grade, kernel-isolated **OpenSandbox container** for each workspace. Spawning an artificial, restricted QuickJS engine *inside* an already isolated Linux container creates redundant isolation layers and cuts the agent off from the rich Linux software stack.
-2. **Artificial Filesystem Crippling:** Restricting filesystem access runs counter to the agent's core purpose. Agents already possess native file operations (`read`, `write`, `execute`). Many production workflows (such as `docx`, `pptx`, `xlsx`, `pdf`, data science with `pandas`/`matplotlib`, and large dataset processing) fundamentally rely on manipulating real files on the workspace volume.
-3. **The Core Opportunity — SDK Delegation:** When the agent writes and executes code in the sandbox, that code should not be an isolated island. It should be a **first-class program empowered by the Agent itself**.
+In CubePlex, this design is both **redundant** and **counter-productive**:
+1. **OpenSandbox is Already the Isolation Boundary:** CubePlex already provisions an enterprise-grade, kernel-isolated **OpenSandbox container** for each workspace. Running a stripped QuickJS sandbox *inside* an already isolated container adds fragile nested sandboxing ("sandbox-in-a-sandbox") while discarding the rich Linux/Python runtime.
+2. **Filesystem Access is Essential:** The agent already has unrestricted read/write/exec permissions in its workspace. Heavy productivity skills (`docx`, `pptx`, `xlsx`, `pdf`, data science with `pandas`/`matplotlib`) fundamentally rely on reading and writing real files on `/workspace` (PVC).
+3. **No Redundant Tool Concept:** Adding a separate `codemode` tool causes cognitive conflict for the model (forcing it to choose between `execute` and `codemode`) and fragments execution pipelines.
 
-### The Architectural Shift
-Code Mode in CubePlex is redesigned as **SDK-Driven Sandbox Program Execution**:
-- The agent executes full-featured code (Python / TypeScript) directly in the OpenSandbox environment with normal workspace filesystem access.
-- The environment provides a pre-installed, high-level client SDK (`cubeplex` Python/TS library).
-- Through `from cubeplex.agent import tools, llm`, scripts running inside the sandbox can directly invoke the Agent's configured tools (MCP servers, native tools) and delegate sub-prompts to the Agent's available LLMs (for structured data extraction, summarization, and content generation).
+### The Architectural Breakthrough: In-Sandbox Delegation
+Instead of introducing a new tool, **CubePlex empowers the existing sandbox environment with a native context library: `cubeplex_context`**:
+- The agent continues using its familiar `write` and `execute` tools.
+- When running scripts in the sandbox, code can directly import `cubeplex_context`:
+  ```python
+  from cubeplex_context import tools, llm
+  ```
+- **Tool Delegation:** Scripts can invoke configured workspace MCP servers and approved native tools asynchronously (`await tools.linear__list_issues(...)`).
+- **Model Delegation:** Scripts can query the agent's available LLMs for non-agentic sub-tasks (e.g., batch data classification, content summarization).
+- **Universal Skill Uplift:** All existing document and research skills automatically gain the ability to query MCP tools and LLMs directly from their internal Python scripts.
 
 ---
 
-## 2. Server-Side Architecture & Trust Model
+## 2. Architecture & Communication Model
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     Model Turn (LLM)                        │
 │                                                             │
-│  - Receives `codemode` tool with code execution arguments   │
-│  - Emits Python/TypeScript script leveraging `cubeplex` SDK │
+│  - Reads available tools via prompt stubs / tools.pyi        │
+│  - Writes Python script using `from cubeplex_context ...`   │
+│  - Executes script via standard `execute(command="...")`    │
 └──────────────────────────────┬──────────────────────────────┘
-                               │ tool_call: codemode({"code": "...", "language": "python"})
+                               │ tool_call: execute("python script.py")
                                ▼
 ═════════════════════════════════════════════════════════════════
                       CUBEPLEX BACKEND
  ┌───────────────────────────────────────────────────────────┐
- │ CodeModeMiddleware (cubeloop)                             │
- │  - Unwraps `code` and language options                    │
- │  - Issues Ephemeral Command Nonce (ttl = timeout)         │
- │  - Dispatches execution to OpenSandbox via `commands.run` │
+ │ Sandbox Service / Run Manager                             │
+ │  - Injects `CUBEPLEX_COMMAND_NONCE` into `opts.envs`      │
+ │  - Launches command via OpenSandbox `commands.run`        │
  │                                                           │
  │ Reverse Tool & LLM Dispatch Bridge:                       │
- │  - Internal API endpoint (routed via force_allow_hosts)   │
- │  - Validates Ephemeral Nonce against cluster-shared Redis │
+ │  - Listens on internal endpoint (e.g. /api/v1/context)    │
+ │  - Validates Ephemeral Command Nonce from shared Redis    │
  │  - Enforces Default-Deny whitelist on delegated tools     │
- │  - Handles tool calls: executes MCP / Native tools        │
- │  - Handles LLM calls: invokes configured Workspace models │
- │    (with strict turn-level concurrency & token ceilings)  │
- │  - Emits real-time nested SSE events to the UI            │
+ │  - Executes MCP / Native tools on behalf of the script    │
+ │  - Executes single-turn model completions via LLM provider│
+ │  - Emits real-time nested SSE events for UI rendering     │
  └─────────────────────────────▲─────────────────────────────┘
                                │
             HTTP / JSON-RPC    │ Internal Service Route
-        (X-CodeMode-Nonce)     │ (General sandbox egress remains default-deny)
-                               │
+        (X-CodeMode-Nonce)     │ (force_allow_hosts FQDN, no port match)
+                               │ (General egress remains default-deny)
 ═════════════════════════════════════════════════════════════════
                  WORKSPACE OPENSANDBOX CONTAINER
  ┌───────────────────────────────────────────────────────────┐
- │ Native Container Environment (Python 3.12+ / Node 22+)     │
+ │ OpenSandbox Environment (Python 3.12+ / Linux)            │
  │                                                           │
- │  - Full access to `/workspace` filesystem (PVC)           │
- │  - Full access to installed packages (pandas, docx, etc.) │
+ │  - Full native access to `/workspace` filesystem (PVC)    │
+ │  - Pre-installed `cubeplex_context` Python library        │
  │                                                           │
- │ Pre-installed SDK (`cubeplex`):                           │
- │   * `from cubeplex.agent import tools, llm`               │
- │   * `tools.<name>(**kwargs)` ──> calls Bridge             │
- │   * `llm.generate(prompt, **kwargs)` ──> calls Bridge     │
- │   * `llm.classify(data, schema)` ──> calls Bridge         │
+ │ In-Sandbox Script Execution:                              │
+ │   from cubeplex_context import tools, llm                 │
  │                                                           │
- │ Script Output:                                            │
- │   - Writes deliverables directly to `/workspace/...`      │
- │   - Dumps overflow execution logs to `/workspace/.codemode`│
- │   - Standard stdout/stderr captured as tool result        │
+ │   * `tools.<name>(**kwargs)` ──> calls Reverse Bridge     │
+ │   * `llm.generate(prompt)`   ──> calls Reverse Bridge     │
+ │   * `llm.classify(data)`     ──> calls Reverse Bridge     │
+ │                                                           │
+ │ Script Output & Artifacts:                                │
+ │   - Writes deliverables directly to `/workspace/projects/`│
+ │   - Standard stdout/stderr returned to Agent as normal    │
  └───────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 Why Avoid Nested Sandboxing
-- **Eliminate QuickJS/VM Overhead:** No need to cross-compile, distribute, or debug a separate C/WASM JavaScript engine inside the container.
-- **Ecosystem Leverage:** Document creation skills (`docx`, `pptx`, `xlsx`) already produce Python code relying on libraries like `python-docx`, `python-pptx`, `openpyxl`, and `reportlab`. Forcing them through a stripped QuickJS environment broke their primary capabilities.
-- **Natural File Handling:** When a tool (like an MCP database reader) returns 50 MB of data, the script can simply stream it into `/workspace/.codemode/data.json` or a SQLite database, process it with standard tools, and avoid in-memory limits entirely.
+---
 
-### 2.2 Security & Isolation Boundaries
-1. **The Container is the Boundary:** All scripts run under UID 1000 (`cubeplex`) inside the workspace's dedicated container with cgroups-enforced memory/CPU limits.
-2. **Ephemeral Nonce Lifecycle:**
-   - Every `commands.run` invocation generates a cryptographic, single-use `command_nonce` passed in `opts.envs`.
-   - The nonce is registered in **cluster-shared Redis** and bound to the command's `execution_id` and active `run_id`.
-   - The moment the command exits (or reaches its deadline), the nonce is immediately invalidated.
-   - Any lookup miss on any backend replica fails-closed (HTTP 401).
-3. **Server-Side Bridge Whitelist (Default-Deny):**
-   - The SDK communicates with the backend solely via the Bridge endpoint, routed through `build_network_policy` (`force_allow_hosts`).
-   - The Bridge enforces an explicit whitelist: calling `execute`, `ask_user`, or shell management from inside sandbox scripts is blocked.
+## 3. Trust Boundary & Security Architecture
+
+### 3.1 Network Egress & Service Routing
+- The OpenSandbox container operates under a **default-deny outbound network policy**.
+- Access to the CubePlex Backend Reverse Bridge is enabled by injecting the Bridge's internal FQDN into `build_network_policy` (`force_allow_hosts`), matching CubePlex's established egress pattern (identical to `credential-exchange proxy`).
+- General outbound internet access remains strictly blocked unless explicitly permitted by workspace egress policy.
+
+### 3.2 Ephemeral Command Nonce Lifecycle
+To isolate privileges to active command turns and prevent unauthorized reuse:
+1. When `commands.run` is called, the backend generates a cryptographically secure, single-use `command_nonce`.
+2. The nonce is passed via `opts.envs` as `CUBEPLEX_COMMAND_NONCE` along with `CUBEPLEX_BRIDGE_URL` and `CUBEPLEX_RUN_ID`.
+3. The nonce record is saved in **cluster-shared Redis**, keyed by `execution_id` and `run_id` with a strict TTL matching the command timeout (default 60s, max 300s). Local process memory is never used, ensuring load-balanced multi-replica backend pods can validate calls seamlessly.
+4. The moment `commands.run` finishes (exit, cancellation, or timeout), the backend immediately purges the nonce from Redis. Any lookup miss on any backend pod fails-closed with HTTP 401 Unauthorized.
+
+### 3.3 Server-Side Default-Deny Tool Whitelist
+Processes sharing the container under UID 1000 can observe `/proc/<pid>/environ`. Therefore, the true security boundary is enforced strictly on the server-side Bridge:
+- **Whitelisted for Delegation (`allowed_callers: ["sandbox", "direct"]`):**
+  - All workspace-configured external MCP tools (e.g. `linear`, `notion`, `github`, `jira`).
+  - Read-only native utility tools: `read`, `calculator`, `datetime`, `memory_search`.
+- **Forbidden from Delegation (`allowed_callers: ["direct"]`):**
+  - Interactive tools: `ask_user`.
+  - Process/shell execution: `execute`, `monitor`.
+  - Task and workspace control: `write_todos`, `persona_update`, `scheduled_tasks`, `subagent`.
+  - Any unauthorized tool call made via `cubeplex_context.tools` is immediately rejected with HTTP 403 / actionable error message.
 
 ---
 
-## 3. The `cubeplex` In-Sandbox SDK
+## 4. The `cubeplex_context` SDK Contract
 
-The OpenSandbox image includes pre-installed Python (`cubeplex`) and TypeScript (`@cubeplex/agent`) client packages that automatically discover the backend bridge via ambient environment variables (`CUBEPLEX_BRIDGE_URL`, `CUBEPLEX_COMMAND_NONCE`, `CUBEPLEX_RUN_ID`).
+The client SDK `cubeplex_context` is pre-installed in the OpenSandbox image as a lightweight Python package (relying solely on `httpx` and `pydantic`).
 
-### 3.1 Python SDK Surface (`cubeplex.agent`)
+### 4.1 Invoking Tools (`cubeplex_context.tools`)
+
+Tools are accessed via dynamic attribute access or dictionary lookups:
 
 ```python
-from cubeplex.agent import tools, llm
+from cubeplex_context import tools
 
-# 1. Calling Agent Tools (MCP & Whitelisted Native Tools)
-# Tools are accessible via attribute or dictionary lookup
+# Normalized attribute access
 issues = await tools.linear__list_issues(team="CORE", limit=50)
-content = await tools["notion__query_database"](database_id="db_123")
 
-# 2. Delegating to Model Capabilities
-# Quick text/code generation using the workspace's active model
+# Exact namespaced name lookup
+result = await tools["notion__query_database"](database_id="db_123")
+```
+
+#### How the Agent Discovers Available Tools
+1. **System Prompt Type Stubs:** CubeLoop's middleware injects compact Python type signatures of available tools into the agent's system prompt:
+   ```text
+   ## Available in `cubeplex_context.tools`:
+   - `tools.linear__list_issues(team: str, limit: int = 50) -> list[dict]`
+   - `tools.notion__query_database(database_id: str) -> dict`
+   ```
+2. **Local Type Hint File (`/workspace/.codemode/tools.pyi`):**
+   When a session initializes or MCP servers update, the backend writes a complete `.pyi` stub file to `/workspace/.codemode/tools.pyi`. Agents can inspect this file with `read` if detailed parameter schemas are needed.
+3. **Runtime Reflection API:**
+   For dynamic discovery inside scripts:
+   ```python
+   # List all tool names and descriptions
+   all_tools = tools.list()
+
+   # Inspect detailed schema and documentation for a tool
+   schema = tools.describe("linear__list_issues")
+   ```
+
+### 4.2 Delegating to Models (`cubeplex_context.llm`)
+
+Scripts can delegate sub-prompts, summaries, and structured extractions to the workspace's active model:
+
+```python
+from cubeplex_context import llm
+
+# Free-form generation
 summary = await llm.generate(
-    prompt=f"Extract top 3 blockers from these issues:\n{issues}",
-    system_prompt="You are a technical project manager. Be concise.",
+    prompt=f"Summarize these tickets:\n{issues}",
+    system_prompt="You are an engineering manager. Output concise bullets.",
     temperature=0.2,
 )
 
 # Structured JSON classification / extraction
 analysis = await llm.classify(
     data=issues,
-    instruction="Categorize each issue by component and urgency",
+    instruction="Extract issue priority and root cause category",
     schema={
-        "component": "string",
-        "urgency": "low | medium | high"
+        "type": "object",
+        "properties": {
+            "priority": {"type": "string", "enum": ["low", "high", "urgent"]},
+            "category": {"type": "string"}
+        }
     }
 )
 ```
 
-### 3.2 TypeScript SDK Surface (`@cubeplex/agent`)
+#### Sub-Model Anti-Recursion & Cost Guardrails
+1. **Non-Agentic Single-Turn Only:** Sub-calls directly invoke provider completion APIs. Sub-calls **cannot use tools** and cannot spawn sub-agents. Recursion depth is strictly capped at 1.
+2. **Concurrency Ceiling:** At most 4 concurrent sub-model requests are allowed per script execution. Additional calls are queued.
+3. **Token Attribution:** Tokens consumed by `llm.*` sub-calls are metered by the Bridge and merged into the parent run's `usage` counters in PostgreSQL.
+4. **Execution Deadline:** In-sandbox execution remains bounded by the command timeout (default 60s, max 300s).
 
-```typescript
-import { tools, llm } from "@cubeplex/agent";
+### 4.3 Context Metadata
 
-// Tool execution
-const issues = await tools.linear__list_issues({ team: "CORE", limit: 50 });
+The SDK also exposes ambient execution metadata:
 
-// LLM generation
-const summary = await llm.generate({
-  prompt: `Summarize:\n${JSON.stringify(issues)}`,
-  temperature: 0.2,
-});
-```
-
----
-
-## 4. Sub-Model Execution Guardrails (Anti-Recursion)
-
-Allowing scripts to query LLMs introduces powerful sub-task parallelization, but must be strictly bounded to prevent cost explosions and infinite loops:
-
-1. **Non-Agentic Completion Only:**
-   - `llm.generate()` and `llm.classify()` call the model provider directly for single-turn completions.
-   - Sub-calls **do not have access to tools** and cannot trigger sub-agents or nested `codemode` sessions. Recursion depth is capped at 1.
-2. **Turn-Level Concurrency & Rate Limits:**
-   - At most 4 concurrent sub-model calls per script invocation. Excess calls queue asynchronously.
-   - Hard execution deadline (default 60s, max 300s configurable via `@options`).
-3. **Token & Budget Attribution:**
-   - Input and output tokens consumed by `llm.*` calls within the script are tracked by the Bridge and appended to the parent turn's `usage` metadata in PostgreSQL.
-   - If the workspace exceeds its token rate limit or cost budget, the Bridge rejects subsequent sub-model calls with HTTP 429.
-
----
-
-## 5. Tool Parameter & Return Contracts
-
-### 5.1 Tool Schema
-The `codemode` tool is exposed to the primary agent as a standard JSON object:
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "code": {
-      "type": "string",
-      "description": "Python (default) or TypeScript code to execute in the workspace sandbox."
-    },
-    "language": {
-      "type": "string",
-      "enum": ["python", "typescript"],
-      "default": "python",
-      "description": "Scripting runtime to use."
-    }
-  },
-  "required": ["code"]
-}
-```
-
-Optional execution options can still be declared on the first line:
 ```python
-# @options: {"timeout_ms": 60000, "max_output_tokens": 8000}
+import cubeplex_context as ctx
+
+print(ctx.run_id)          # Current Run ID
+print(ctx.workspace_id)    # Current Workspace ID
 ```
 
-### 5.2 Output & Deliverable Handling
-- **Stdout / Result:** The tool result returns standard `stdout`/`stderr` from the script process.
-- **Deliverables:** Files generated by scripts (e.g., reports, charts, CSVs) are saved directly onto `/workspace/` (e.g. `/workspace/projects/sales-report.docx`). The agent can immediately present them via `save_artifact` or `present_file` in the subsequent turn.
-- **Large Log Spills:** If standard output exceeds `max_output_tokens`, the full text is dumped to `/workspace/.codemode/logs/exec_<id>.log` and truncated cleanly in the context.
+---
+
+## 5. End-to-End Workflow Examples
+
+### Example: Automated Report Generation via `docx` Skill
+An agent tasked with generating a monthly incident report previously had to make 10 round trips to pull tickets, summarize each, and format a document. With `cubeplex_context`, the agent writes a single Python script and runs it via `execute`:
+
+```python
+import asyncio
+from cubeplex_context import tools, llm
+from docx import Document
+
+async def main():
+    # 1. Fetch raw data from Linear MCP
+    issues = await tools.linear__list_issues(team="INFRA", state="closed")
+    
+    # 2. Parallel LLM summarization of root causes
+    summaries = await asyncio.gather(*[
+        llm.generate(f"Summarize root cause in 1 sentence: {item['description']}")
+        for item in issues[:10]
+    ])
+    
+    # 3. Create formatted Word document directly in the workspace
+    doc = Document()
+    doc.add_heading("Monthly Incident Report", level=1)
+    for issue, summary in zip(issues[:10], summaries):
+        doc.add_heading(issue["title"], level=2)
+        doc.add_paragraph(summary)
+    
+    doc.save("/workspace/projects/incident-report.docx")
+    print("Report generated successfully at /workspace/projects/incident-report.docx")
+
+asyncio.run(main())
+```
+
+After `execute` completes, the agent immediately calls `save_artifact(path="/workspace/projects/incident-report.docx")` to deliver the result.
 
 ---
 
 ## 6. Observability & User Experience (SSE & UI)
 
-When an agent executes a `codemode` script that delegates tasks:
-1. The frontend receives `ToolExecutionStartEvent` for `codemode`.
-2. As the script calls `tools.linear__list_issues()` or `llm.generate()`, the Bridge emits nested events:
+When an agent executes a script that uses `cubeplex_context`:
+1. The frontend receives standard `ToolExecutionStartEvent` for `execute`.
+2. As the script invokes `tools.linear__list_issues()` or `llm.generate()`, the Reverse Bridge emits nested SSE events:
    - `ToolExecutionStartEvent(tool_name="linear__list_issues", is_nested=True, parent_tool_call_id=...)`
-   - `LLMExecutionStartEvent(model="gpt-5.6", is_nested=True, parent_tool_call_id=...)`
-3. The Chat UI renders a cohesive **Code Mode Pipeline Card**:
-   - The main block shows the Python/TS code.
-   - A nested real-time progress accordion displays sub-actions:
-     ```
-     ▼ 🛠️ Code Mode Execution (python)
-       ├─ ↳ [Tool] linear__list_issues (fetched 50 issues)
-       ├─ ↳ [LLM] Summarized blockers via claude-sonnet-4-5 (1.2s)
-       ├─ ↳ [FS] Generated /workspace/projects/blockers.docx (14 KB)
-       └─ ✔ Completed successfully in 4.3s
-     ```
+   - `LLMExecutionStartEvent(model="claude-sonnet-4-5", is_nested=True, parent_tool_call_id=...)`
+3. The Chat UI renders an expandable nested execution tree inside the command card:
+   ```
+   ▼ ⚙️ execute: python generate_report.py
+     ├─ ↳ [Tool] linear__list_issues (fetched 10 issues)
+     ├─ ↳ [LLM] 10 parallel root-cause summaries completed (1.8s)
+     ├─ ↳ [FS] Saved /workspace/projects/incident-report.docx
+     └─ ✔ Command completed (exit_code: 0, wall_time: 3.2s)
+   ```
 
 ---
 
 ## 7. Implementation Roadmap
 
-### Phase 1: SDK Packaging & Reverse Bridge Service
-- Implement `cubeplex-sdk` Python package with `cubeplex.agent.tools` and `cubeplex.agent.llm`.
-- Build the Backend Bridge service endpoint (`/api/v1/codemode/dispatch`), including Redis-backed Ephemeral Nonce validation and Default-Deny tool filtering.
+### Phase 1: SDK & Reverse Bridge Service
+- Implement `cubeplex_context` Python client package with `tools` and `llm` interfaces.
+- Build the Backend Reverse Bridge endpoint (`/api/v1/context/dispatch`), Redis-backed Ephemeral Nonce validation, and Default-Deny whitelist enforcement.
 - Inject Bridge FQDN into sandbox `build_network_policy` (`force_allow_hosts`).
+- Pre-install `cubeplex_context` into the OpenSandbox container image.
 
-### Phase 2: Agent Harness & CodeMode Middleware
-- Implement `CodeModeMiddleware` in `cubeloop` / `cubeplex`.
-- Generate Python type definitions and docstrings for available workspace tools into the system prompt.
-- Route `codemode` invocations to `commands.run` in OpenSandbox.
+### Phase 2: Tool Stubs & System Prompt Integration
+- Implement type stub generation in CubeLoop/CubePlex for active workspace tools.
+- Auto-generate `/workspace/.codemode/tools.pyi` on session startup.
+- Inject SDK guidance and Python signatures into the agent system prompt.
 
-### Phase 3: Observability & Production Hardening
-- Extend `agents/stream.py` to stream nested tool and LLM execution events.
-- Implement Chat UI pipeline cards for nested code executions.
-- Add concurrency semaphores and token accounting for in-sandbox `llm.*` queries.
+### Phase 3: Sub-Model Delegation & Nested UI Observability
+- Connect `cubeplex_context.llm` to the workspace's configured model preset with strict concurrency limiting (max 4).
+- Aggregate in-sandbox token usage into the parent run's billing records.
+- Update `agents/stream.py` and Chat UI components to render nested execution trees for `execute` commands.
