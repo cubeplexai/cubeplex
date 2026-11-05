@@ -1,10 +1,10 @@
-# In-Sandbox Agent Delegation via `cubeplex_context`
+# In-Sandbox Agent Delegation via `cubeplex_context` (Code Mode)
 
-**Status:** Draft / Architectural Redesign (Rev. 5)
+**Status:** Proposed Specification
 
-**Date:** 2026-11-04
+**Date:** 2026-11-05
 
-**Scope:** OpenSandbox Environment, In-Sandbox SDK (`cubeplex_context`), Tool & Model Delegation
+**Scope:** OpenSandbox Runtime, In-Sandbox SDK (`cubeplex_context`), Tool & Model Delegation
 
 **Issue:** [#724](https://github.com/cubeplexai/cubeplex/issues/724)
 
@@ -15,20 +15,21 @@
 - [Runtime Session Contracts](2026-09-13-runtime-session-design.md)
 - [Sandbox Background Execute](2026-09-18-sandbox-background-execute-design.md)
 - [Command Lifecycle](2026-09-20-command-lifecycle-design.md)
+- [Multi-Instance Run Control](2026-05-25-multi-instance-run-control-design.md)
 - [Prompt Cache Discipline](../../backend/docs/prompt-cache-discipline.md)
 
 ---
 
-## 1. Executive Summary & Vision
+## 1. Executive Summary & Design Principles
 
-Existing "Code Mode" implementations in single-process CLI tools (e.g., `pi.dev`, Cloudflare Agents, Docker Agent) treat code execution as an isolated in-memory "tool calling macro". In those systems, the model writes JavaScript inside a synthetic, memory-only QuickJS VM with zero filesystem access purely to avoid network round-trips for API tool calls.
+The standard "Code Mode" design found in single-process desktop CLI tools (e.g. `pi.dev`, Docker Agent) treats code execution as an isolated in-memory "tool calling macro". In those environments, the model writes JavaScript inside a synthetic, memory-only QuickJS VM with zero filesystem access purely to avoid network round-trips when chaining API tool calls.
 
-In CubePlex, this design is both **redundant** and **counter-productive**:
-1. **OpenSandbox is Already the Isolation Boundary:** CubePlex already provisions an enterprise-grade, kernel-isolated **OpenSandbox container** for each workspace. Running a stripped QuickJS sandbox *inside* an already isolated container adds fragile nested sandboxing ("sandbox-in-a-sandbox") while discarding the rich Linux/Python runtime.
-2. **Filesystem Access is Essential:** The agent already has unrestricted read/write/exec permissions in its workspace. Heavy productivity skills (`docx`, `pptx`, `xlsx`, `pdf`, data science with `pandas`/`matplotlib`) fundamentally rely on reading and writing real files on `/workspace` (PVC).
-3. **No Redundant Tool Concept:** Adding a separate `codemode` tool causes cognitive conflict for the model (forcing it to choose between `execute` and `codemode`) and fragments execution pipelines.
+In CubePlex, this design is both **redundant** and **architecturally counter-productive**:
+1. **OpenSandbox is Already the Isolation Boundary:** CubePlex already provisions an enterprise-grade, kernel-isolated **OpenSandbox container** for each workspace. Running a stripped QuickJS sandbox *inside* an already isolated container introduces fragile nested sandboxing ("sandbox-in-a-sandbox") while cutting the agent off from the rich Linux and Python runtime.
+2. **Filesystem Access is Essential for Productivity Skills:** The agent already has unrestricted read/write/exec permissions in its workspace. Heavy production skills (`docx`, `pptx`, `xlsx`, `pdf`, data science with `pandas`/`matplotlib`) fundamentally rely on reading and writing real files on the persistent `/workspace` volume (PVC).
+3. **No Redundant Tool Concept:** Introducing a separate `codemode` tool causes cognitive conflict for the model (forcing it to choose between `execute` and `codemode`) and fragments execution pipelines.
 
-### The Architectural Breakthrough: In-Sandbox Delegation
+### The Architectural Vision: In-Sandbox Delegation
 Instead of introducing a new tool, **CubePlex empowers the existing sandbox environment with a native context library: `cubeplex_context`**:
 - The agent continues using its familiar `write` and `execute` tools.
 - When running scripts in the sandbox, code can directly import `cubeplex_context`:
@@ -138,6 +139,7 @@ The lifecycle of the command nonce is strictly aligned with the lifecycle of the
    - Any lookup miss in Redis fails-closed with HTTP 401 Unauthorized across all backend replicas.
 
 ### 3.3 Server-Side Default-Deny Tool Whitelist
+Processes sharing the container under UID 1000 can observe `/proc/<pid>/environ`. Therefore, the true security boundary is enforced strictly on the server-side Bridge:
 - **Whitelisted for Delegation (`allowed_callers: ["sandbox", "direct"]`):**
   - All workspace-configured external MCP tools (e.g. `{slug}__{tool_name}`).
   - Read-only native utility tools: `read`, `calculator`, `datetime`, `memory_search`.
