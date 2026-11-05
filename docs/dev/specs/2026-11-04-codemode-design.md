@@ -59,18 +59,19 @@ Instead of introducing a new tool, **CubePlex empowers the existing sandbox envi
                       CUBEPLEX BACKEND
  ┌───────────────────────────────────────────────────────────┐
  │ Sandbox Service / Command Lifecycle                       │
- │  - Before `sandbox.start`: generates `command_nonce`      │
+ │  - Before `sandbox.start`: generates `command_nonce`,     │
+ │    persists record to Redis (status starting/running),    │
  │    and passes via `opts.envs` (NOT in set_run_env)        │
  │  - On `persist_running(command_id, provider_ref)`:        │
- │    Registers `command_nonce` in Redis (key: command_id)   │
- │    with TTL = command's `timeout_seconds`                 │
+ │    backfills `provider_ref` on the Redis record           │
  │  - On `_terminalize` (exited/killed): purges nonce        │
  │                                                           │
  │ ExchangeListener (Internal mTLS Port 8443):               │
  │  - Route: /api/v1/internal/context/dispatch               │
  │  - NOT exposed via Ingress; port 8000 never serves route  │
  │  - Verifies mTLS client certificate CN matches sandbox    │
- │  - Verifies nonce matches running sandbox_commands record │
+ │  - Verifies nonce matches sandbox_commands record in      │
+ │    `starting` or `running` state                          │
  │  - Enforces Default-Deny whitelist on delegated tools     │
  │  - Dispatches tool invocations to MCP / Native tools      │
  │  - Dispatches single-turn sub-model completions to LLM;   │
@@ -120,18 +121,19 @@ Instead of introducing a new tool, **CubePlex empowers the existing sandbox envi
   - No new `force_allow_hosts` rules are required in `build_network_policy`, as the cluster-internal FQDN is already permitted.
 - **Dual-Factor Bridge Validation:** On every incoming call, the Bridge verifies:
   1. The client certificate CN corresponds to the verified caller sandbox pod.
-  2. The nonce corresponds to an active `sandbox_commands` record whose `status` is currently `running`, and whose registered sandbox matches the certificate.
+  2. The nonce corresponds to an active `sandbox_commands` record whose `status` is currently `starting` or `running`, and whose registered sandbox matches the certificate.
 
 ### 3.2 Nonce Lifecycle Bound to Sandbox Commands
 The lifecycle of the command nonce is strictly aligned with the lifecycle of the sandbox command execution in `sandbox_commands`:
 
-1. **Pre-Execution Generation:**
-   - The `command_nonce` MUST be generated **before** invoking `sandbox.start()`. Generating it inside `persist_running` / `on_started` is too late, as the container process is already launched.
-   - The nonce is passed exclusively through the command's own `opts.envs` (as `CUBEPLEX_COMMAND_NONCE`). It must **NEVER** be written to `set_run_env` (which persists sandbox-wide and would leak across subsequent commands).
-2. **Persistence on `running`:**
-   - In `persist_running(command_id, provider_ref)` (invoked by `on_started`), the pre-generated nonce is saved to cluster-shared Redis with `command_id` as the key.
-   - The Redis record contains: `org_id`, `workspace_id`, `user_id`, and `provider_ref`.
+1. **Pre-Execution Generation & Redis Persistence:**
+   - The `command_nonce` MUST be generated and saved to cluster-shared Redis **before** invoking `sandbox.start()`. Generating it inside `persist_running` / `on_started` is too late, because the container process is already launched and an early bridge call from a fast script would receive a false 401.
+   - The Redis record is keyed by `command_id`, storing `org_id`, `workspace_id`, and `user_id`.
    - **TTL:** The record TTL is set to the command's own `timeout_seconds` (the same duration as `monitor_deadline_at`), serving strictly as a fallback against missed cleanups.
+   - The nonce is passed exclusively through the command's own `opts.envs` (as `CUBEPLEX_COMMAND_NONCE`). It must **NEVER** be written to `set_run_env` (which persists sandbox-wide and would leak across subsequent commands).
+2. **State Acceptance & `provider_ref` Backfill on `running`:**
+   - The Bridge accepts the nonce while the command is in either `starting` or `running` state.
+   - When `on_started` invokes `persist_running(command_id, provider_ref)`, the backend updates the Redis record to backfill `provider_ref`.
 3. **Multi-Call Lifetime (Not Single-Use):**
    - The script may invoke `tools.*` and `llm.*` multiple times during its execution. All calls during that command execution share the same `command_nonce`. Single-use semantics are explicitly avoided.
 4. **Deletion on Command Terminalization:**
@@ -148,7 +150,8 @@ The lifecycle of the command nonce is strictly aligned with the lifecycle of the
 ### 3.3 Security Boundary & Residual Risk within Pod
 Processes sharing the container under UID 1000 (`cubeplex`) can inspect `/proc/<pid>/environ` of other running processes.
 - **Residual Exposure:** Any concurrently executing process under UID 1000 in the same sandbox pod can read `CUBEPLEX_COMMAND_NONCE` from `/proc/<pid>/environ` while the command is active, and can send requests to the local addon on `127.0.0.1:8319`. Because mTLS client certificates identify the pod rather than the specific process, mTLS cannot block other processes within the same pod.
-- **Server-Side Enforcement:** Consequently, command-level isolation within the same pod cannot be treated as an absolute boundary. The true security boundary is enforced at the server-side Bridge:
+- **Scope of Exposure:** Processes that can read `environ` already possess full shell access inside this container. Acquiring the nonce grants that process access to the whitelisted MCP tools and `llm.*` sub-calls using the credentials of the user who initiated the command, with token usage and costs attributed to this run.
+- **Server-Side Enforcement:** Consequently, command-level isolation within the same pod is not a secure boundary against same-UID processes. While the command is `starting` or `running`, any sibling process stealing the nonce can call all whitelisted MCP tools and `llm.*`. The server-side rejection list on the Bridge only prevents invoking `execute`, `ask_user`, or admin tools via the bridge; it does not close the leak of delegated MCP and model capabilities to concurrent same-container processes.
   - **Whitelisted for Delegation (`allowed_callers: ["sandbox", "direct"]`):**
     - All workspace-configured external MCP tools (e.g. `{slug}__{tool_name}`).
     - Read-only native utility tools: `read`, `calculator`, `datetime`, `memory_search`.
@@ -156,7 +159,6 @@ Processes sharing the container under UID 1000 (`cubeplex`) can inspect `/proc/<
     - Interactive tools: `ask_user`.
     - Process/shell execution: `execute`, `monitor`.
     - Task and workspace control: `write_todos`, `persona_update`, `scheduled_tasks`, `subagent`.
-  - Any unauthorized tool call made to the bridge is rejected with HTTP 403. Even if a sibling process in the same pod acquires the nonce, it cannot execute arbitrary host shell commands or access disallowed administrative tools.
 
 ---
 
@@ -315,8 +317,8 @@ When a script running inside `execute` invokes `cubeplex_context.tools` or `cube
 - Implement `cubeplex_context` Python client package with `tools` and `llm` interfaces.
 - Mount `/api/v1/internal/context/dispatch` on `ExchangeListener` (port 8443).
 - Implement local HTTP forwarding endpoint on the egress addon (in mitmproxy sidecar using standard library `http.client`), forwarding local requests over mTLS to the backend.
-- Generate `command_nonce` prior to `sandbox.start` (passed via `opts.envs`), persisting to Redis on `persist_running` and purging on `_terminalize`.
-- Validate mTLS client certificate CN and `sandbox_commands` status (`running`).
+- Generate `command_nonce` and persist to Redis prior to `sandbox.start` (passed via `opts.envs`); accept nonce in `starting` and `running` states, backfill `provider_ref` on `persist_running`, and purge on `_terminalize`.
+- Validate mTLS client certificate CN and `sandbox_commands` status (`starting` or `running`).
 - Pre-install `cubeplex_context` into the OpenSandbox container image.
 
 ### Phase 2: Tool Stubs & System Prompt Integration
