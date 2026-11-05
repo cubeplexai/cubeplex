@@ -480,8 +480,6 @@
     "loadingEarlier": "Loading earlier messages…",
     "turnNavLabel": "Conversation turns",
     "turnNavJump": "Jump to turn: {preview}",
-    "turnNavYou": "You",
-    "turnNavAgent": "Agent",
     "turnNavNoReply": "No reply yet",
     "turnNavAttachmentOnly": "Attachment",
     "turnNavLoadEarlier": "Load earlier turns",

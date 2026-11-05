@@ -1,7 +1,7 @@
 import { getTextContent, type Message } from '@cubeplex/core'
 
 /** Resting tick. Short and faint so the column stays out of the way. */
-export const TURN_TICK_REST_WIDTH_PX = 4
+export const TURN_TICK_REST_WIDTH_PX = 6
 export const TURN_TICK_REST_OPACITY = 0.4
 
 /** Hovered tick. Full extension the pointer is on. */
@@ -9,7 +9,7 @@ export const TURN_TICK_HOVER_WIDTH_PX = 16
 export const TURN_TICK_HOVER_OPACITY = 1
 
 /** Tick immediately above or below the hovered one: halfway from rest to full. */
-export const TURN_TICK_NEAR_WIDTH_PX = 10
+export const TURN_TICK_NEAR_WIDTH_PX = 11
 export const TURN_TICK_NEAR_OPACITY = 0.4
 
 export const TURN_TICK_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)'

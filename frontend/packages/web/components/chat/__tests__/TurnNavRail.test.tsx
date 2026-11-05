@@ -37,7 +37,7 @@ describe('TurnNavRail', () => {
     render(<TurnNavRail turns={turns} onJump={() => undefined} />, { wrapper })
 
     for (const tick of ticks()) {
-      expect(tick.style.width).toBe('4px')
+      expect(tick.style.width).toBe('6px')
       expect(tick.style.opacity).toBe('0.4')
       expect(tick.style.transition).toBe(
         'width 0.2s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1)',
@@ -49,9 +49,9 @@ describe('TurnNavRail', () => {
 
     expect(ticks()[2].style.width).toBe('16px')
     expect(ticks()[2].style.opacity).toBe('1')
-    expect(ticks()[1].style.width).toBe('10px')
-    expect(ticks()[3].style.width).toBe('10px')
-    expect(ticks()[0].style.width).toBe('4px')
+    expect(ticks()[1].style.width).toBe('11px')
+    expect(ticks()[3].style.width).toBe('11px')
+    expect(ticks()[0].style.width).toBe('6px')
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 
@@ -69,9 +69,12 @@ describe('TurnNavRail', () => {
       await vi.advanceTimersByTimeAsync(1)
     })
     const preview = screen.getByRole('tooltip')
-    expect(preview).toHaveTextContent('You')
-    expect(preview).toHaveTextContent('alpha question')
-    expect(preview).toHaveTextContent('Agent')
+    expect(preview).not.toHaveTextContent('You')
+    expect(preview).not.toHaveTextContent('Agent')
+    const question = preview.querySelector('p')
+    expect(question).toHaveTextContent('alpha question')
+    expect(question?.className).toContain('truncate')
+    expect(question?.className).toContain('font-semibold')
     expect(preview).toHaveTextContent('alpha answer')
 
     fireEvent.mouseLeave(buttons[0])
@@ -124,7 +127,9 @@ describe('TurnNavRail', () => {
       await vi.advanceTimersByTimeAsync(90)
     })
     const preview = screen.getByRole('tooltip')
-    expect(preview).toHaveTextContent(`${'问'.repeat(80)}...`)
+    const question = preview.querySelector('p')
+    expect(question).toHaveTextContent(long)
+    expect(question?.className).toContain('truncate')
     expect(preview).toHaveTextContent('No reply yet')
 
     fireEvent.click(screen.getByRole('button'))
@@ -148,7 +153,7 @@ describe('TurnNavRail', () => {
       await vi.advanceTimersByTimeAsync(90)
     })
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
-    expect(ticks()[0].style.width).toBe('4px')
+    expect(ticks()[0].style.width).toBe('6px')
 
     fireEvent.click(earlier)
     expect(onLoadEarlier).toHaveBeenCalledOnce()
