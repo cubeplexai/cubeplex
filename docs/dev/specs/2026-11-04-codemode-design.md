@@ -16,7 +16,7 @@
 - [Sandbox Background Execute](2026-09-18-sandbox-background-execute-design.md)
 - [Command Lifecycle](2026-09-20-command-lifecycle-design.md)
 - [Multi-Instance Run Control](2026-05-25-multi-instance-run-control-design.md)
-- [Prompt Cache Discipline](../../backend/docs/prompt-cache-discipline.md)
+- [Prompt Cache Discipline](../../../backend/docs/prompt-cache-discipline.md)
 
 ---
 
@@ -25,7 +25,7 @@
 The standard "Code Mode" design found in single-process desktop CLI tools (e.g. `pi.dev`, Docker Agent) treats code execution as an isolated in-memory "tool calling macro". In those environments, the model writes JavaScript inside a synthetic, memory-only QuickJS VM with zero filesystem access purely to avoid network round-trips when chaining API tool calls.
 
 In CubePlex, this design is both **redundant** and **architecturally counter-productive**:
-1. **OpenSandbox is Already the Isolation Boundary:** CubePlex already provisions an enterprise-grade, kernel-isolated **OpenSandbox container** for each workspace. Running a stripped QuickJS sandbox *inside* an already isolated container introduces fragile nested sandboxing ("sandbox-in-a-sandbox") while cutting the agent off from the rich Linux and Python runtime.
+1. **OpenSandbox is Already the Isolation Boundary:** CubePlex already provisions enterprise-grade, kernel-isolated **OpenSandbox containers** scoped to the user, conversation, or topic (sharing a user-level sandbox for personal chats and creator topics, conversation-level for group chats, and topic-level for dedicated topics). Running a stripped QuickJS sandbox *inside* an already isolated container introduces fragile nested sandboxing ("sandbox-in-a-sandbox") while cutting the agent off from the rich Linux and Python runtime.
 2. **Filesystem Access is Essential for Productivity Skills:** The agent already has unrestricted read/write/exec permissions in its workspace. Heavy production skills (`docx`, `pptx`, `xlsx`, `pdf`, data science with `pandas`/`matplotlib`) fundamentally rely on reading and writing real files on the persistent `/workspace` volume (PVC).
 3. **No Redundant Tool Concept:** Introducing a separate `codemode` tool causes cognitive conflict for the model (forcing it to choose between `execute` and `codemode`) and fragments execution pipelines.
 
@@ -59,6 +59,8 @@ Instead of introducing a new tool, **CubePlex empowers the existing sandbox envi
                       CUBEPLEX BACKEND
  ┌───────────────────────────────────────────────────────────┐
  │ Sandbox Service / Command Lifecycle                       │
+ │  - Before `sandbox.start`: generates `command_nonce`      │
+ │    and passes via `opts.envs` (NOT in set_run_env)        │
  │  - On `persist_running(command_id, provider_ref)`:        │
  │    Registers `command_nonce` in Redis (key: command_id)   │
  │    with TTL = command's `timeout_seconds`                 │
@@ -76,15 +78,16 @@ Instead of introducing a new tool, **CubePlex empowers the existing sandbox envi
  └─────────────────────────────▲─────────────────────────────┘
                                │
             mTLS (HTTPS)       │ Egress Addon mTLS Channel
-         to port 8443          │ (Existing cluster-internal FQDN;
+         to port 8443          │ (Uses addon's /etc/egress-client/ certs;
                                │  no new force_allow_hosts needed)
 ═════════════════════════════════════════════════════════════════
                  WORKSPACE OPENSANDBOX CONTAINER
  ┌───────────────────────────────────────────────────────────┐
  │ OpenSandbox Pod (Local Egress Addon Sidecar)              │
  │                                                           │
- │  - Egress addon holds client certificate for mTLS         │
- │  - `cubeplex_context` sends HTTP calls to local addon     │
+ │  - Egress addon listens on localhost (e.g. 127.0.0.1:8319)│
+ │    and forwards via stdlib http.client over mTLS          │
+ │  - `cubeplex_context` calls local addon HTTP endpoint     │
  │    with `X-CodeMode-Nonce: <command_nonce>`               │
  │                                                           │
  │ Python Script Execution (Python 3.12+):                   │
@@ -109,10 +112,12 @@ Instead of introducing a new tool, **CubePlex empowers the existing sandbox envi
 - **Dedicated Internal Listener (`ExchangeListener:8443`):** The bridge route is registered exclusively on the internal `ExchangeListener` application (listening on port 8443), under an internal prefix such as `/api/v1/internal/context/dispatch`:
   - Port 8443 is exposed only via internal Kubernetes ClusterIP Service; Ingress NEVER routes to 8443.
   - The listener requires valid client certificates (mTLS).
-- **Existing Egress Addon Routing:** The sandbox pod's local egress addon already holds the client certificate and connects to the exchange service using the existing cluster-internal FQDN.
-  - No new `force_allow_hosts` rules are required in `build_network_policy`.
-  - Existing sandboxes do not require recreation or policy patching.
-  - The `cubeplex_context` SDK communicates with the local egress addon via plaintext localhost HTTP, passing `X-CodeMode-Nonce`; the addon terminates the local call and forwards it over the established mTLS connection to the backend on port 8443.
+- **Local Egress Addon Forwarding Channel:**
+  - Client certificates reside exclusively in the egress sidecar at `/etc/egress-client/`. The sandbox application container does not mount these certificates and cannot connect directly to 8443 (`CERT_REQUIRED`).
+  - The existing egress addon (mitmproxy's `inject.py`) only intercepts outbound HTTP traffic matching `cbxref_` placeholders. It does not provide a local bridge endpoint today.
+  - An internal HTTP listener (e.g. `127.0.0.1:8319`) must be added to the egress addon process. The addon runs in mitmproxy's embedded Python runtime without third-party dependencies like `httpx`; this local forwarder must use the Python standard library (`http.client` / `urllib.request`).
+  - The in-sandbox `cubeplex_context` SDK issues standard plaintext HTTP calls to `127.0.0.1:8319` with `X-CodeMode-Nonce: <command_nonce>`. The addon terminates the local call and forwards it over the established mTLS connection to the backend `ExchangeListener` on port 8443.
+  - No new `force_allow_hosts` rules are required in `build_network_policy`, as the cluster-internal FQDN is already permitted.
 - **Dual-Factor Bridge Validation:** On every incoming call, the Bridge verifies:
   1. The client certificate CN corresponds to the verified caller sandbox pod.
   2. The nonce corresponds to an active `sandbox_commands` record whose `status` is currently `running`, and whose registered sandbox matches the certificate.
@@ -120,34 +125,38 @@ Instead of introducing a new tool, **CubePlex empowers the existing sandbox envi
 ### 3.2 Nonce Lifecycle Bound to Sandbox Commands
 The lifecycle of the command nonce is strictly aligned with the lifecycle of the sandbox command execution in `sandbox_commands`:
 
-1. **Generation & Persistence on `running`:**
-   - When a command enters the `running` state (hooked at `persist_running(command_id, provider_ref)`), the backend generates a cryptographically secure `command_nonce`.
-   - The nonce is written to cluster-shared Redis with `command_id` as the key.
+1. **Pre-Execution Generation:**
+   - The `command_nonce` MUST be generated **before** invoking `sandbox.start()`. Generating it inside `persist_running` / `on_started` is too late, as the container process is already launched.
+   - The nonce is passed exclusively through the command's own `opts.envs` (as `CUBEPLEX_COMMAND_NONCE`). It must **NEVER** be written to `set_run_env` (which persists sandbox-wide and would leak across subsequent commands).
+2. **Persistence on `running`:**
+   - In `persist_running(command_id, provider_ref)` (invoked by `on_started`), the pre-generated nonce is saved to cluster-shared Redis with `command_id` as the key.
    - The Redis record contains: `org_id`, `workspace_id`, `user_id`, and `provider_ref`.
    - **TTL:** The record TTL is set to the command's own `timeout_seconds` (the same duration as `monitor_deadline_at`), serving strictly as a fallback against missed cleanups.
-2. **Multi-Call Lifetime (Not Single-Use):**
+3. **Multi-Call Lifetime (Not Single-Use):**
    - The script may invoke `tools.*` and `llm.*` multiple times during its execution. All calls during that command execution share the same `command_nonce`. Single-use semantics are explicitly avoided.
-3. **Deletion on Command Terminalization:**
+4. **Deletion on Command Terminalization:**
    - The nonce is deleted from Redis when the command transitions to `exited` or `killed`.
    - The existing `_terminalize` logic covers process exit, user cancellation, command timeout, sandbox pause/deletion, and cleanup of residual `lifetime=run` commands.
-4. **Independent of Agent Turn Completion:**
+5. **Independent of Agent Turn Completion:**
    - The nonce is **NOT** deleted when `sandbox.start()` returns.
    - The nonce is **NOT** deleted when the 60-second execution result is handed off to a background task.
    - The nonce is **NOT** deleted when the current LLM run completes with `Done`.
    - Commands with `lifetime=conversation` (or background commands) continue executing after the LLM turn concludes and retain full bridge access as long as their status remains `running`.
-5. **Fail-Closed Lookup:**
+6. **Fail-Closed Lookup:**
    - Any lookup miss in Redis fails-closed with HTTP 401 Unauthorized across all backend replicas.
 
-### 3.3 Server-Side Default-Deny Tool Whitelist
-Processes sharing the container under UID 1000 can observe `/proc/<pid>/environ`. Therefore, the true security boundary is enforced strictly on the server-side Bridge:
-- **Whitelisted for Delegation (`allowed_callers: ["sandbox", "direct"]`):**
-  - All workspace-configured external MCP tools (e.g. `{slug}__{tool_name}`).
-  - Read-only native utility tools: `read`, `calculator`, `datetime`, `memory_search`.
-- **Forbidden from Delegation (`allowed_callers: ["direct"]`):**
-  - Interactive tools: `ask_user`.
-  - Process/shell execution: `execute`, `monitor`.
-  - Task and workspace control: `write_todos`, `persona_update`, `scheduled_tasks`, `subagent`.
-  - Any unauthorized tool call made via `cubeplex_context.tools` is immediately rejected with HTTP 403.
+### 3.3 Security Boundary & Residual Risk within Pod
+Processes sharing the container under UID 1000 (`cubeplex`) can inspect `/proc/<pid>/environ` of other running processes.
+- **Residual Exposure:** Any concurrently executing process under UID 1000 in the same sandbox pod can read `CUBEPLEX_COMMAND_NONCE` from `/proc/<pid>/environ` while the command is active, and can send requests to the local addon on `127.0.0.1:8319`. Because mTLS client certificates identify the pod rather than the specific process, mTLS cannot block other processes within the same pod.
+- **Server-Side Enforcement:** Consequently, command-level isolation within the same pod cannot be treated as an absolute boundary. The true security boundary is enforced at the server-side Bridge:
+  - **Whitelisted for Delegation (`allowed_callers: ["sandbox", "direct"]`):**
+    - All workspace-configured external MCP tools (e.g. `{slug}__{tool_name}`).
+    - Read-only native utility tools: `read`, `calculator`, `datetime`, `memory_search`.
+  - **Forbidden from Delegation (`allowed_callers: ["direct"]`):**
+    - Interactive tools: `ask_user`.
+    - Process/shell execution: `execute`, `monitor`.
+    - Task and workspace control: `write_todos`, `persona_update`, `scheduled_tasks`, `subagent`.
+  - Any unauthorized tool call made to the bridge is rejected with HTTP 403. Even if a sibling process in the same pod acquires the nonce, it cannot execute arbitrary host shell commands or access disallowed administrative tools.
 
 ---
 
@@ -305,7 +314,8 @@ When a script running inside `execute` invokes `cubeplex_context.tools` or `cube
 ### Phase 1: SDK & Exchange Bridge Service
 - Implement `cubeplex_context` Python client package with `tools` and `llm` interfaces.
 - Mount `/api/v1/internal/context/dispatch` on `ExchangeListener` (port 8443).
-- Implement Redis-backed command nonce lifecycle hooked to `persist_running` and `_terminalize`.
+- Implement local HTTP forwarding endpoint on the egress addon (in mitmproxy sidecar using standard library `http.client`), forwarding local requests over mTLS to the backend.
+- Generate `command_nonce` prior to `sandbox.start` (passed via `opts.envs`), persisting to Redis on `persist_running` and purging on `_terminalize`.
 - Validate mTLS client certificate CN and `sandbox_commands` status (`running`).
 - Pre-install `cubeplex_context` into the OpenSandbox container image.
 
