@@ -8,14 +8,16 @@
 
 **Issue:** [#724](https://github.com/cubeplexai/cubeplex/issues/724)
 
-**Goal:** Enable scripts running inside OpenSandbox containers to programmatically orchestrate workspace tools (MCP and approved native tools) and delegate sub-model prompts through a dedicated client package (`cubeplex_context`), without requiring a separate `codemode` tool, without nested QuickJS sandboxes, and without public port exposure.
+**Goal:** Enable scripts running inside OpenSandbox containers to programmatically orchestrate workspace tools (MCP and approved native tools) and delegate sub-model prompts through a dedicated client package (`cubeplex_context`), without requiring a separate `codemode` tool, without nested QuickJS sandboxes, and without public port exposure in production.
 
 **Architecture:**
 - **Execution Environment:** Code runs natively inside the existing OpenSandbox container (Python 3.12+), retaining normal read/write access to `/workspace` (PVC) and pre-installed document/data libraries (`docx`, `pptx`, `xlsx`, `pandas`).
-- **Communication Channel:** Calls from `from cubeplex_context import tools, llm` target a local plaintext HTTP listener on the pod's egress addon (`127.0.0.1:8319`). The addon (mitmproxy sidecar) uses its existing client certificate to forward requests over mTLS to the internal `ExchangeListener` on port 8443 (`/api/v1/internal/context/dispatch`). The bridge is never exposed on the public API port (8000) or through Ingress.
-- **Authentication & Nonce Lifecycle:** The backend generates an ephemeral `command_nonce` before `sandbox.start` and persists it to cluster-shared Redis keyed by `command_id` with a TTL equal to the command's own `timeout_seconds`. The nonce is passed via command `opts.envs` (never in `set_run_env`), accepted by the Bridge in both `starting` and `running` states, backfilled with `provider_ref` on `persist_running`, and immediately purged on command terminalization (`_terminalize`) or startup failure (`_persist_start_failed`).
+- **Communication Channel:** Calls from `from cubeplex_context import tools, llm` target a local plaintext HTTP listener on the pod's egress addon (`127.0.0.1:8319`). The addon (in `deploy/kubernetes/charts/cubeplex/files/egress/inject.py`) forwards requests via standard library `http.client` using `EGRESS_EXCHANGE_URL`:
+  - In `mtls` mode (production): forwards over mTLS (using `/etc/egress-client/` client certs) to internal `ExchangeListener` on port 8443 (`/api/v1/internal/context/dispatch`). The bridge is never exposed on the public API port (8000) or through Ingress.
+  - In `dev` mode (local & tests): the dispatch router is mounted directly on the public app using existing sidecar dev authentication (`x-egress-sandbox-id` + shared secret).
+- **Authentication & Nonce Lifecycle:** The backend generates an ephemeral `command_nonce` before `sandbox.start` and persists it to cluster-shared Redis keyed by `command_id` after `_persist_reserve` commits, with a TTL equal to the command's own `timeout_seconds`. The nonce is passed via command `opts.envs` (never in `set_run_env`), accepted by the Bridge in both `starting` and `running` states, backfilled with `provider_ref` on `persist_running`, and immediately purged when the command terminates (`record_observation`, `mark_terminal`, background coordinator) or on startup failure (`_persist_start_failed`).
 - **Prompt Cache Discipline & Discovery:** System prompt prefixes remain byte-stable across conversation turns by including only fixed SDK usage instructions. Dynamic tool discovery is handled via runtime reflection (`tools.list()`, `tools.describe()`) and `/workspace/.codemode/tools.pyi` synced to running sandboxes via `Sandbox.upload`.
-- **Accounting & Anti-Recursion:** In-sandbox `llm.*` queries are strictly single-turn, non-agentic completions (no tool access, depth capped at 1, max 4 concurrent calls). Tokens are tracked as isolated `llm_call` records linked by `parent_run_id` without inflating the parent conversation's `context_tokens`.
+- **Accounting & Anti-Recursion:** In-sandbox `llm.*` queries are strictly single-turn, non-agentic completions (no tool access, depth capped at 1). Concurrency is capped at 4 using a Redis-backed distributed semaphore. Tokens are tracked as isolated `BillingEvent` and `LlmBillingEvent` records linked by `parent_run_id` without inflating the parent conversation's `turn_usage` or `context_tokens`.
 
 **Tech stack:** Python 3.12+, FastAPI/Starlette, mitmproxy (egress addon), Redis, PostgreSQL/SQLAlchemy, OpenSandbox SDK, Next.js / React 19 (Chat UI).
 
@@ -27,19 +29,19 @@ The delivery is structured in three strictly ordered milestones to ensure transp
 
 1. **Phase 1: In-Sandbox SDK Package, Egress Addon Forwarder, and Exchange Bridge**
    - Package `cubeplex_context` client library.
-   - Add local HTTP listener to egress addon (`deploy/kubernetes/egress-bundle/` & `deploy/images/`).
-   - Implement `/api/v1/internal/context/dispatch` endpoint on `ExchangeListener` (port 8443).
-   - Hook pre-start nonce generation, Redis persistence, `_terminalize`, and `_persist_start_failed` cleanup in `SandboxService` / `RunManager`.
-   - Implement dual-factor validation (mTLS CN + Redis nonce status check) and default-deny tool whitelist.
+   - Add local HTTP listener (`127.0.0.1:8319`) to `deploy/kubernetes/charts/cubeplex/files/egress/inject.py` using standard library `http.client` targeting `EGRESS_EXCHANGE_URL`, and fix the dangling symlink in `deploy/kubernetes/egress-bundle/addon/inject.py`.
+   - Implement dispatch router in `build_exchange_app` (`backend/cubeplex/sandbox_env/exchange_listener.py`); mount on public app in `dev` mode, on port 8443 in `mtls` mode.
+   - Hook pre-start nonce generation and Redis persistence in `backend/cubeplex/middleware/sandbox.py` (`_persist_reserve`), and hook nonce deletion in terminalization functions (`record_observation`, `mark_terminal`, `_persist_start_failed`, `_terminalize`).
+   - Implement dual-factor validation (mTLS CN / dev secret + Redis command status check) and a strict default-deny tool whitelist.
 2. **Phase 2: Prompt Cache Discipline, Tool Stubs Synchronization, and Runtime Discovery**
    - Add byte-stable SDK instruction to workspace agent system prompt.
    - Implement `tools.pyi` generator and sync pipeline via `Sandbox.upload` on sandbox startup / MCP catalog refresh.
    - Implement `cubeplex_context.tools.list()` and `describe()` reflection APIs.
 3. **Phase 3: Sub-Model Delegation, Token Accounting, and UI Observability**
    - Connect `cubeplex_context.llm.generate()` and `classify()` to workspace model presets via Bridge.
-   - Enforce anti-recursion, concurrency limit (4), and create separate `llm_call` rows with `parent_run_id`.
-   - Track financial costs via `billing_llm_events`.
-   - Update `agents/stream.py` and Chat UI to render nested execution steps within command execution cards.
+   - Enforce anti-recursion, Redis-backed concurrency limit (4), and insert `billing_events` / `billing_llm_events` rows with `parent_run_id` set to `sandbox_commands.run_id`.
+   - Publish nested execution progress events to the run stream keyed by `SandboxCommand.tool_call_id`.
+   - Update Chat UI command cards to render nested execution trees.
 
 ---
 
@@ -49,16 +51,18 @@ The delivery is structured in three strictly ordered milestones to ensure transp
 
 - **Create** `packages/cubeplex-context/pyproject.toml` and `packages/cubeplex-context/cubeplex_context/__init__.py`, `_client.py`, `tools.py`, `llm.py`: lightweight in-sandbox SDK client.
 - **Modify** `deploy/images/sandbox/Dockerfile` and `deploy/images/sandbox/VERSION`: install `cubeplex_context` into the base sandbox image.
-- **Modify** `deploy/kubernetes/egress-bundle/addon/inject.py` (and corresponding container build scripts): add local HTTP listener on `127.0.0.1:8319` using Python standard library `http.server` / `http.client` to forward requests with `X-CodeMode-Nonce` over mTLS to backend port 8443.
-- **Modify** `backend/cubeplex/sandbox/exchange.py` (or `ExchangeListener` definition): register route `/api/v1/internal/context/dispatch`.
-- **Modify** `backend/cubeplex/services/sandbox.py` and `backend/cubeplex/sandbox/manager.py`:
-  - Generate `command_nonce` prior to `sandbox.start()`.
-  - Pass `CUBEPLEX_COMMAND_NONCE` via command `opts.envs`.
-  - Save nonce record to Redis before calling `sandbox.start()`.
-  - Update Redis record in `persist_running` to backfill `provider_ref`.
-  - Clean up nonce in `_terminalize` and `_persist_start_failed`.
-- **Create** `backend/cubeplex/api/routes/v1/_internal_context.py` (or handler module under `backend/cubeplex/sandbox/`): dispatch handler implementing mTLS CN verification, Redis command status check (`starting` or `running`), and tool execution.
-- **Add** `backend/tests/unit/sandbox/test_context_bridge.py`, `backend/tests/unit/sandbox/test_command_nonce_lifecycle.py`, and `packages/cubeplex-context/tests/test_client.py`.
+- **Modify** `deploy/kubernetes/charts/cubeplex/files/egress/inject.py`: add local HTTP listener on `127.0.0.1:8319` using standard library `http.server` / `http.client` to forward requests with `X-CodeMode-Nonce` to `EGRESS_EXCHANGE_URL`.
+- **Fix Symlink** `deploy/kubernetes/egress-bundle/addon/inject.py`: point correctly to `../../charts/cubeplex/files/egress/inject.py`.
+- **Modify** `backend/cubeplex/sandbox_env/exchange_listener.py`: register dispatch router in `build_exchange_app`.
+- **Modify** `backend/cubeplex/app.py`: mount dispatch router on the main FastAPI application when `egress_exchange.auth.mode == "dev"`.
+- **Create** `backend/cubeplex/sandbox_env/context_bridge.py`: handler implementing mTLS CN / dev auth validation, Redis nonce status check (`starting` or `running`), and default-deny tool execution.
+- **Modify** `backend/cubeplex/middleware/sandbox.py`:
+  - In `_persist_reserve`: write Redis nonce record under `reservation.command.id` after row commit.
+  - In `sandbox.start(...)` call sites (`execute` and `monitor`): pass `envs={"CUBEPLEX_COMMAND_NONCE": ..., "CUBEPLEX_BRIDGE_URL": "http://127.0.0.1:8319"}` into `opts.envs`.
+  - In `persist_running`: backfill `provider_ref` on the Redis record.
+  - In terminal state transitions (`record_observation`, `mark_terminal`, `_persist_start_failed`, `_persist_killed`, `_terminalize`): delete `codemode:nonce:{command_id}` from Redis.
+- **Add** `packages/cubeplex-context/tests/test_client.py` (pure unit tests for SDK client).
+- **Add** `backend/tests/e2e/test_context_bridge.py` and `backend/tests/e2e/test_command_nonce_lifecycle.py` (E2E tests covering routes, Redis, DB status, and auth modes).
 
 ### Interfaces
 
@@ -92,34 +96,46 @@ class ContextDispatchResponse(BaseModel):
 ### Core Logic
 
 1. **Pre-Execution Generation & Redis Persistence:**
-   - Before `sandbox.start(command, opts, ...)`:
-     - Generate `command_nonce = secrets.token_urlsafe(32)`.
-     - Inject `CUBEPLEX_COMMAND_NONCE` and `CUBEPLEX_BRIDGE_URL=http://127.0.0.1:8319` into `opts.envs`.
-     - Write Redis key `codemode:nonce:{command_id}` with status `starting` and TTL set to `command.timeout_seconds`.
-2. **Persistence & Lifecycle Hooks:**
-   - In `on_started` / `persist_running(command_id, provider_ref)`: update Redis entry setting `status="running"` and `provider_ref=provider_ref`.
-   - In `_terminalize(command_id, ...)`: `await redis.delete(f"codemode:nonce:{command_id}")`.
-   - In `_persist_start_failed(command_id, ...)`: immediately call `await redis.delete(f"codemode:nonce:{command_id}")` to eliminate the 90-second orphan exposure window.
+   - In `backend/cubeplex/middleware/sandbox.py`:
+     - Before invoking `sandbox.start`, generate `command_nonce = secrets.token_urlsafe(32)`.
+     - After `BackgroundTaskService.reserve_task` commits in `_persist_reserve`, write Redis key `codemode:nonce:{reservation.command.id}` with `status="starting"` and TTL set to `command.timeout_seconds`.
+     - Pass `CUBEPLEX_COMMAND_NONCE` and `CUBEPLEX_BRIDGE_URL=http://127.0.0.1:8319` via `envs` into `sandbox.start(command, opts, envs=...)`.
+2. **Persistence & Lifecycle Cleanup:**
+   - In `persist_running(command_id, provider_ref)`: update Redis entry setting `status="running"` and `provider_ref=provider_ref`.
+   - In `_persist_start_failed`: immediately call `await redis.delete(f"codemode:nonce:{command_id}")` to eliminate the ~90-second orphan exposure window.
+   - In terminal transitions (`record_observation`, `_persist_foreground`, `_persist_background_terminal`, `_persist_timed_out`, `_persist_killed` -> `mark_terminal`, and `BackgroundTaskCoordinator`): delete `f"codemode:nonce:{command_id}"` from Redis.
 3. **Egress Addon Local Forwarder:**
-   - In mitmproxy addon `inject.py`, start an async/threaded `http.server.HTTPServer` on `127.0.0.1:8319`.
-   - On incoming HTTP POST `/v1/dispatch`:
-     - Read incoming headers and body (forwarding `X-CodeMode-Nonce`).
-     - Use `http.client.HTTPSConnection` targeting the backend exchange service host (`ExchangeListener` on port 8443) using client certs in `/etc/egress-client/`.
-     - Return upstream response directly to the local client.
-4. **Bridge Security Gates:**
-   - Verify mTLS client cert subject contains valid sandbox identity matching the registered sandbox for that command.
-   - Extract `X-CodeMode-Nonce` from request header; fetch Redis record. If missing, fail-closed with HTTP 401.
-   - Verify matching `sandbox_commands` status is `starting` or `running`.
-   - Check tool name against `allowed_callers`: reject `execute`, `monitor`, `ask_user`, `write_todos`, `subagent`, `persona_update` with HTTP 403.
-   - Execute authorized tool through existing runtime dispatcher and return result.
+   - In `deploy/kubernetes/charts/cubeplex/files/egress/inject.py`:
+     - Start an internal HTTP server on `127.0.0.1:8319`.
+     - Read target from environment variable `EGRESS_EXCHANGE_URL` (avoiding hardcoded port 8443).
+     - In `mtls` mode, forward using standard library `http.client.HTTPSConnection` with client certs in `/etc/egress-client/`.
+     - In `dev` mode, forward with `X-Egress-Sandbox-Id` and shared secret headers.
+     - Forward incoming `X-CodeMode-Nonce` header and body; stream upstream response back to local client.
+4. **Bridge Security & Default-Deny Whitelist:**
+   - Validate caller identity:
+     - In `mtls` mode: verify client cert CN matches registered sandbox pod ID.
+     - In `dev` mode: verify dev sidecar auth header.
+   - Fetch `codemode:nonce:{command_id}` from Redis; verify nonce matches `X-CodeMode-Nonce`. If missing or mismatched, fail-closed with HTTP 401.
+   - Verify `sandbox_commands` record status is currently `starting` or `running`.
+   - **Strict Default-Deny Whitelist:**
+     - Whitelisted: external MCP tools named `{slug}__{tool_name}` from `slugify_for_namespace`, plus exactly four native tools: `read`, `calculator`, `datetime`, and `memory_search`.
+     - Forbidden: all other tools (including `write`, `edit`, `execute`, `monitor`, `kill_execute`, `scheduled_tasks`, `save_artifact`, `present_file`, `generate_image`, `create_trigger`, `create_scheduled_task`, `load_skill`, `show_widget`, `persona_get`, `persona_update`, `sandbox_config`, `view_images`, `ask_user`, `write_todos`, `subagent`).
+     - Any non-whitelisted tool call is rejected with HTTP 403 Forbidden.
 
 ### Tests
 
-- Nonce generation and environment passing in `opts.envs` (verify `set_run_env` is untouched).
-- Redis record write on pre-start, status update on `persist_running`, and deletion on `_terminalize`.
-- Explicit test for `_persist_start_failed` verifying immediate nonce deletion.
-- Bridge authentication unit tests: valid nonce + valid cert -> 200; invalid/expired nonce -> 401; cert mismatch -> 403.
-- Whitelist enforcement: whitelisted MCP tool succeeds; disallowed native tools (`execute`, `ask_user`) rejected with 403.
+- **Unit tests (`packages/cubeplex-context/tests/`):**
+  - SDK client serialization, error handling, and parameter encoding without backend dependencies.
+- **E2E tests (`backend/tests/e2e/`):**
+  - `test_command_nonce_lifecycle.py`: verify Redis key created on reserve, updated on `persist_running`, deleted on `mark_terminal` and `_persist_start_failed`, and surviving across agent run `Done`.
+  - `test_context_bridge.py`:
+    - Valid nonce + valid caller -> 200.
+    - Expired/missing nonce -> 401.
+    - Sandbox ID mismatch -> 403.
+    - Whitelisted MCP tool (`linear__list_issues`) -> 200.
+    - Whitelisted native tool (`read`) -> 200.
+    - Disallowed native tools (`write`, `scheduled_tasks`, `execute`, `ask_user`) -> 403.
+    - Dev mode authentication roundtrip vs mTLS mode verification.
 
 ---
 
@@ -127,11 +143,12 @@ class ContextDispatchResponse(BaseModel):
 
 ### Files
 
-- **Modify** `backend/cubeplex/prompts/` (or agent system prompt builder in `cubeplex/streams/run_manager.py`): add byte-stable SDK instruction block.
+- **Modify** `backend/cubeplex/prompts/` (agent system prompt builder in `cubeplex/streams/run_manager.py`): add byte-stable SDK instruction block.
 - **Create** `backend/cubeplex/services/stub_generator.py`: generate `.pyi` type definitions for configured workspace tools.
-- **Modify** `backend/cubeplex/services/sandbox.py` (or post-start lifecycle): trigger `Sandbox.upload` to write `/workspace/.codemode/tools.pyi` once sandbox is running.
+- **Modify** `backend/cubeplex/middleware/sandbox.py` (post-start / bootstrap hooks): synchronize `/workspace/.codemode/tools.pyi` via `Sandbox.upload` once container is running.
 - **Extend** `packages/cubeplex-context/cubeplex_context/tools.py`: implement `tools.list()`, `tools.describe(tool_name)`, and dynamic attribute lookup.
-- **Add** `backend/tests/unit/services/test_stub_generator.py` and `packages/cubeplex-context/tests/test_tool_discovery.py`.
+- **Add** `backend/tests/unit/services/test_stub_generator.py` (pure unit test for AST/stub generation).
+- **Add** `backend/tests/e2e/test_tool_discovery.py` (E2E test for stub upload and bridge reflection).
 
 ### Interfaces
 
@@ -163,7 +180,7 @@ class ToolCatalog:
 2. **Stub File Generation (`/workspace/.codemode/tools.pyi`):**
    - Translate active MCP tools and whitelisted native tools into typed Python function stubs with docstrings.
    - Use `{slug}__{tool_name}` runtime format derived from `slugify_for_namespace`.
-   - When a sandbox instance is initialized or when MCP connectors are enabled/disabled, use `Sandbox.upload` to upload the generated stubs to `/workspace/.codemode/tools.pyi`.
+   - Because the backend API does not mount workspace PVCs, write the file via `Sandbox.upload` after container startup or on connector catalog updates.
 3. **In-Sandbox Reflection API:**
    - `cubeplex_context.tools.list()` and `tools.describe()` dispatch requests to the Bridge endpoint with `action="tool_list"` / `action="tool_describe"`.
    - The Bridge queries the active workspace tool registry and returns schemas without LLM round trips.
@@ -181,13 +198,13 @@ class ToolCatalog:
 
 ### Files
 
-- **Modify** `backend/cubeplex/api/routes/v1/_internal_context.py` (Bridge handler): handle `action="llm_generate"` and `action="llm_classify"`.
-- **Modify** `backend/cubeplex/models/llm_call.py` (or existing DB schema): link sub-model calls via `parent_run_id`.
-- **Modify** `backend/cubeplex/billing/` (or billing recorder): record tokens via `billing_llm_events` pointing to `parent_run_id`.
-- **Modify** `backend/cubeplex/agents/stream.py`: handle nested tool and sub-model execution events.
+- **Modify** `backend/cubeplex/sandbox_env/context_bridge.py`: handle `action="llm_generate"` and `action="llm_classify"`.
+- **Modify** `backend/cubeplex/repositories/billing.py`: record sub-model tokens via `insert_llm_event`.
+- **Modify** `backend/cubeplex/streams/run_events.py` and run stream publishers: publish nested execution events tagged with `SandboxCommand.tool_call_id`.
 - **Modify** `frontend/packages/core/src/types/events.ts`: declare nested execution event shapes.
 - **Modify** `frontend/packages/web/components/chat/`: render nested progress steps within the command execution card.
-- **Add** `backend/tests/unit/sandbox/test_submodel_delegation.py` and `frontend/packages/web/__tests__/components/NestedToolActivity.test.tsx`.
+- **Add** `backend/tests/e2e/test_submodel_delegation.py` (E2E test for LLM dispatch, Redis concurrency, and billing rows).
+- **Add** `frontend/packages/web/__tests__/components/NestedToolActivity.test.tsx`.
 
 ### Interfaces
 
@@ -216,32 +233,34 @@ class LLMClient:
 
 ### Core Logic
 
-1. **Anti-Recursion & Concurrency Bounds:**
-   - Bridge enforces non-agentic completions: sub-calls directly invoke provider completion APIs without tool schemas or agent loops.
-   - An `asyncio.Semaphore(4)` per command session limits concurrent sub-calls to 4.
-   - Sub-calls cannot spawn sub-agents or re-invoke code execution (depth strictly 1).
-2. **Isolated Token Accounting:**
-   - Tokens consumed by `llm.generate()` / `llm.classify()` are recorded in a new `llm_call` row with `parent_run_id` set to the active agent run ID.
-   - Tokens are NOT merged into the parent run's `turn_usage` or `context_tokens` (preventing artificial inflation of the conversation context token counter).
-   - Billing events (`billing_events` / `billing_llm_events`) are logged with `parent_run_id` for accurate organization cost attribution.
+1. **Anti-Recursion & Distributed Concurrency Ceiling:**
+   - Bridge enforces non-agentic completions: sub-calls directly invoke provider completion APIs without tool schemas or agent loops. Depth is strictly capped at 1.
+   - Enforce concurrency using cluster-shared Redis (e.g. atomic counter on `codemode:concurrency:{command_id}` with max 4). Requests exceeding 4 wait or fail with 429 across multi-replica backend pods.
+2. **Isolated Token Accounting & Billing:**
+   - Sub-model tokens are NOT merged into parent run's `turn_usage` or `context_tokens` (preventing artificial inflation of the conversation's active context window).
+   - The Bridge reads `SandboxCommand.run_id` (from `TaskSpec.originating_run_id`).
+   - The Bridge calls `BillingRepository.insert_llm_event` to create a `BillingEvent` (`event_type="llm_call"`) and an `LlmBillingEvent` with `parent_run_id` set to the command's originating run ID.
 3. **Observability & Nested UI Stream:**
-   - When the Bridge begins executing a delegated tool or sub-model query, it emits a nested progress event tagged with `parent_tool_call_id` (the ID of the active `execute` command).
-   - The Chat UI renders an expandable nested execution tree inside the command card showing sub-tool and model calls with execution duration.
+   - The Bridge receives requests in a separate HTTP request outside the agent process. It publishes nested progress events to the conversation run stream in Redis, tagged with `SandboxCommand.tool_call_id`.
+   - Chat UI command cards join on that tool-call ID and render an expandable nested execution tree showing sub-tool calls and sub-model queries with durations.
 
 ### Tests
 
-- Concurrency enforcement: issuing 8 concurrent `llm.generate()` calls respects the semaphore of 4.
-- Token accounting test: parent run's context tokens remain unchanged while child `llm_call` and `billing_llm_events` rows are created.
-- Provider sub-call error handling: upstream 429/timeout cleanly surfaces back to the in-sandbox SDK without terminating the host agent run.
+- Distributed concurrency enforcement: issuing concurrent `llm.generate()` calls across backend replicas respects the hard limit of 4.
+- Token accounting E2E test: parent run's context tokens remain unchanged while `billing_events` and `billing_llm_events` rows are inserted with `parent_run_id`.
+- Provider sub-call error handling: upstream 429/timeout surfaces cleanly to SDK.
 - Frontend rendering test: command card successfully folds and displays nested sub-tool steps.
 
 ---
 
 ## 5. Security & Edge Case Checklist
 
-- [ ] **No Port 8000 Exposure:** Bridge route is exclusively on `ExchangeListener:8443` and not mounted on public routers.
+- [ ] **Port Isolation:** Bridge route is registered in `build_exchange_app` (port 8443 in `mtls` mode, public app in `dev` mode) and never exposed on public port 8000 in production.
 - [ ] **No Egress Policy Drift:** Uses existing cluster FQDN without modifying `build_network_policy`.
-- [ ] **Process Liveness Gap Closed:** Nonce generated before `sandbox.start`, Redis written before process launches, accepted in `starting` & `running`, and immediately deleted on `_persist_start_failed`.
+- [ ] **Correct Addon Path:** Local HTTP forwarder added to `deploy/kubernetes/charts/cubeplex/files/egress/inject.py` using stdlib `http.client` targeting `EGRESS_EXCHANGE_URL`; broken symlink fixed.
+- [ ] **Accurate Lifecycle Hooks:** Nonce generated before `sandbox.start`, persisted after `_persist_reserve`, deleted in `mark_terminal` (`record_observation`, terminal transitions) and `_persist_start_failed`.
 - [ ] **Multi-Turn Command Support:** Background and `lifetime=conversation` commands continue executing across agent turns without early nonce deletion.
-- [ ] **Same-UID Container Risk Acknowledged:** Server-side Bridge Default-Deny whitelist is the authoritative security boundary against same-container UID 1000 processes.
+- [ ] **Same-UID Container Risk Acknowledged:** Sibling UID 1000 processes stealing the nonce can access whitelisted MCP tools and `llm.*` while the command is running; the Default-Deny whitelist only prevents re-executing host shell/admin tools.
 - [ ] **Prompt Cache Byte Stability:** System prompt remains byte-identical across conversation turns; tool stubs maintained via `/workspace/.codemode/tools.pyi` and reflection APIs.
+- [ ] **Correct Accounting:** Token usage recorded via `BillingRepository.insert_llm_event` with `parent_run_id`, never merged into parent `turn_usage`.
+- [ ] **E2E Test Placement:** All tests touching FastAPI routes, database `AsyncSession`, Alembic, or Redis are placed in `backend/tests/e2e/`.
