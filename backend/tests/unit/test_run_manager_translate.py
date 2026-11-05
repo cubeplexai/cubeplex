@@ -11,6 +11,28 @@ def test_injected_message_dict_becomes_typed_event():
     assert evt.data == {"content": "do X", "steer_id": "s1"}
 
 
+def test_injected_message_dict_forwards_background_notice():
+    evt = cubeloop_dict_to_agent_event(
+        {
+            "type": "injected_message",
+            "content": "Background task result:\n{}",
+            "steer_id": "bge-notice",
+            "source": "background_task",
+            "notice_id": "bge-notice",
+            "execution_generation": 3,
+        },
+        "2026-05-25T00:00:00+00:00",
+    )
+    assert isinstance(evt, InjectedMessageEvent)
+    assert evt.data == {
+        "content": "Background task result:\n{}",
+        "steer_id": "bge-notice",
+        "source": "background_task",
+        "notice_id": "bge-notice",
+        "execution_generation": 3,
+    }
+
+
 def test_injected_message_dict_forwards_group_chat_sender():
     evt = cubeloop_dict_to_agent_event(
         {

@@ -576,6 +576,14 @@ def cubeloop_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEven
             "content": d.get("content", ""),
             "steer_id": d.get("steer_id", ""),
         }
+        if d.get("source") == "background_task":
+            injected_data["source"] = "background_task"
+            notice_id = d.get("notice_id")
+            if isinstance(notice_id, str) and notice_id:
+                injected_data["notice_id"] = notice_id
+            generation = d.get("execution_generation")
+            if isinstance(generation, int):
+                injected_data["execution_generation"] = generation
         if d.get("sender_user_id") and d.get("sender_display_name"):
             injected_data["sender_user_id"] = d["sender_user_id"]
             injected_data["sender_display_name"] = d["sender_display_name"]

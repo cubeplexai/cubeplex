@@ -107,6 +107,8 @@ export function buildTurnNavItems(
   for (const msg of messages) {
     if (msg.role === 'user') {
       if (msg.metadata?.synthetic === true) continue
+      // A delivered background result is a card in the transcript, not a turn.
+      if (msg.metadata?.source === 'background_task') continue
       flush()
       current = {
         id: msg.id,

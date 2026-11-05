@@ -18,7 +18,6 @@ import {
 import type {
   AssistantMessage as AssistantMessageType,
   Message,
-  BackgroundTaskEvent,
   SubagentSummary,
   TurnUsage,
 } from '@cubeplex/core'
@@ -31,7 +30,7 @@ import { AskUserCard } from './AskUserCard'
 import { FailoverBanner } from './FailoverBanner'
 import { RetryBanner } from './RetryBanner'
 import { CompactionMarker } from './CompactionMarker'
-import { BackgroundTaskEventItem, BackgroundTaskEventsLoadMore } from './BackgroundTaskEvents'
+import { BackgroundTaskEventItem } from './BackgroundTaskEvents'
 import { MessageAttachments } from './MessageAttachments'
 import { TurnNavRail } from './TurnNavRail'
 import type { FailoverEvent, RetryEvent } from '@/lib/types/events'
@@ -42,6 +41,7 @@ import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
 import { ASSISTANT_CONTENT_MAX_CLASS, CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
 import { lastTurnUsageByRun } from '@/lib/cost/helpers'
+import { backgroundResultFromMessage } from '@/lib/backgroundResultMessage'
 import { groupAssistantRuns } from '@/lib/foldToolActivity'
 import {
   buildTurnNavItems,
@@ -58,7 +58,6 @@ interface MessageListProps {
 // Module-level stable empty array — avoids breaking Zustand's `===` selector
 // equality when the failover slice is missing/empty.
 const EMPTY_FAILOVER_EVENTS: FailoverEvent[] = []
-const EMPTY_BACKGROUND_EVENTS: BackgroundTaskEvent[] = []
 
 function turnIdFor(
   turnIdByMessage: ReadonlyMap<string, string>,
@@ -298,9 +297,6 @@ export function MessageList({ conversationId }: MessageListProps) {
   const retryEvent = useMessageStore(
     (s) => (s.retryEvents[conversationId] as RetryEvent | null | undefined) ?? null,
   )
-  const backgroundEvents = useMessageStore(
-    (s) => s.backgroundEvents[conversationId] ?? EMPTY_BACKGROUND_EVENTS,
-  )
   const { workspaceId } = useWorkspaceContext()
   // Fork action needs to know whether this is a group chat (the backend
   // rejects forks on group chats, and we render the disabled-state UI for
@@ -512,32 +508,6 @@ export function MessageList({ conversationId }: MessageListProps) {
     [messages, mainStream?.text],
   )
   const turnIdByMessage = useMemo(() => indexTurnMessages(turns), [turns])
-
-  const { backgroundEventsByMessageId, trailingBackgroundEvents } = useMemo(() => {
-    const orderedEvents = [...backgroundEvents].sort(
-      (left, right) =>
-        left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id),
-    )
-    const byMessageId = new Map<string, BackgroundTaskEvent[]>()
-    let eventIndex = 0
-    for (const message of messages ?? []) {
-      const messageTime = msgTimestampMs(message)
-      if (messageTime <= 0) continue
-      const before: BackgroundTaskEvent[] = []
-      while (eventIndex < orderedEvents.length) {
-        const event = orderedEvents[eventIndex]
-        const eventTime = Date.parse(event.created_at)
-        if (Number.isNaN(eventTime) || eventTime > messageTime) break
-        before.push(event)
-        eventIndex += 1
-      }
-      if (before.length > 0) byMessageId.set(message.id, before)
-    }
-    return {
-      backgroundEventsByMessageId: byMessageId,
-      trailingBackgroundEvents: orderedEvents.slice(eventIndex),
-    }
-  }, [backgroundEvents, messages])
 
   // One run's assistant rows are separate checkpoint messages. Fold them back
   // into the single activity the live stream showed, so refresh stays collapsed.
@@ -752,15 +722,6 @@ export function MessageList({ conversationId }: MessageListProps) {
                 )
                 return (
                   <Fragment key={row.messages[0].id}>
-                    {row.messages.flatMap((message) =>
-                      (backgroundEventsByMessageId.get(message.id) ?? []).map((event) => (
-                        <BackgroundTaskEventItem
-                          key={`background:${event.id}`}
-                          event={event}
-                          conversationId={conversationId}
-                        />
-                      )),
-                    )}
                     {row.messages.some((message) => message.id === bannersBeforeHistoryId) && (
                       <ModelChainBanners
                         retryEvent={retryEvent}
@@ -812,15 +773,9 @@ export function MessageList({ conversationId }: MessageListProps) {
                 )
               }
               const msg = row.message
+              const backgroundResult = msg.role === 'user' ? backgroundResultFromMessage(msg) : null
               return (
                 <Fragment key={msg.id}>
-                  {(backgroundEventsByMessageId.get(msg.id) ?? []).map((event) => (
-                    <BackgroundTaskEventItem
-                      key={`background:${event.id}`}
-                      event={event}
-                      conversationId={conversationId}
-                    />
-                  ))}
                   {msg.id === bannersBeforeHistoryId && (
                     <ModelChainBanners
                       retryEvent={retryEvent}
@@ -848,45 +803,44 @@ export function MessageList({ conversationId }: MessageListProps) {
                           }
                         />
                       )}
-                    {msg.role === 'user' && msg.metadata?.synthetic !== true && (
-                      <>
-                        {/* Sender identity is stamped on every user message (incl. 1:1)
+                    {backgroundResult && (
+                      <BackgroundTaskEventItem
+                        event={backgroundResult}
+                        conversationId={conversationId}
+                      />
+                    )}
+                    {msg.role === 'user' &&
+                      msg.metadata?.synthetic !== true &&
+                      backgroundResult === null && (
+                        <>
+                          {/* Sender identity is stamped on every user message (incl. 1:1)
                     so a 1:1→group conversion attributes past messages, but the
                     badge only shows in group chats. */}
-                        {isGroupChat &&
-                          msg.metadata?.sender_display_name &&
-                          msg.metadata?.sender_user_id && (
-                            <SenderBadge
-                              userId={msg.metadata.sender_user_id}
-                              displayName={msg.metadata.sender_display_name}
+                          {isGroupChat &&
+                            msg.metadata?.sender_display_name &&
+                            msg.metadata?.sender_user_id && (
+                              <SenderBadge
+                                userId={msg.metadata.sender_user_id}
+                                displayName={msg.metadata.sender_display_name}
+                              />
+                            )}
+                          {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
+                            <MessageAttachments
+                              attachments={msg.metadata.attachments}
+                              conversationId={conversationId}
                             />
                           )}
-                        {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
-                          <MessageAttachments
-                            attachments={msg.metadata.attachments}
+                          <UserMessage
+                            content={getTextContent(msg)}
+                            timestamp={msg.timestamp}
                             conversationId={conversationId}
                           />
-                        )}
-                        <UserMessage
-                          content={getTextContent(msg)}
-                          timestamp={msg.timestamp}
-                          conversationId={conversationId}
-                        />
-                      </>
-                    )}
+                        </>
+                      )}
                   </div>
                 </Fragment>
               )
             })}
-
-            {trailingBackgroundEvents.map((event) => (
-              <BackgroundTaskEventItem
-                key={`background:${event.id}`}
-                event={event}
-                conversationId={conversationId}
-              />
-            ))}
-            <BackgroundTaskEventsLoadMore conversationId={conversationId} />
 
             {bannersBeforeHistoryId == null && (
               <ModelChainBanners

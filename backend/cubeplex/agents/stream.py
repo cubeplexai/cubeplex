@@ -582,11 +582,26 @@ def _convert_terminal_agent_event(evt: AgentEvent) -> list[dict[str, Any]]:
 
     if isinstance(evt, MessageEndEvent) and isinstance(evt.message, UserMessage):
         meta = evt.message.metadata
+        text = "".join(c.text for c in evt.message.content if isinstance(c, TextContent))
         if meta.get("source") == "background_task":
-            return []
+            # The checkpoint row is model input. The client draws a result card
+            # from this event instead of a user bubble.
+            notice_id = meta.get("notice_id")
+            if not isinstance(notice_id, str) or not notice_id:
+                return []
+            injected_notice: dict[str, Any] = {
+                "type": "injected_message",
+                "content": text,
+                "steer_id": notice_id,
+                "source": "background_task",
+                "notice_id": notice_id,
+            }
+            generation = meta.get("execution_generation")
+            if isinstance(generation, int):
+                injected_notice["execution_generation"] = generation
+            return [injected_notice]
         steer_id = meta.get("steer_id")
         if steer_id:
-            text = "".join(c.text for c in evt.message.content if isinstance(c, TextContent))
             injected: dict[str, Any] = {
                 "type": "injected_message",
                 "content": text,

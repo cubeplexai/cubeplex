@@ -96,6 +96,11 @@ interface MessageBase {
     // being a group chat (is_group_chat), not on the mere presence of these.
     sender_user_id?: string
     sender_display_name?: string
+    // Delivered background result. The row stays in checkpoint order, and the
+    // transcript draws a result card instead of a user bubble.
+    source?: string
+    notice_id?: string
+    execution_generation?: number
   }
 }
 
