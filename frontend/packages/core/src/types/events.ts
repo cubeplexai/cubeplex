@@ -227,7 +227,15 @@ export interface DoneEvent extends AgentEvent {
 
 export interface InjectedMessageEvent extends AgentEvent {
   type: 'injected_message'
-  data: { content: string; steer_id: string }
+  data: {
+    content: string
+    steer_id: string
+    sender_user_id?: string
+    sender_display_name?: string
+    source?: string
+    notice_id?: string
+    execution_generation?: number
+  }
 }
 
 export interface SandboxConfirmRequestEvent extends AgentEvent {

@@ -123,32 +123,50 @@ describe('MessageList failover banner placement', () => {
     expectBannerAboveAnswer()
   })
 
-  it('places a background result before messages sent after it completed', () => {
+  it('renders a delivered background result from its history message', () => {
     const earlierUserMsg = {
       ...userMsg,
       timestamp: Date.parse('2026-09-22T00:00:00Z') / 1000,
     } as unknown as Message
+    const notice = {
+      source: 'background_task',
+      notice_id: 'bge-1',
+      task_id: 'task-1',
+      task_kind: 'command',
+      originating_run_id: 'run-0',
+      execution_generation: 1,
+      reason: 'completion',
+      summary: 'background build completed',
+      result_ref: null,
+    }
+    const backgroundMsg = {
+      id: 'msg-bg',
+      role: 'user',
+      content: [{ type: 'text', text: `Background task result:\n${JSON.stringify(notice)}` }],
+      timestamp: Date.parse('2026-09-22T01:00:00Z') / 1000,
+      metadata: { source: 'background_task', notice_id: 'bge-1', execution_generation: 1 },
+    } as unknown as Message
     useMessageStore.setState({
-      messages: { [CONV]: [earlierUserMsg, laterUserMsg] },
+      messages: { [CONV]: [earlierUserMsg, backgroundMsg, laterUserMsg] },
       isStreaming: false,
       streamingConversationId: null,
       streamAgents: {},
       backgroundEvents: {
         [CONV]: [
           {
-            id: 'event-1',
-            task_id: 'task-1',
+            id: 'event-pending',
+            task_id: 'task-2',
             task_kind: 'command',
             execution_generation: 1,
             reason: 'completion',
-            summary: 'background build completed',
+            summary: 'still waiting',
             result_ref: null,
-            state: 'delivered',
+            state: 'pending',
             discard_reason: null,
             revision: 1,
-            created_at: '2026-09-22T01:00:00Z',
-            updated_at: '2026-09-22T01:00:00Z',
-            delivered_at: '2026-09-22T01:00:01Z',
+            created_at: '2026-09-22T01:30:00Z',
+            updated_at: '2026-09-22T01:30:00Z',
+            delivered_at: null,
           },
         ],
       },
@@ -156,8 +174,13 @@ describe('MessageList failover banner placement', () => {
 
     render(<MessageList conversationId={CONV} />, { wrapper })
 
+    const earlier = screen.getByText('hello')
     const result = screen.getByText('Background result')
     const later = screen.getByText('message sent after background completion')
+    expect(screen.getByText('Result delivered')).toBeTruthy()
+    expect(screen.queryByText('Result awaiting delivery')).toBeNull()
+    expect(screen.queryByText(/Background task result:/)).toBeNull()
+    expect(earlier.compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(result.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

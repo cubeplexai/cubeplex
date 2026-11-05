@@ -419,16 +419,26 @@ def test_injected_user_message_without_steer_id_is_dropped() -> None:
     assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == []
 
 
-def test_background_task_input_with_steer_id_is_not_projected_into_chat() -> None:
+def test_background_task_input_is_projected_as_a_result_card_source() -> None:
     msg = UserMessage(
         content=[TextContent(text='Background task result:\n{"source":"background_task"}')],
         metadata={
             "source": "background_task",
             "notice_id": "bge-notice",
+            "execution_generation": 3,
             "steer_id": "bge-notice",
         },
     )
-    assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == []
+    assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == [
+        {
+            "type": "injected_message",
+            "content": 'Background task result:\n{"source":"background_task"}',
+            "steer_id": "bge-notice",
+            "source": "background_task",
+            "notice_id": "bge-notice",
+            "execution_generation": 3,
+        }
+    ]
 
 
 def test_injected_group_chat_message_carries_sender_identity() -> None:

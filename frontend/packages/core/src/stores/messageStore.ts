@@ -87,6 +87,9 @@ type InjectedMessageData = {
   steer_id: string
   sender_user_id?: string
   sender_display_name?: string
+  source?: string
+  notice_id?: string
+  execution_generation?: number
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -784,6 +787,12 @@ async function fillHistoryGap(
 }
 
 function historyCounterpartKey(message: Message): string | null {
+  if (message.role === 'user' && message.metadata?.source === 'background_task') {
+    const noticeId = message.metadata.notice_id ?? message.metadata.steer_id
+    if (typeof noticeId === 'string' && noticeId) {
+      return JSON.stringify(['background-notice', noticeId])
+    }
+  }
   const steerId = message.role === 'user' ? message.metadata?.steer_id : undefined
   if (typeof steerId === 'string') return JSON.stringify(['steer', steerId])
   const clientMessageId = message.role === 'user' ? message.metadata?.client_message_id : undefined
@@ -3387,6 +3396,15 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           ? {
               sender_user_id: data.sender_user_id,
               sender_display_name: data.sender_display_name,
+            }
+          : {}),
+        ...(data.source === 'background_task'
+          ? {
+              source: data.source,
+              ...(data.notice_id ? { notice_id: data.notice_id } : {}),
+              ...(data.execution_generation !== undefined
+                ? { execution_generation: data.execution_generation }
+                : {}),
             }
           : {}),
       },

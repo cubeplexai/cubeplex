@@ -47,6 +47,24 @@ describe('turn navigation items', () => {
     expect(turns[1].assistantText).toBe('second answer')
   })
 
+  it('does not start a turn from a delivered background result', () => {
+    const turns = buildTurnNavItems(
+      [
+        user('u1', 'real question'),
+        user('bg', 'Background task result:\n{}', {
+          metadata: { source: 'background_task', notice_id: 'bge-1' },
+        }),
+        assistant('a1', 'still the first reply'),
+      ],
+      null,
+    )
+
+    expect(turns).toHaveLength(1)
+    expect(turns[0].id).toBe('u1')
+    expect(turns[0].assistantText).toBe('still the first reply')
+    expect(turns[0].messageIds).not.toContain('bg')
+  })
+
   it('does not start a turn from a synthetic user message', () => {
     const turns = buildTurnNavItems(
       [

@@ -127,6 +127,13 @@ async def test_internal_background_input_is_not_projected_as_user_message(
             "result received",
             "visible user message",
         ]
+        chat = await load_history_window(
+            db_session, thread_id, limit=10, include_background_notices=True
+        )
+        assert [message["role"] for message in chat.messages] == ["user", "assistant", "user"]
+        assert chat.messages[0]["metadata"]["source"] == "background_task"
+        assert chat.messages[0]["metadata"]["notice_id"] == "bge-notice"
+        assert chat.messages[0]["content"][0]["text"] == "internal result"
     finally:
         await _delete_thread(thread_id)
 

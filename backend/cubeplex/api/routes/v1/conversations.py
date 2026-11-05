@@ -1760,7 +1760,11 @@ async def list_messages(
 
     effective_limit = min(limit or _history_tail_limit(), _MAX_HISTORY_WINDOW)
     window = await load_history_window(
-        session, conversation_id, before_seq=before_seq, limit=effective_limit
+        session,
+        conversation_id,
+        before_seq=before_seq,
+        limit=effective_limit,
+        include_background_notices=True,
     )
     return {
         "messages": window.messages,
@@ -1855,7 +1859,12 @@ async def get_conversation_bootstrap(
     # Redis + cubeloop-pool work — those do not touch ``session``, so there is
     # no SQLAlchemy concurrency conflict.
     history, active_run, pending_pair, last_run_error_raw = await asyncio.gather(
-        load_history_window(session, conversation_id, limit=_history_tail_limit()),
+        load_history_window(
+            session,
+            conversation_id,
+            limit=_history_tail_limit(),
+            include_background_notices=True,
+        ),
         get_active_run(rds.client, prefix=rds.key_prefix, conversation_id=conversation_id),
         _load_pending_hitl(conversation_id),
         get_conversation_last_error(

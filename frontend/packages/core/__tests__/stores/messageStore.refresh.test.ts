@@ -176,4 +176,50 @@ describe('conversation baseline refresh', () => {
     expect(fetchMock.mock.calls[2][1]?.headers).not.toHaveProperty('If-None-Match')
     expect(useMessageStore.getState().messages[conversationId][0].id).toBe('message-1')
   })
+
+  it('replaces a live background result card with its checkpoint row', async () => {
+    fetchMock.mockResolvedValueOnce(response('W/"one"'))
+    await useMessageStore.getState().loadMessages(client, conversationId)
+    useMessageStore.setState({
+      messages: {
+        [conversationId]: [
+          ...useMessageStore.getState().messages[conversationId],
+          {
+            id: 'local-notice',
+            role: 'user',
+            content: [{ type: 'text', text: 'Background task result:\n{"task_id":"task-1"}' }],
+            metadata: {
+              source: 'background_task',
+              notice_id: 'bge-1',
+              steer_id: 'bge-1',
+            },
+          },
+        ],
+      },
+    })
+    fetchMock.mockResolvedValueOnce(
+      response('W/"two"', {
+        messages: [
+          ...payload.messages,
+          {
+            id: 'history-notice',
+            seq: 2,
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Background task result:\n{"task_id":"task-1","summary":"done"}',
+              },
+            ],
+            metadata: { source: 'background_task', notice_id: 'bge-1' },
+          },
+        ],
+      }),
+    )
+
+    await useMessageStore.getState().loadMessages(client, conversationId, refreshOptions)
+
+    const ids = useMessageStore.getState().messages[conversationId].map((message) => message.id)
+    expect(ids).toEqual(['message-1', 'history-notice'])
+  })
 })
