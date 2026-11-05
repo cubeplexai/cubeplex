@@ -64,7 +64,8 @@ Instead of introducing a new tool, **CubePlex empowers the existing sandbox envi
  │    and passes via `opts.envs` (NOT in set_run_env)        │
  │  - On `persist_running(command_id, provider_ref)`:        │
  │    backfills `provider_ref` on the Redis record           │
- │  - On `_terminalize` (exited/killed): purges nonce        │
+ │  - On `_terminalize` (exited/killed) or start failure:    │
+ │    purges nonce immediately                               │
  │                                                           │
  │ ExchangeListener (Internal mTLS Port 8443):               │
  │  - Route: /api/v1/internal/context/dispatch               │
@@ -136,9 +137,10 @@ The lifecycle of the command nonce is strictly aligned with the lifecycle of the
    - When `on_started` invokes `persist_running(command_id, provider_ref)`, the backend updates the Redis record to backfill `provider_ref`.
 3. **Multi-Call Lifetime (Not Single-Use):**
    - The script may invoke `tools.*` and `llm.*` multiple times during its execution. All calls during that command execution share the same `command_nonce`. Single-use semantics are explicitly avoided.
-4. **Deletion on Command Terminalization:**
+4. **Deletion on Command Terminalization & Start Failure:**
    - The nonce is deleted from Redis when the command transitions to `exited` or `killed`.
    - The existing `_terminalize` logic covers process exit, user cancellation, command timeout, sandbox pause/deletion, and cleanup of residual `lifetime=run` commands.
+   - **Start Failure Cleanup:** If `sandbox.start` launches the process but subsequent persistence fails, existing `_persist_start_failed` leaves the command row in `starting` without immediately marking it `killed` (the reconciler only cleans up unattached starting rows after ~90 seconds). Because the Bridge accepts nonces in `starting` state, this would leave a 90-second exposure window. To close this gap, `_persist_start_failed` (and startup exception handlers) MUST explicitly delete the Redis nonce record immediately, matching `_terminalize`.
 5. **Independent of Agent Turn Completion:**
    - The nonce is **NOT** deleted when `sandbox.start()` returns.
    - The nonce is **NOT** deleted when the 60-second execution result is handed off to a background task.
@@ -317,7 +319,7 @@ When a script running inside `execute` invokes `cubeplex_context.tools` or `cube
 - Implement `cubeplex_context` Python client package with `tools` and `llm` interfaces.
 - Mount `/api/v1/internal/context/dispatch` on `ExchangeListener` (port 8443).
 - Implement local HTTP forwarding endpoint on the egress addon (in mitmproxy sidecar using standard library `http.client`), forwarding local requests over mTLS to the backend.
-- Generate `command_nonce` and persist to Redis prior to `sandbox.start` (passed via `opts.envs`); accept nonce in `starting` and `running` states, backfill `provider_ref` on `persist_running`, and purge on `_terminalize`.
+- Generate `command_nonce` and persist to Redis prior to `sandbox.start` (passed via `opts.envs`); accept nonce in `starting` and `running` states, backfill `provider_ref` on `persist_running`, and purge on `_terminalize` as well as `_persist_start_failed`.
 - Validate mTLS client certificate CN and `sandbox_commands` status (`starting` or `running`).
 - Pre-install `cubeplex_context` into the OpenSandbox container image.
 
