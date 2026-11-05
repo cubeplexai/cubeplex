@@ -597,6 +597,47 @@
   transform: rotate(-41deg);
 }
 
+/* Turn rail: brief flash on the turn the tick jumped to, and the preview fade. */
+@keyframes turn-nav-highlight {
+  0% {
+    background-color: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.turn-nav-highlight {
+  animation: turn-nav-highlight 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+  border-radius: var(--radius);
+}
+
+@keyframes turn-nav-preview-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes turn-nav-preview-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.turn-nav-preview {
+  animation: turn-nav-preview-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.turn-nav-preview-out {
+  animation: turn-nav-preview-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
