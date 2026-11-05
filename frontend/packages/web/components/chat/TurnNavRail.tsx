@@ -125,7 +125,9 @@ export function TurnNavRail({
   if (turns.length === 0) return null
 
   const preview = previewIndex != null ? turns[previewIndex] : undefined
-  const userPreview = preview ? previewSnippet(preview.userText) || t('turnNavAttachmentOnly') : ''
+  const userLine = preview
+    ? preview.userText.replace(/\s+/g, ' ').trim() || t('turnNavAttachmentOnly')
+    : ''
   const agentPreview = preview ? previewSnippet(preview.assistantText) || t('turnNavNoReply') : ''
 
   return (
@@ -137,7 +139,7 @@ export function TurnNavRail({
     >
       <div className="flex h-full min-h-0 flex-col justify-center">
         <div
-          className="pointer-events-auto flex max-h-full min-h-0 flex-col items-start gap-1.5 overflow-y-auto py-1 pl-1.5 scrollbar-none"
+          className="pointer-events-auto flex max-h-full min-h-0 flex-col items-start gap-0.5 overflow-y-auto py-1 pl-1.5 scrollbar-none"
           onScroll={reposition}
         >
           {hasOlder && (
@@ -147,7 +149,7 @@ export function TurnNavRail({
               aria-label={t('turnNavLoadEarlier')}
               aria-busy={loadingOlder || undefined}
               disabled={loadingOlder || onLoadEarlier == null}
-              className="group flex h-3 w-8 shrink-0 items-center disabled:cursor-default"
+              className="group flex h-2.5 w-8 shrink-0 items-center disabled:cursor-default"
               onClick={() => onLoadEarlier?.()}
             >
               <span
@@ -168,7 +170,7 @@ export function TurnNavRail({
                   buttonRefs.current[index] = node
                 }}
                 type="button"
-                className="flex h-3 w-8 shrink-0 items-center"
+                className="flex h-2.5 w-8 shrink-0 items-center"
                 aria-label={t('turnNavJump', { preview: label })}
                 aria-describedby={previewIndex === index ? 'turn-nav-preview' : undefined}
                 onMouseEnter={() => activate(index)}
@@ -205,10 +207,8 @@ export function TurnNavRail({
           )}
           style={{ top: anchorTop }}
         >
-          <p className="text-xs text-muted-foreground">{t('turnNavYou')}</p>
-          <p className="mt-0.5 text-sm text-popover-foreground">{userPreview}</p>
-          <p className="mt-2 text-xs text-muted-foreground">{t('turnNavAgent')}</p>
-          <p className="mt-0.5 text-sm text-muted-foreground">{agentPreview}</p>
+          <p className="truncate text-sm font-semibold text-popover-foreground">{userLine}</p>
+          <p className="mt-1 text-sm font-normal text-popover-foreground">{agentPreview}</p>
         </div>
       )}
     </nav>

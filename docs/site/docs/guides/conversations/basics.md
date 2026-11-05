@@ -38,7 +38,7 @@ On a wide window, the left edge of the chat shows a column of short ticks. Each 
 
 - A resting tick is a short, faint line.
 - Moving the pointer onto a tick lengthens that tick and brightens it. The tick above it and the tick below it lengthen halfway, so the column ripples as you move.
-- The preview waits a brief moment before it opens, so a quick pass along the column does not flash a card. The card shows the start of your message and the start of the reply.
+- The preview waits a brief moment before it opens, so a quick pass along the column does not flash a card. Your question is bold and stays on one line, ending in an ellipsis when it does not fit. The start of the reply sits under it in regular type.
 - Click a tick to scroll that turn into view. The turn is centered when it fits on screen, and it flashes so you can see where you landed.
 - A long conversation opens on its latest messages. A small mark above the first tick means earlier turns are still unloaded. Click it to load them; the new ticks appear at the top of the column.
 

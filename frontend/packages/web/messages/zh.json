@@ -480,8 +480,6 @@
     "loadingEarlier": "正在加载更早的消息…",
     "turnNavLabel": "对话轮次",
     "turnNavJump": "跳转到该轮：{preview}",
-    "turnNavYou": "你",
-    "turnNavAgent": "智能体",
     "turnNavNoReply": "尚未回复",
     "turnNavAttachmentOnly": "附件",
     "turnNavLoadEarlier": "加载更早的轮次",

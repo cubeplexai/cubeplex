@@ -110,10 +110,10 @@ describe('preview snippet', () => {
 
 describe('tick presentation', () => {
   it('extends the hovered tick fully and its neighbors halfway', () => {
-    expect(tickPresentation(null)).toEqual({ width: 4, opacity: 0.4 })
+    expect(tickPresentation(null)).toEqual({ width: 6, opacity: 0.4 })
     expect(tickPresentation(0)).toEqual({ width: 16, opacity: 1 })
-    expect(tickPresentation(1)).toEqual({ width: 10, opacity: 0.4 })
-    expect(tickPresentation(2)).toEqual({ width: 4, opacity: 0.4 })
+    expect(tickPresentation(1)).toEqual({ width: 11, opacity: 0.4 })
+    expect(tickPresentation(2)).toEqual({ width: 6, opacity: 0.4 })
     expect(TURN_TICK_TRANSITION).toBe(
       'width 0.2s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1)',
     )
