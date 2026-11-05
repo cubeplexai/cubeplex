@@ -33,6 +33,7 @@ import { RetryBanner } from './RetryBanner'
 import { CompactionMarker } from './CompactionMarker'
 import { BackgroundTaskEventItem, BackgroundTaskEventsLoadMore } from './BackgroundTaskEvents'
 import { MessageAttachments } from './MessageAttachments'
+import { TurnNavRail } from './TurnNavRail'
 import type { FailoverEvent, RetryEvent } from '@/lib/types/events'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMessages } from '@/hooks/useMessages'
@@ -42,6 +43,12 @@ import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
 import { ASSISTANT_CONTENT_MAX_CLASS, CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
 import { lastTurnUsageByRun } from '@/lib/cost/helpers'
 import { groupAssistantRuns } from '@/lib/foldToolActivity'
+import {
+  buildTurnNavItems,
+  indexTurnMessages,
+  scrollDeltaForTurn,
+  type TurnNavItem,
+} from '@/lib/turnNav'
 import { cn } from '@/lib/utils'
 
 interface MessageListProps {
@@ -52,6 +59,17 @@ interface MessageListProps {
 // equality when the failover slice is missing/empty.
 const EMPTY_FAILOVER_EVENTS: FailoverEvent[] = []
 const EMPTY_BACKGROUND_EVENTS: BackgroundTaskEvent[] = []
+
+function turnIdFor(
+  turnIdByMessage: ReadonlyMap<string, string>,
+  messageIds: readonly string[],
+): string | undefined {
+  for (const id of messageIds) {
+    const turnId = turnIdByMessage.get(id)
+    if (turnId) return turnId
+  }
+  return undefined
+}
 
 function ModelChainBanners({
   retryEvent,
@@ -489,6 +507,12 @@ export function MessageList({ conversationId }: MessageListProps) {
     }
   }, [messages])
 
+  const turns = useMemo(
+    () => buildTurnNavItems(messages ?? [], mainStream?.text ?? null),
+    [messages, mainStream?.text],
+  )
+  const turnIdByMessage = useMemo(() => indexTurnMessages(turns), [turns])
+
   const { backgroundEventsByMessageId, trailingBackgroundEvents } = useMemo(() => {
     const orderedEvents = [...backgroundEvents].sort(
       (left, right) =>
@@ -523,6 +547,36 @@ export function MessageList({ conversationId }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
+  const highlightTimer = useRef<number | null>(null)
+
+  const handleJumpToTurn = useCallback((turn: TurnNavItem) => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    stickToBottom.current = false
+    const nodes = [
+      ...scroller.querySelectorAll<HTMLElement>(`[data-turn-id="${CSS.escape(turn.id)}"]`),
+    ]
+    if (nodes.length === 0) return
+    const firstBox = nodes[0].getBoundingClientRect()
+    const lastBox = nodes[nodes.length - 1].getBoundingClientRect()
+    const view = scroller.getBoundingClientRect()
+    const delta = scrollDeltaForTurn({
+      firstTop: firstBox.top,
+      lastBottom: lastBox.bottom,
+      viewTop: view.top,
+      viewHeight: view.height,
+    })
+    scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: 'smooth' })
+    scroller.querySelectorAll('.turn-nav-highlight').forEach((node) => {
+      node.classList.remove('turn-nav-highlight')
+    })
+    for (const node of nodes) node.classList.add('turn-nav-highlight')
+    if (highlightTimer.current != null) window.clearTimeout(highlightTimer.current)
+    const highlighted = nodes
+    highlightTimer.current = window.setTimeout(() => {
+      for (const node of highlighted) node.classList.remove('turn-nav-highlight')
+    }, 1200)
+  }, [])
 
   // Detect whether user has scrolled away from bottom
   const handleScroll = useCallback(() => {
@@ -551,6 +605,12 @@ export function MessageList({ conversationId }: MessageListProps) {
     })
     ro.observe(content)
     return () => ro.disconnect()
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimer.current != null) window.clearTimeout(highlightTimer.current)
+    }
   }, [])
 
   // When a new streaming turn starts, force stick to bottom and scroll immediately
@@ -640,209 +700,232 @@ export function MessageList({ conversationId }: MessageListProps) {
   const showHistoryLoading = messagesLoadingState !== false && messages.length === 0
 
   return (
-    <ScrollArea ref={scrollRef} className="flex-1" onScroll={handleScroll}>
-      {/* Outer px-4 matches the composer footer so column edges share the same
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {turns.length > 0 && (
+        <TurnNavRail
+          turns={turns}
+          onJump={handleJumpToTurn}
+          hasOlder={hasMoreOlder}
+          loadingOlder={isLoadingOlder}
+          onLoadEarlier={handleLoadEarlier}
+        />
+      )}
+      <ScrollArea ref={scrollRef} className="min-h-0 flex-1" onScroll={handleScroll}>
+        {/* Outer px-4 matches the composer footer so column edges share the same
           inset; CHAT_COLUMN_CLASS keeps max-width + centering in sync with InputBar. */}
-      <div className="px-4 py-4">
-        <div ref={contentRef} className={cn(CHAT_COLUMN_CLASS, 'space-y-4')}>
-          {showHistoryLoading && (
-            <div
-              role="status"
-              aria-label={t('loadingConversation')}
-              aria-live="polite"
-              className="flex min-h-[50vh] items-center justify-center"
-            >
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 aria-hidden className="size-4 animate-spin" />
-                <span>{t('loadingConversation')}</span>
-              </div>
-            </div>
-          )}
-          {hasMoreOlder && (
-            <div className="flex justify-center py-2">
-              <button
-                type="button"
-                onClick={handleLoadEarlier}
-                disabled={isLoadingOlder}
-                className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-60 transition-colors px-3 py-1 rounded-md border border-border bg-background/60"
+        <div className="px-4 py-4">
+          <div ref={contentRef} className={cn(CHAT_COLUMN_CLASS, 'space-y-4')}>
+            {showHistoryLoading && (
+              <div
+                role="status"
+                aria-label={t('loadingConversation')}
+                aria-live="polite"
+                className="flex min-h-[50vh] items-center justify-center"
               >
-                {isLoadingOlder ? t('loadingEarlier') : t('loadEarlier')}
-              </button>
-            </div>
-          )}
-          {historyRows.map((row) => {
-            if (row.kind === 'assistant-run') {
-              const msg = row.merged
-              const anchor = anchorByMessageId.get(msg.id)
-              const isAnchor = anchor !== undefined
-              const isLastRun = isAnchor && msg.id === lastAnchorMessageId
-              const toolResultMap = row.messages.reduce<typeof historicalToolResults>(
-                (acc, message) => Object.assign(acc, messageScopedToolResults[message.id]),
-                {},
-              )
-              return (
-                <Fragment key={row.messages[0].id}>
-                  {row.messages.flatMap((message) =>
-                    (backgroundEventsByMessageId.get(message.id) ?? []).map((event) => (
-                      <BackgroundTaskEventItem
-                        key={`background:${event.id}`}
-                        event={event}
-                        conversationId={conversationId}
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 aria-hidden className="size-4 animate-spin" />
+                  <span>{t('loadingConversation')}</span>
+                </div>
+              </div>
+            )}
+            {hasMoreOlder && (
+              <div className="flex justify-center py-2">
+                <button
+                  type="button"
+                  onClick={handleLoadEarlier}
+                  disabled={isLoadingOlder}
+                  className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-60 transition-colors px-3 py-1 rounded-md border border-border bg-background/60"
+                >
+                  {isLoadingOlder ? t('loadingEarlier') : t('loadEarlier')}
+                </button>
+              </div>
+            )}
+            {historyRows.map((row) => {
+              if (row.kind === 'assistant-run') {
+                const msg = row.merged
+                const anchor = anchorByMessageId.get(msg.id)
+                const isAnchor = anchor !== undefined
+                const isLastRun = isAnchor && msg.id === lastAnchorMessageId
+                const toolResultMap = row.messages.reduce<typeof historicalToolResults>(
+                  (acc, message) => Object.assign(acc, messageScopedToolResults[message.id]),
+                  {},
+                )
+                return (
+                  <Fragment key={row.messages[0].id}>
+                    {row.messages.flatMap((message) =>
+                      (backgroundEventsByMessageId.get(message.id) ?? []).map((event) => (
+                        <BackgroundTaskEventItem
+                          key={`background:${event.id}`}
+                          event={event}
+                          conversationId={conversationId}
+                        />
+                      )),
+                    )}
+                    {row.messages.some((message) => message.id === bannersBeforeHistoryId) && (
+                      <ModelChainBanners
+                        retryEvent={retryEvent}
+                        failoverEvents={failoverEvents}
+                        showRetry={isStreaming}
                       />
-                    )),
-                  )}
-                  {row.messages.some((message) => message.id === bannersBeforeHistoryId) && (
+                    )}
+                    <div
+                      data-turn-id={turnIdFor(
+                        turnIdByMessage,
+                        row.messages.map((message) => message.id),
+                      )}
+                    >
+                      {/* #msg-{seq} matches cubepi_messages.seq for search deep links.
+                          Every row in the folded run keeps its own anchor. */}
+                      {row.messages.map((message) =>
+                        message.seq != null ? (
+                          <span
+                            key={message.seq}
+                            id={`msg-${message.seq}`}
+                            className="block h-0 overflow-hidden"
+                          />
+                        ) : null,
+                      )}
+                      {msg.id !== lastAssistantId && (
+                        <HistoryAssistantMessage
+                          message={msg}
+                          subagentDataMap={subagentDataMap}
+                          toolResultMap={toolResultMap}
+                          conversationId={conversationId}
+                          workspaceId={workspaceId}
+                          isGroupChat={isGroupChat}
+                          activeRunId={activeRunId}
+                          isStreamingTurn={isStreaming}
+                          showForkAction={isAnchor}
+                          turnUsage={anchor?.turnUsage ?? null}
+                          turnCopyText={anchor?.copyText ?? ''}
+                          isRunAnchor={isAnchor}
+                          isLastRun={isLastRun}
+                          sessionUsage={isLastRun ? sessionUsage : null}
+                          contextWindow={isLastRun ? contextWindow : null}
+                          contextTokens={isLastRun ? contextTokens : null}
+                          pendingConfirmMap={pendingConfirmMap}
+                          onSandboxConfirm={handleSandboxConfirm}
+                        />
+                      )}
+                    </div>
+                  </Fragment>
+                )
+              }
+              const msg = row.message
+              return (
+                <Fragment key={msg.id}>
+                  {(backgroundEventsByMessageId.get(msg.id) ?? []).map((event) => (
+                    <BackgroundTaskEventItem
+                      key={`background:${event.id}`}
+                      event={event}
+                      conversationId={conversationId}
+                    />
+                  ))}
+                  {msg.id === bannersBeforeHistoryId && (
                     <ModelChainBanners
                       retryEvent={retryEvent}
                       failoverEvents={failoverEvents}
                       showRetry={isStreaming}
                     />
                   )}
-                  <div>
-                    {/* #msg-{seq} matches cubepi_messages.seq for search deep links.
-                        Every row in the folded run keeps its own anchor. */}
-                    {row.messages.map((message) =>
-                      message.seq != null ? (
-                        <span
-                          key={message.seq}
-                          id={`msg-${message.seq}`}
-                          className="block h-0 overflow-hidden"
+                  <div
+                    id={msg.seq != null ? `msg-${msg.seq}` : undefined}
+                    data-turn-id={turnIdByMessage.get(msg.id)}
+                  >
+                    {msg.role === 'user' &&
+                      msg.metadata?.synthetic === true &&
+                      (msg.metadata.synthetic_source === 'compaction' ||
+                        msg.metadata.kind === 'compaction') && (
+                        <CompactionMarker
+                          source={
+                            typeof msg.metadata.compaction === 'object' &&
+                            msg.metadata.compaction !== null &&
+                            'source' in msg.metadata.compaction
+                              ? String(
+                                  (msg.metadata.compaction as { source?: string }).source ?? '',
+                                )
+                              : undefined
+                          }
                         />
-                      ) : null,
-                    )}
-                    {msg.id !== lastAssistantId && (
-                      <HistoryAssistantMessage
-                        message={msg}
-                        subagentDataMap={subagentDataMap}
-                        toolResultMap={toolResultMap}
-                        conversationId={conversationId}
-                        workspaceId={workspaceId}
-                        isGroupChat={isGroupChat}
-                        activeRunId={activeRunId}
-                        isStreamingTurn={isStreaming}
-                        showForkAction={isAnchor}
-                        turnUsage={anchor?.turnUsage ?? null}
-                        turnCopyText={anchor?.copyText ?? ''}
-                        isRunAnchor={isAnchor}
-                        isLastRun={isLastRun}
-                        sessionUsage={isLastRun ? sessionUsage : null}
-                        contextWindow={isLastRun ? contextWindow : null}
-                        contextTokens={isLastRun ? contextTokens : null}
-                        pendingConfirmMap={pendingConfirmMap}
-                        onSandboxConfirm={handleSandboxConfirm}
-                      />
+                      )}
+                    {msg.role === 'user' && msg.metadata?.synthetic !== true && (
+                      <>
+                        {/* Sender identity is stamped on every user message (incl. 1:1)
+                    so a 1:1→group conversion attributes past messages, but the
+                    badge only shows in group chats. */}
+                        {isGroupChat &&
+                          msg.metadata?.sender_display_name &&
+                          msg.metadata?.sender_user_id && (
+                            <SenderBadge
+                              userId={msg.metadata.sender_user_id}
+                              displayName={msg.metadata.sender_display_name}
+                            />
+                          )}
+                        {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
+                          <MessageAttachments
+                            attachments={msg.metadata.attachments}
+                            conversationId={conversationId}
+                          />
+                        )}
+                        <UserMessage
+                          content={getTextContent(msg)}
+                          timestamp={msg.timestamp}
+                          conversationId={conversationId}
+                        />
+                      </>
                     )}
                   </div>
                 </Fragment>
               )
-            }
-            const msg = row.message
-            return (
-              <Fragment key={msg.id}>
-                {(backgroundEventsByMessageId.get(msg.id) ?? []).map((event) => (
-                  <BackgroundTaskEventItem
-                    key={`background:${event.id}`}
-                    event={event}
-                    conversationId={conversationId}
-                  />
-                ))}
-                {msg.id === bannersBeforeHistoryId && (
-                  <ModelChainBanners
-                    retryEvent={retryEvent}
-                    failoverEvents={failoverEvents}
-                    showRetry={isStreaming}
-                  />
-                )}
-                <div id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
-                  {msg.role === 'user' &&
-                    msg.metadata?.synthetic === true &&
-                    (msg.metadata.synthetic_source === 'compaction' ||
-                      msg.metadata.kind === 'compaction') && (
-                      <CompactionMarker
-                        source={
-                          typeof msg.metadata.compaction === 'object' &&
-                          msg.metadata.compaction !== null &&
-                          'source' in msg.metadata.compaction
-                            ? String((msg.metadata.compaction as { source?: string }).source ?? '')
-                            : undefined
-                        }
-                      />
-                    )}
-                  {msg.role === 'user' && msg.metadata?.synthetic !== true && (
-                    <>
-                      {/* Sender identity is stamped on every user message (incl. 1:1)
-                    so a 1:1→group conversion attributes past messages, but the
-                    badge only shows in group chats. */}
-                      {isGroupChat &&
-                        msg.metadata?.sender_display_name &&
-                        msg.metadata?.sender_user_id && (
-                          <SenderBadge
-                            userId={msg.metadata.sender_user_id}
-                            displayName={msg.metadata.sender_display_name}
-                          />
-                        )}
-                      {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
-                        <MessageAttachments
-                          attachments={msg.metadata.attachments}
-                          conversationId={conversationId}
-                        />
-                      )}
-                      <UserMessage
-                        content={getTextContent(msg)}
-                        timestamp={msg.timestamp}
-                        conversationId={conversationId}
-                      />
-                    </>
-                  )}
-                </div>
-              </Fragment>
-            )
-          })}
+            })}
 
-          {trailingBackgroundEvents.map((event) => (
-            <BackgroundTaskEventItem
-              key={`background:${event.id}`}
-              event={event}
-              conversationId={conversationId}
-            />
-          ))}
-          <BackgroundTaskEventsLoadMore conversationId={conversationId} />
-
-          {bannersBeforeHistoryId == null && (
-            <ModelChainBanners
-              retryEvent={retryEvent}
-              failoverEvents={failoverEvents}
-              showRetry={isStreaming}
-            />
-          )}
-
-          {mainStream && (
-            <AssistantMessage
-              stream={mainStream}
-              isStreaming={isStreaming}
-              statusPhase={statusPhase}
-              subAgentStreams={subAgentStreams}
-              toolResultMap={mergedToolResultMap}
-              todos={todos}
-              conversationId={conversationId}
-              workspaceId={workspaceId}
-              pendingConfirmMap={pendingConfirmMap}
-              onSandboxConfirm={handleSandboxConfirm}
-            />
-          )}
-
-          {pendingAsk && streamingConversationId === conversationId && (
-            <div className={ASSISTANT_CONTENT_MAX_CLASS}>
-              <AskUserCard
-                key={pendingAsk.question_id}
-                pending={pendingAsk}
-                onSubmit={handleAskUserSubmit}
-                onCancel={handleAskUserCancel}
+            {trailingBackgroundEvents.map((event) => (
+              <BackgroundTaskEventItem
+                key={`background:${event.id}`}
+                event={event}
+                conversationId={conversationId}
               />
-            </div>
-          )}
+            ))}
+            <BackgroundTaskEventsLoadMore conversationId={conversationId} />
+
+            {bannersBeforeHistoryId == null && (
+              <ModelChainBanners
+                retryEvent={retryEvent}
+                failoverEvents={failoverEvents}
+                showRetry={isStreaming}
+              />
+            )}
+
+            {mainStream && (
+              <div data-turn-id={turns.length > 0 ? turns[turns.length - 1].id : undefined}>
+                <AssistantMessage
+                  stream={mainStream}
+                  isStreaming={isStreaming}
+                  statusPhase={statusPhase}
+                  subAgentStreams={subAgentStreams}
+                  toolResultMap={mergedToolResultMap}
+                  todos={todos}
+                  conversationId={conversationId}
+                  workspaceId={workspaceId}
+                  pendingConfirmMap={pendingConfirmMap}
+                  onSandboxConfirm={handleSandboxConfirm}
+                />
+              </div>
+            )}
+
+            {pendingAsk && streamingConversationId === conversationId && (
+              <div className={ASSISTANT_CONTENT_MAX_CLASS}>
+                <AskUserCard
+                  key={pendingAsk.question_id}
+                  pending={pendingAsk}
+                  onSubmit={handleAskUserSubmit}
+                  onCancel={handleAskUserCancel}
+                />
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-    </ScrollArea>
+      </ScrollArea>
+    </div>
   )
 }

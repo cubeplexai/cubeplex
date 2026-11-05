@@ -32,6 +32,23 @@ If several files are being written at once, each tool row tracks its own content
 
 ![Conversation view with the chat thread and an artifact preview panel](/img/conversations/conversation-layout.png)
 
+### Turn navigation
+
+On a wide window, the left edge of the chat shows a column of short ticks. Each tick is one turn: your message and the agent's reply. The column stays quiet until you need to move through a long thread.
+
+- A resting tick is a short, faint line.
+- Moving the pointer onto a tick lengthens that tick and brightens it. The tick above it and the tick below it lengthen halfway, so the column ripples as you move.
+- The preview waits a brief moment before it opens, so a quick pass along the column does not flash a card. The card shows the start of your message and the start of the reply.
+- Click a tick to scroll that turn into view. The turn is centered when it fits on screen, and it flashes so you can see where you landed.
+- A long conversation opens on its latest messages. A small mark above the first tick means earlier turns are still unloaded. Click it to load them; the new ticks appear at the top of the column.
+
+The column is hidden on a narrow window, and it is absent until the conversation has a turn to show.
+
+:::info 📸 Screenshot placeholder
+**Capture:** Chat with several turns. The pointer rests on one left-edge tick so that tick is long, the ticks above and below it are a little longer, and the preview card shows the start of the user message and the agent reply.
+**Asset:** `/img/conversations/turn-nav-rail.png`
+:::
+
 The input bar sits at the bottom. It includes:
 
 - **Model preset picker** — choose which model to use for this message.
