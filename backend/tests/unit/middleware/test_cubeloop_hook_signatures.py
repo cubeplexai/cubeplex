@@ -14,6 +14,7 @@ from cubeplex.middleware.citation import CitationMiddleware
 from cubeplex.middleware.memory import MemoryMiddleware
 from cubeplex.middleware.sandbox import SandboxMiddleware
 from cubeplex.middleware.timestamps import TimestampMiddleware
+from cubeplex.middleware.user_stop import UserStopMiddleware
 
 
 def _assert_requires_keyword_ctx(method: Callable[..., Any]) -> None:
@@ -29,6 +30,7 @@ def test_context_and_prompt_hooks_require_ctx() -> None:
     hooks = [
         AttachmentHintMiddleware.transform_context,
         TimestampMiddleware.transform_context,
+        UserStopMiddleware.transform_context,
         TodoListMiddleware.transform_system_prompt,
         TodoListMiddleware.transform_context,
         MemoryMiddleware.transform_system_prompt,
