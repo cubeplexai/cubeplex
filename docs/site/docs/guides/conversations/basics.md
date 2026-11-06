@@ -80,10 +80,12 @@ dismiss. Client commands never create a user message bubble for the slash text.
 | `/compact` | Force-compact older context for this conversation (idle only) |
 
 `/compact` does **not** post a chat bubble with the text `/compact`. It asks
-the compaction model to summarize older turns, and the request finishes when
-that summary is saved. The timeline then shows one centered **Context compacted**
-marker (and a short toast). That marker is stored in conversation history so it
-remains visible after reload — it is not a user message.
+the compaction model to summarize older turns. If that takes a moment, the
+timeline shows a centered **Compacting context…** line and the composer stays
+locked. When the summary is saved, that line becomes one stored **Context
+compacted** marker, which remains visible after reload — it is not a user
+message. If there is not enough history, or compaction fails, the waiting line
+goes away and a short toast explains why.
 
 Unknown text like `/zzzzz` with no match sends as a normal message (or steers
 while streaming). Type a space after `/` to write a literal leading slash.

@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import en from '../../messages/en.json'
 import { InputBar } from '../../components/layout/InputBar'
+import { useCompactionPendingStore } from '../../lib/stores/compaction-pending'
 import { getPresetSelectionStore } from '../../lib/stores/preset-selection'
 
 const storeMocks = vi.hoisted(() => ({
@@ -129,12 +131,26 @@ function renderWithIntl(ui: React.ReactElement): ReturnType<typeof render> {
   )
 }
 
+const compactedMarker = {
+  role: 'user',
+  content: [{ type: 'text', text: '' }],
+  metadata: { synthetic: true, synthetic_source: 'compaction', kind: 'compaction' },
+}
+
 describe('InputBar slash commands', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    storeMocks.appendHistoryMessage.mockReset()
+    vi.useRealTimers()
+    storeMocks.compactConversation.mockResolvedValue({
+      ok: true,
+      compacted: true,
+      marker: compactedMarker,
+    })
     storeMocks.state.isStreaming = false
     storeMocks.state.streamingConversationId = null
     storeMocks.state.cancellingConversationIds = {}
+    useCompactionPendingStore.setState({ compactingConversationIds: {} })
     getPresetSelectionStore('ws-1').setState({ modelKey: null, thinking: 'off' })
   })
 
@@ -206,6 +222,150 @@ describe('InputBar slash commands', () => {
       )
     })
     expect(storeMocks.send).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('does not flash the lock when compact returns before the waiting delay', async () => {
+    vi.useFakeTimers()
+    try {
+      renderWithIntl(<InputBar conversationId="conv-1" />)
+      const textarea = screen.getByTestId('chat-input')
+      fireEvent.change(textarea, { target: { value: '/compact' } })
+      fireEvent.click(screen.getByTestId('slash-cmd-compact'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(storeMocks.appendHistoryMessage).toHaveBeenCalled()
+      expect(toast.success).not.toHaveBeenCalled()
+      expect(useCompactionPendingStore.getState().compactingConversationIds).toEqual({})
+      expect(textarea).not.toBeDisabled()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500)
+      })
+      expect(useCompactionPendingStore.getState().compactingConversationIds).toEqual({})
+      expect(textarea).not.toBeDisabled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('locks the composer while a slow compact is in flight, then keeps only the marker', async () => {
+    vi.useFakeTimers()
+    let resolveCompact: (value: unknown) => void = () => {}
+    storeMocks.compactConversation.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCompact = resolve
+        }),
+    )
+    storeMocks.appendHistoryMessage.mockImplementation(() => {
+      expect(useCompactionPendingStore.getState().compactingConversationIds['conv-1']).toBe(true)
+    })
+    try {
+      renderWithIntl(<InputBar conversationId="conv-1" />)
+      const textarea = screen.getByTestId('chat-input')
+      fireEvent.change(textarea, { target: { value: '/compact' } })
+      fireEvent.click(screen.getByTestId('slash-cmd-compact'))
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(499)
+      })
+      expect(textarea).not.toBeDisabled()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      expect(textarea).toBeDisabled()
+      expect(textarea).toHaveAttribute('placeholder', 'Compacting context…')
+      expect(screen.getByTestId('send-button')).toBeDisabled()
+
+      fireEvent.change(textarea, { target: { value: 'hello' } })
+      fireEvent.keyDown(textarea, { key: 'Enter' })
+      expect(storeMocks.send).not.toHaveBeenCalled()
+      expect(screen.getByTestId('send-button')).toBeDisabled()
+
+      fireEvent.change(textarea, { target: { value: '/compact' } })
+      expect(screen.queryByTestId('slash-cmd-compact')).not.toBeInTheDocument()
+
+      resolveCompact({ ok: true, compacted: true, marker: compactedMarker })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(storeMocks.appendHistoryMessage).toHaveBeenCalled()
+      expect(toast.success).not.toHaveBeenCalled()
+      expect(useCompactionPendingStore.getState().compactingConversationIds).toEqual({})
+      expect(textarea).not.toBeDisabled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops the waiting lock and explains a skip', async () => {
+    vi.useFakeTimers()
+    let resolveCompact: (value: unknown) => void = () => {}
+    storeMocks.compactConversation.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCompact = resolve
+        }),
+    )
+    try {
+      renderWithIntl(<InputBar conversationId="conv-1" />)
+      const textarea = screen.getByTestId('chat-input')
+      fireEvent.change(textarea, { target: { value: '/compact' } })
+      fireEvent.click(screen.getByTestId('slash-cmd-compact'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500)
+      })
+      expect(textarea).toBeDisabled()
+
+      resolveCompact({ ok: true, compacted: false })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(toast.message).toHaveBeenCalledWith('Not enough history to compact yet')
+      expect(toast.success).not.toHaveBeenCalled()
+      expect(toast.error).not.toHaveBeenCalled()
+      expect(storeMocks.appendHistoryMessage).not.toHaveBeenCalled()
+      expect(useCompactionPendingStore.getState().compactingConversationIds).toEqual({})
+      expect(textarea).not.toBeDisabled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops the waiting lock and explains a failure', async () => {
+    vi.useFakeTimers()
+    let rejectCompact: (reason: unknown) => void = () => {}
+    storeMocks.compactConversation.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectCompact = reject
+        }),
+    )
+    try {
+      renderWithIntl(<InputBar conversationId="conv-1" />)
+      const textarea = screen.getByTestId('chat-input')
+      fireEvent.change(textarea, { target: { value: '/compact' } })
+      fireEvent.click(screen.getByTestId('slash-cmd-compact'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500)
+      })
+      expect(textarea).toBeDisabled()
+
+      rejectCompact(new Error('boom'))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(toast.error).toHaveBeenCalledWith('Could not compact conversation')
+      expect(toast.success).not.toHaveBeenCalled()
+      expect(storeMocks.appendHistoryMessage).not.toHaveBeenCalled()
+      expect(useCompactionPendingStore.getState().compactingConversationIds).toEqual({})
+      expect(textarea).not.toBeDisabled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('hides /compact while streaming', async () => {

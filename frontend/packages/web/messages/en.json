@@ -268,7 +268,6 @@
     "listAria": "Composer commands",
     "noMatches": "No matching commands",
     "filterHint": "Type to filter commands and skills",
-    "compactSuccess": "Conversation context compacted",
     "compactSkipped": "Not enough history to compact yet",
     "compactFailed": "Could not compact conversation",
     "renameUnavailable": "Could not open rename — try the sidebar menu",
@@ -597,7 +596,8 @@
     "compactionMarker": {
       "label": "Context compacted",
       "manual": "Context compacted",
-      "auto": "Context compacted automatically"
+      "auto": "Context compacted automatically",
+      "pending": "Compacting context…"
     },
     "thinkingLevelDefault": "Default",
     "thinkingLevelOn": "Reasoning on",
