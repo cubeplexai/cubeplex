@@ -1,15 +1,34 @@
-import { Avatar } from '@/components/ui/avatar-resolved'
+'use client'
+
+import { useAuthStore, useConversationStore } from '@cubeplex/core'
+import { Avatar, type AvatarStyle } from '@/components/ui/avatar-resolved'
 
 interface SenderBadgeProps {
   userId: string
   displayName: string
+  conversationId?: string
 }
 
-export function SenderBadge({ userId, displayName }: SenderBadgeProps) {
+export function SenderBadge({ userId, displayName, conversationId }: SenderBadgeProps) {
+  const currentUser = useAuthStore((s) => s.user)
+  const participant = useConversationStore((s) =>
+    conversationId
+      ? s.conversationParticipants[conversationId]?.find((p) => p.user_id === userId)
+      : undefined,
+  )
+
+  const isMe = currentUser?.id === userId
+  const src = isMe ? currentUser?.avatar_url : participant?.avatar_url
+  const seed = isMe
+    ? (currentUser?.avatar_seed ?? currentUser?.id)
+    : (participant?.avatar_seed ?? userId)
+  const style = (isMe ? currentUser?.avatar_style : participant?.avatar_style) as
+    AvatarStyle | undefined
+
   return (
     <div className="flex items-center justify-end gap-1.5 mb-1">
       <span className="text-xs text-muted-foreground truncate max-w-[60%]">{displayName}</span>
-      <Avatar seed={userId} name={displayName} userId={userId} size="sm" />
+      <Avatar src={src} seed={seed} style={style} name={displayName} userId={userId} size="sm" />
     </div>
   )
 }

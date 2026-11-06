@@ -98,6 +98,7 @@ def _serialize_participant(p: Any, users_by_id: dict[str, Any] | None = None) ->
         if user
         else None,
         "avatar_seed": user.avatar_seed if user else None,
+        "avatar_style": user.avatar_style if user else None,
     }
 
 

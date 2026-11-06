@@ -314,6 +314,24 @@ export function MessageList({ conversationId }: MessageListProps) {
   const isGroupChat = useConversationStore(
     (s) => s.conversations.find((c) => c.id === conversationId)?.is_group_chat ?? false,
   )
+  const fetchConversationParticipants = useConversationStore((s) => s.fetchConversationParticipants)
+  const conversationParticipants = useConversationStore(
+    (s) => s.conversationParticipants[conversationId],
+  )
+
+  useEffect(() => {
+    if (isGroupChat && (!conversationParticipants || conversationParticipants.length === 0)) {
+      const client = createApiClient('')
+      if (workspaceId) client.setWorkspaceId(workspaceId)
+      void fetchConversationParticipants(client, conversationId).catch(() => undefined)
+    }
+  }, [
+    conversationId,
+    conversationParticipants,
+    fetchConversationParticipants,
+    isGroupChat,
+    workspaceId,
+  ])
 
   useEffect(() => {
     const client = createApiClient('')
@@ -830,6 +848,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                               <SenderBadge
                                 userId={msg.metadata.sender_user_id}
                                 displayName={msg.metadata.sender_display_name}
+                                conversationId={conversationId}
                               />
                             )}
                           {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
