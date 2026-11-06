@@ -268,7 +268,6 @@
     "listAria": "输入框命令",
     "noMatches": "没有匹配的命令",
     "filterHint": "输入以筛选命令和技能",
-    "compactSuccess": "已压缩对话上下文",
     "compactSkipped": "历史消息还不够，暂无法压缩",
     "compactFailed": "压缩对话失败",
     "renameUnavailable": "无法打开重命名，请从侧边栏菜单操作",
@@ -597,7 +596,8 @@
     "compactionMarker": {
       "label": "上下文已压缩",
       "manual": "上下文已压缩",
-      "auto": "上下文已自动压缩"
+      "auto": "上下文已自动压缩",
+      "pending": "正在压缩上下文…"
     },
     "thinkingLevelDefault": "默认",
     "thinkingLevelOn": "开启推理",

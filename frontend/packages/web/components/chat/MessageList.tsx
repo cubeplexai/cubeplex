@@ -29,7 +29,7 @@ import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
 import { FailoverBanner } from './FailoverBanner'
 import { RetryBanner } from './RetryBanner'
-import { CompactionMarker } from './CompactionMarker'
+import { CompactionMarker, showCompactionPendingLine } from './CompactionMarker'
 import { BackgroundTaskEventItem } from './BackgroundTaskEvents'
 import { MessageAttachments } from './MessageAttachments'
 import { TurnNavRail } from './TurnNavRail'
@@ -42,6 +42,7 @@ import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
 import { ASSISTANT_CONTENT_MAX_CLASS, CHAT_COLUMN_CLASS } from '@/lib/chatLayout'
 import { lastTurnUsageByRun } from '@/lib/cost/helpers'
 import { backgroundResultFromMessage } from '@/lib/backgroundResultMessage'
+import { useCompactionPendingStore } from '@/lib/stores/compaction-pending'
 import { groupAssistantRuns } from '@/lib/foldToolActivity'
 import {
   buildTurnNavItems,
@@ -270,6 +271,13 @@ export function MessageList({ conversationId }: MessageListProps) {
     contextWindow,
     contextTokens,
   } = useMessages(conversationId)
+  const compactingThisConversation = useCompactionPendingStore(
+    (s) => s.compactingConversationIds[conversationId] === true,
+  )
+  const showPendingCompact = showCompactionPendingLine(
+    compactingThisConversation,
+    messages.length > 0 ? messages[messages.length - 1] : null,
+  )
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const loadOlderMessages = useMessageStore((s) => s.loadOlderMessages)
   const loadOlderUntilSeq = useMessageStore((s) => s.loadOlderUntilSeq)
@@ -841,6 +849,8 @@ export function MessageList({ conversationId }: MessageListProps) {
                 </Fragment>
               )
             })}
+
+            {showPendingCompact && <CompactionMarker pending />}
 
             {bannersBeforeHistoryId == null && (
               <ModelChainBanners

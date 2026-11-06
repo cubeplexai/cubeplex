@@ -31,6 +31,10 @@ import { reasoningFromThinking } from '@/lib/reasoning-control'
 import { getPresetSelectionStore, validatedModelKey } from '@/lib/stores/preset-selection'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
+import {
+  COMPACT_PENDING_DELAY_MS,
+  useCompactionPendingStore,
+} from '@/lib/stores/compaction-pending'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { applySkillChipsToContent, type ComposerSkillChip } from '@/lib/composer/skillChips'
 import {
@@ -79,6 +83,7 @@ export function InputBar({
   const t = useTranslations('input')
   const tShell = useTranslations('shellLayout')
   const tSlash = useTranslations('slashCommands')
+  const tMarker = useTranslations('chat.compactionMarker')
   const router = useRouter()
   const [content, setContent] = useState('')
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -125,7 +130,14 @@ export function InputBar({
   const isCancelling = useMessageStore((s) =>
     conversationId ? Boolean(s.cancellingConversationIds[conversationId]) : false,
   )
-  const composerLockMessage = isCancelling ? t('cancellingLock') : null
+  const isCompacting = useCompactionPendingStore((s) =>
+    conversationId ? s.compactingConversationIds[conversationId] === true : false,
+  )
+  const composerLockMessage = isCancelling
+    ? t('cancellingLock')
+    : isCompacting
+      ? tMarker('pending')
+      : null
   const shouldSteer =
     messageIsStreaming ||
     runLifecycle === 'running' ||
@@ -232,6 +244,7 @@ export function InputBar({
       shouldSteer ||
       uploadInFlight ||
       isCancelling ||
+      isCompacting ||
       modelSyncPending ||
       noUsablePresets ||
       !canSendPayload
@@ -341,7 +354,7 @@ export function InputBar({
       isStreaming: messageIsStreaming,
       effortAvailable: Boolean(workspaceId),
       modelPickerAvailable: Boolean(workspaceId),
-      compactAvailable: true,
+      compactAvailable: !isCompacting,
       cancelStream: (id: string) => {
         const client = createApiClient('')
         if (workspaceId) client.setWorkspaceId(workspaceId)
@@ -384,23 +397,29 @@ export function InputBar({
         })
       },
       compactConversation: async (id: string) => {
+        const pendingTimer = window.setTimeout(() => {
+          useCompactionPendingStore.getState().beginCompacting(id)
+        }, COMPACT_PENDING_DELAY_MS)
         const client = createApiClient('')
         if (workspaceId) client.setWorkspaceId(workspaceId)
         try {
           const result = await compactConversation(client, id)
           if (result.compacted) {
             // Durable marker is persisted server-side; append locally so the
-            // timeline updates without a full bootstrap.
+            // timeline updates without a full bootstrap. Append before clearing
+            // the waiting flag so the saved line replaces the spinner.
             if (result.marker) {
               appendHistoryMessage(id, result.marker as Message)
             }
-            toast.success(tSlash('compactSuccess'))
           } else {
             toast.message(tSlash('compactSkipped'))
           }
         } catch (err) {
           console.error('Failed to compact conversation:', err)
           toast.error(tSlash('compactFailed'))
+        } finally {
+          window.clearTimeout(pendingTimer)
+          useCompactionPendingStore.getState().endCompacting(id)
         }
       },
     }),
@@ -408,6 +427,7 @@ export function InputBar({
       conversationId,
       workspaceId,
       messageIsStreaming,
+      isCompacting,
       cancelStream,
       appendHistoryMessage,
       requestRename,
@@ -482,7 +502,7 @@ export function InputBar({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (isCancelling) return
+      if (isCancelling || isCompacting) return
       if (shouldSteer && (hasText || hasSkillChips)) {
         void handleSteer()
       } else {
@@ -557,7 +577,11 @@ export function InputBar({
 
   // Steering is text-only; don't allow new attachment uploads mid-run.
   const canAttach =
-    Boolean(conversationId || onSubmit) && !isSubmitting && !shouldSteer && !isCancelling
+    Boolean(conversationId || onSubmit) &&
+    !isSubmitting &&
+    !shouldSteer &&
+    !isCancelling &&
+    !isCompacting
   // Show Stop only while streaming AND the box is empty; once the user types
   // (or pins a skill chip), the button becomes Send (which steers the live run).
   const hasControllableRun =
@@ -748,12 +772,13 @@ export function InputBar({
                   (isSubmitting && !shouldSteer) ||
                   uploadInFlight ||
                   isCancelling ||
+                  isCompacting ||
                   (!shouldSteer && (modelSyncPending || noUsablePresets))
                 }
                 title={composerLockMessage ?? undefined}
                 className={cn(
                   'flex size-7 shrink-0 items-center justify-center rounded-md transition-all duration-fast active:scale-[0.94]',
-                  canSendPayload && !isCancelling
+                  canSendPayload && !isCancelling && !isCompacting
                     ? 'bg-primary text-primary-foreground hover:bg-primary/80'
                     : 'bg-muted text-muted-foreground',
                   'disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100',
