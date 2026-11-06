@@ -740,7 +740,9 @@ export function MessageList({ conversationId }: MessageListProps) {
               if (row.kind === 'assistant-run') {
                 const msg = row.merged
                 const anchor = anchorByMessageId.get(msg.id)
-                const isAnchor = anchor !== undefined
+                const isAnchor =
+                  anchor !== undefined &&
+                  !(activeRunId != null && msg.run_id === activeRunId && isStreaming)
                 const isLastRun = isAnchor && msg.id === lastAnchorMessageId
                 const toolResultMap = row.messages.reduce<typeof historicalToolResults>(
                   (acc, message) => Object.assign(acc, messageScopedToolResults[message.id]),
