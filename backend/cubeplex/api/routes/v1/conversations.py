@@ -799,6 +799,7 @@ def _serialize_conv_participant(
         if user
         else None,
         "avatar_seed": user.avatar_seed if user else None,
+        "avatar_style": user.avatar_style if user else None,
     }
     if include_email:
         row["email"] = user.email if user else None

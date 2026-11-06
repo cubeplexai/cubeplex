@@ -7,4 +7,5 @@ export interface ConversationParticipant {
   email?: string | null
   avatar_url?: string | null
   avatar_seed?: string | null
+  avatar_style?: string | null
 }

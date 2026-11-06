@@ -65,6 +65,7 @@ class ConversationParticipantOut(BaseModel):
     email: str | None = None
     avatar_url: str | None = None
     avatar_seed: str | None = None
+    avatar_style: str | None = None
 
 
 class ListConversationParticipantsResponse(BaseModel):
