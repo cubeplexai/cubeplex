@@ -351,3 +351,107 @@ async def test_force_compact_summarizer_failure_does_not_write() -> None:
     assert result.reason == "summarizer_failed"
     assert cp.saved is None
     assert cp.appended is None
+
+
+def _budget_config(budget: int | None) -> Any:
+    class _Cfg:
+        def get(self, key: str, default: object = None) -> object:
+            if key == "compaction.max_summary_tokens":
+                return budget
+            if key == "compaction.keep_tail_tokens":
+                return 8_000
+            if key == "compaction.min_compact_messages":
+                return 4
+            return default
+
+    return _Cfg()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("budget", [None, 256])
+async def test_force_compact_calls_compaction_model(budget: int | None) -> None:
+    msgs = [_user(f"message {i}") for i in range(12)]
+    cp = _FakeCp(messages=msgs)
+    snap = object()
+    preset = object()
+    model = object()
+    seen: dict[str, Any] = {}
+
+    async def _load(session: object, org_id: str, backend: object) -> object:
+        assert session is not None
+        assert org_id == "org-1"
+        assert backend is not None
+        return snap
+
+    def _preset(loaded: object, task: str) -> object:
+        assert loaded is snap
+        assert task == "compaction"
+        return preset
+
+    def _build(loaded: object, chosen: object) -> object:
+        assert loaded is snap
+        assert chosen is preset
+        return model
+
+    async def _history(*_args: Any, **kwargs: Any) -> CompactionResult:
+        seen.update(kwargs)
+        return _result(compacted=True, reason=None)
+
+    with (
+        patch("cubeplex.services.conversation_compact._config", _budget_config(budget)),
+        patch(
+            "cubeplex.services.conversation_compact.shared_checkpointer",
+            return_value=_CpCtx(cp),
+        ),
+        patch("cubeplex.llm.snapshot.load_llm_snapshot", _load),
+        patch("cubeplex.llm.resolver.resolve_task_preset", _preset),
+        patch("cubeplex.llm.builder.build_chain_model", _build),
+        patch("cubeplex.services.conversation_compact.compact_history", _history),
+    ):
+        result = await force_compact_conversation("conv-1", **_creds())
+
+    assert result.compacted is True
+    assert seen["model"] is model
+    assert seen["force"] is True
+    assert seen["fallback_on_error"] is False
+    assert seen["max_summary_tokens"] == budget
+    assert seen["keep_tail_tokens"] == 8_000
+    assert seen["min_compact_messages"] == 4
+    assert seen["tool_result_compressor"].__name__ == "preserve_tool_result_for_compaction"
+
+
+@pytest.mark.asyncio
+async def test_force_compact_summarizer_unavailable_without_credentials() -> None:
+    msgs = [_user(f"message {i}") for i in range(12)]
+    cp = _FakeCp(messages=msgs)
+    with patch(
+        "cubeplex.services.conversation_compact.shared_checkpointer",
+        return_value=_CpCtx(cp),
+    ):
+        result = await force_compact_conversation("conv-1")
+    assert result.ok is False
+    assert result.reason == "summarizer_unavailable"
+    assert cp.saved is None
+
+
+@pytest.mark.asyncio
+async def test_force_compact_model_build_failure_does_not_write() -> None:
+    msgs = [_user(f"message {i}") for i in range(12)]
+    cp = _FakeCp(messages=msgs)
+
+    async def _boom(*_args: Any, **_kwargs: Any) -> CompactionResult:
+        raise RuntimeError("preset missing")
+
+    with (
+        patch(
+            "cubeplex.services.conversation_compact.shared_checkpointer",
+            return_value=_CpCtx(cp),
+        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _boom),
+    ):
+        result = await force_compact_conversation("conv-1", **_creds())
+
+    assert result.ok is False
+    assert result.reason == "summarizer_failed"
+    assert cp.saved is None
+    assert cp.appended is None
