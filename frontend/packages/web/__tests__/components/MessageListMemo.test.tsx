@@ -83,6 +83,55 @@ describe('HistoryAssistantMessage', () => {
     expect(await screen.findByText(/messages\.347/)).toBeInTheDocument()
   })
 
+  it('shows Stopped for a user-aborted reply without hovering', async () => {
+    const stopped = {
+      id: 'msg-stopped',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'partial answer' }],
+      stop_reason: 'aborted',
+      run_id: 'run-stopped',
+      timestamp: 1_700_000_002,
+    } as unknown as AssistantMessageType
+    render(
+      <HistoryAssistantMessage
+        message={stopped}
+        subagentDataMap={{}}
+        toolResultMap={{}}
+        conversationId="conv-1"
+      />,
+      { wrapper },
+    )
+    expect(screen.getByText('partial answer')).toBeInTheDocument()
+    const chip = screen.getByRole('button', { name: 'This run was stopped' })
+    expect(chip).toHaveTextContent('Stopped')
+    chip.click()
+    expect(await screen.findByText('You stopped this response.')).toBeInTheDocument()
+  })
+
+  it('shows Stopped when the only checkpoint is an empty aborted marker', () => {
+    const marker = {
+      id: 'msg-marker',
+      role: 'assistant',
+      content: [],
+      stop_reason: 'aborted',
+      run_id: 'run-marker',
+      metadata: { kind: 'user_stop' },
+      timestamp: 1_700_000_003,
+    } as unknown as AssistantMessageType
+    render(
+      <HistoryAssistantMessage
+        message={marker}
+        subagentDataMap={{}}
+        toolResultMap={{}}
+        conversationId="conv-1"
+      />,
+      { wrapper },
+    )
+    expect(screen.getByRole('button', { name: 'This run was stopped' })).toHaveTextContent(
+      'Stopped',
+    )
+  })
+
   it('paints last_run_error only on the last assistant of that run', () => {
     useMessageStore.setState({
       errors: {

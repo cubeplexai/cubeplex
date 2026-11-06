@@ -826,6 +826,20 @@ async def _build_attachment_content_blocks(
         return blocks
 
 
+async def _record_user_stop_marker(conversation_id: str, run_id: str) -> None:
+    """Best-effort transcript marker. A failure must not fail the stop."""
+    from cubeplex.streams.user_stop import mark_user_stopped_run
+
+    try:
+        await mark_user_stopped_run(conversation_id, run_id)
+    except Exception:
+        logger.opt(exception=True).warning(
+            "user-stop marker failed conversation={} run={}",
+            conversation_id,
+            run_id,
+        )
+
+
 async def _repair_dangling_tool_calls(
     conversation_id: str, *, expected_run_id: str | None = None
 ) -> None:
@@ -2284,6 +2298,14 @@ class RunManager:
                     if not worker_never_started:
                         await _repair_dangling_tool_calls(conversation_id, expected_run_id=run_id)
                         await require_claim()
+                    # Only a user cancel stamps aborted. A preserved completed
+                    # or failed recovery must keep the outcome it already had.
+                    # The marker has to land before mark_run_complete: append
+                    # rejects a run whose completed_at is set.
+                    if terminal_status == "cancelled":
+                        await _record_user_stop_marker(conversation_id, run_id)
+                    if not worker_never_started:
+                        await require_claim()
                         await cp.mark_run_complete(conversation_id, run_id)
                         await require_claim()
                     if pending is not None:
@@ -2911,8 +2933,9 @@ class RunManager:
     ) -> None:
         """Mark a user-stopped run cancelled. Do not publish an ErrorEvent.
 
-        Cancel is a status (cubeloop persists ``stop_reason=aborted``). An
-        ``internal_error`` here is what the chat UI used to render as
+        Cancel is a status. The transcript marker (an empty assistant with
+        ``stop_reason=aborted``) is what the chat chip reads after refresh.
+        An ``internal_error`` here is what the chat UI used to render as
         "Reply failed / Run cancelled".
         """
         from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
@@ -2925,11 +2948,19 @@ class RunManager:
         )
         if claim_token is not None:
             assert ctx is not None
-            if await self._owned_terminal_status(ctx, run_id) is not None:
+            owned = await self._owned_terminal_status(ctx, run_id)
+            # failed (or any other finished status) must not be relabeled as a
+            # user stop. cancelled still gets a marker: the first attempt may
+            # have stored the status and lost the transcript write.
+            if owned not in (None, "cancelled"):
                 return
-            await self._begin_execution_finalization(ctx, run_id)
-            with suppress(Exception):
-                await _repair_dangling_tool_calls(conversation_id)
+            if owned is None:
+                await self._begin_execution_finalization(ctx, run_id)
+                with suppress(Exception):
+                    await _repair_dangling_tool_calls(conversation_id)
+            await _record_user_stop_marker(conversation_id, run_id)
+            if owned == "cancelled":
+                return
         await update_run_meta(
             self._redis,
             prefix=self._key_prefix,
@@ -2941,6 +2972,7 @@ class RunManager:
         if claim_token is None:
             with suppress(Exception):
                 await _repair_dangling_tool_calls(conversation_id)
+            await _record_user_stop_marker(conversation_id, run_id)
 
     async def _append_event(
         self,
@@ -4995,6 +5027,13 @@ class RunManager:
             all_tools = [
                 _t for _t in all_tools if getattr(_t, "name", repr(_t)) not in _mw_tool_names
             ]
+
+        from cubeplex.middleware.user_stop import UserStopMiddleware
+
+        # First, so later transforms never see the marker. An empty assistant
+        # would be an Anthropic prefill or OpenAI null content, and dropping
+        # it keeps the cacheable history prefix byte-identical.
+        cubeloop_middleware.insert(0, UserStopMiddleware())
 
         agent = create_cubeplex_agent(
             # Pre-built chain model so a FallbackBoundModel (chain len > 1)

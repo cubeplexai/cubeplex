@@ -153,6 +153,24 @@ describe('groupAssistantRuns', () => {
     expect(mergeAssistantRun([first])).toBe(first)
   })
 
+  it('keeps earlier text and takes aborted from a trailing empty stop marker', () => {
+    const marker = assistant('a-stop', 'run-1', [])
+    marker.stop_reason = 'aborted'
+    marker.metadata = { kind: 'user_stop' }
+    const messages: Message[] = [assistant('a1', 'run-1', [text('partial')]), marker]
+
+    const rows = groupAssistantRuns(messages)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      kind: 'assistant-run',
+      merged: {
+        id: 'a-stop',
+        stop_reason: 'aborted',
+        content: [text('partial')],
+      },
+    })
+  })
+
   it('starts a new run at a user message or a different run id', () => {
     const user: Message = { id: 'u', role: 'user', content: [text('next')] }
     const messages: Message[] = [
