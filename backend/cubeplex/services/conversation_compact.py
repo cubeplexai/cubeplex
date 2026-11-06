@@ -1,26 +1,29 @@
 """Manual force-compact for a conversation (slash ``/compact``).
 
-Reuses cubeloop compaction helpers (boundary + fallback summariser). On success
-also appends a durable **timeline marker** (synthetic user message) so the UI
-history shows where context was compacted — without storing the literal
-``/compact`` user command.
+Reuses cubeloop compaction helpers (boundary + the compaction-task summariser).
+On success also appends a durable **timeline marker** (synthetic user message)
+so the UI history shows where context was compacted — without storing the
+literal ``/compact`` user command.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from cubeloop.middleware.compaction.boundary import safe_boundary, tail_start_by_tokens
 from cubeloop.middleware.compaction.state import CompactionState, message_refs
-from cubeloop.middleware.compaction.summarizer import build_fallback_summary
+from cubeloop.middleware.compaction.summarizer import summarize
 from cubeloop.providers.base import Message, synthetic_user_message
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.agents.checkpointer import shared_checkpointer
 from cubeplex.config import config as _config
+from cubeplex.credentials.encryption import EncryptionBackend
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,7 @@ _COMPACTION_MARKER_SOURCE = "compaction"
 _COMPACTION_MARKER_TEXT = ""
 
 BusyCheck = Callable[[], Awaitable[bool]]
+Summarizer = Callable[[list[Message], CompactionState | None], Awaitable[CompactionState]]
 
 
 @dataclass(frozen=True)
@@ -69,7 +73,51 @@ def _build_marker(*, boundary: int, source: str = "manual") -> Message:
         "source": source,
         "boundary": boundary,
     }
-    return msg.model_copy(update={"metadata": meta, "timestamp": time.time()})
+    return msg.model_copy(
+        update={
+            "metadata": meta,
+            "timestamp": time.time(),
+            # Stable id so the client append and the later history row match.
+            "id": uuid.uuid4().hex,
+        }
+    )
+
+
+def _max_summary_tokens() -> int | None:
+    raw = _config.get("compaction.max_summary_tokens")
+    if raw is None:
+        return None
+    return int(raw)
+
+
+async def _compaction_summarizer(
+    session: AsyncSession,
+    org_id: str,
+    encryption_backend: EncryptionBackend,
+) -> Summarizer:
+    """Same compaction-task model automatic compaction uses."""
+    from cubeplex.llm.builder import build_chain_model
+    from cubeplex.llm.resolver import resolve_task_preset
+    from cubeplex.llm.snapshot import load_llm_snapshot
+
+    snap = await load_llm_snapshot(session, org_id, encryption_backend)
+    preset = resolve_task_preset(snap, "compaction")
+    model = build_chain_model(snap, preset)
+    budget = _max_summary_tokens()
+
+    async def _run(
+        messages: list[Message],
+        existing: CompactionState | None,
+    ) -> CompactionState:
+        return await summarize(
+            model=model,
+            messages_to_summarize=messages,
+            ref_messages=messages,
+            existing=existing,
+            max_summary_tokens=budget,
+        )
+
+    return _run
 
 
 async def force_compact_conversation(
@@ -77,8 +125,12 @@ async def force_compact_conversation(
     *,
     is_busy: BusyCheck | None = None,
     source: str = "manual",
+    summarizer: Summarizer | None = None,
+    session: AsyncSession | None = None,
+    org_id: str | None = None,
+    encryption_backend: EncryptionBackend | None = None,
 ) -> ForceCompactResult:
-    """Summarise older turns into checkpointer ``extra`` without a model call.
+    """Summarise older turns with the compaction-task model.
 
     Does **not** rewrite transcript messages. On success appends a synthetic
     compaction marker so history UI can show where compact happened.
@@ -125,11 +177,24 @@ async def force_compact_conversation(
         if not to_summarize:
             return ForceCompactResult(ok=True, compacted=False, reason="nothing_new")
 
-        new_state = build_fallback_summary(
-            to_summarize,
-            existing=existing,
-            ref_messages=to_summarize,
-        )
+        try:
+            run = summarizer
+            if run is None:
+                if session is None or not org_id or encryption_backend is None:
+                    return ForceCompactResult(
+                        ok=False,
+                        compacted=False,
+                        reason="summarizer_unavailable",
+                    )
+                run = await _compaction_summarizer(session, org_id, encryption_backend)
+            new_state = await run(to_summarize, existing)
+        except Exception:
+            logger.warning(
+                "force_compact summarizer failed conversation_id=%s",
+                conversation_id,
+                exc_info=True,
+            )
+            return ForceCompactResult(ok=False, compacted=False, reason="summarizer_failed")
 
         # Refuse to write if a run started or history advanced mid-flight.
         if await _busy():

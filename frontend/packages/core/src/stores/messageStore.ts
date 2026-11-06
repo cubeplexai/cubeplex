@@ -787,6 +787,8 @@ async function fillHistoryGap(
 }
 
 function historyCounterpartKey(message: Message): string | null {
+  const boundary = compactionBoundary(message)
+  if (boundary !== null) return JSON.stringify(['compaction', boundary])
   if (message.role === 'user' && message.metadata?.source === 'background_task') {
     const noticeId = message.metadata.notice_id ?? message.metadata.steer_id
     if (typeof noticeId === 'string' && noticeId) {
@@ -807,6 +809,16 @@ function historyCounterpartKey(message: Message): string | null {
     return JSON.stringify([message.run_id, message.role])
   }
   return JSON.stringify([message.run_id, message.role, message.content])
+}
+
+function compactionBoundary(message: Message): number | null {
+  if (message.role !== 'user') return null
+  const meta = message.metadata
+  if (!meta || meta.synthetic !== true) return null
+  if (meta.synthetic_source !== 'compaction' && meta.kind !== 'compaction') return null
+  const compaction = meta.compaction
+  if (!compaction || typeof compaction !== 'object' || !('boundary' in compaction)) return null
+  return typeof compaction.boundary === 'number' ? compaction.boundary : null
 }
 
 function sortHistoryMessages(messages: Message[]): Message[] {

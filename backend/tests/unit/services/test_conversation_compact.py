@@ -124,6 +124,14 @@ async def test_force_compact_busy_at_start() -> None:
     assert result.reason == "busy"
 
 
+async def _llm_summarizer(
+    messages: list[Any],
+    existing: CompactionState | None,
+) -> CompactionState:
+    del messages, existing
+    return CompactionState(summary="llm handoff", is_fallback=False)
+
+
 @pytest.mark.asyncio
 async def test_force_compact_writes_extra_when_enough_messages() -> None:
     msgs = [_user(f"message {i} " + ("x" * 200)) for i in range(12)]
@@ -142,18 +150,21 @@ async def test_force_compact_writes_extra_when_enough_messages() -> None:
             return_value=8,
         ),
     ):
-        result = await force_compact_conversation("conv-1")
+        result = await force_compact_conversation("conv-1", summarizer=_llm_summarizer)
 
     assert result.compacted is True
     assert result.boundary == 8
     assert cp.saved is not None
-    assert "compaction" in cp.saved
+    assert cp.saved["compaction"]["summary"] == "llm handoff"
+    assert cp.saved["compaction"]["is_fallback"] is False
     assert cp.saved["compaction_until_msg_index"] == 8
     assert result.marker is not None
+    assert result.marker["id"]
     assert result.marker["metadata"]["synthetic"] is True
     assert result.marker["metadata"]["synthetic_source"] == "compaction"
     assert cp.appended is not None
     assert len(cp.appended) == 1
+    assert cp.appended[0].id == result.marker["id"]
 
 
 @pytest.mark.asyncio
@@ -184,7 +195,7 @@ async def test_force_compact_keep_tail_zero_uses_default() -> None:
             return_value=8,
         ),
     ):
-        result = await force_compact_conversation("conv-1")
+        result = await force_compact_conversation("conv-1", summarizer=_llm_summarizer)
     assert result.compacted is True
     # Default keep-tail (8000) applied when config returns 0
     tail.assert_called()
@@ -262,7 +273,11 @@ async def test_force_compact_busy_before_write() -> None:
             return_value=8,
         ),
     ):
-        result = await force_compact_conversation("conv-1", is_busy=busy)
+        result = await force_compact_conversation(
+            "conv-1",
+            is_busy=busy,
+            summarizer=_llm_summarizer,
+        )
 
     assert result.ok is False
     assert result.reason == "busy"
@@ -294,7 +309,11 @@ async def test_force_compact_busy_after_save() -> None:
             return_value=8,
         ),
     ):
-        result = await force_compact_conversation("conv-1", is_busy=busy)
+        result = await force_compact_conversation(
+            "conv-1",
+            is_busy=busy,
+            summarizer=_llm_summarizer,
+        )
 
     assert result.ok is False
     assert result.reason == "busy_after_save"
@@ -322,7 +341,7 @@ async def test_force_compact_aborts_when_history_changes() -> None:
             return_value=8,
         ),
     ):
-        result = await force_compact_conversation("conv-1")
+        result = await force_compact_conversation("conv-1", summarizer=_llm_summarizer)
 
     assert result.compacted is False
     assert result.reason == "history_changed"
@@ -347,5 +366,40 @@ async def test_force_compact_history_null_on_reload() -> None:
             return_value=8,
         ),
     ):
-        result = await force_compact_conversation("conv-1")
+        result = await force_compact_conversation("conv-1", summarizer=_llm_summarizer)
     assert result.reason == "history_changed"
+
+
+@pytest.mark.asyncio
+async def test_force_compact_summarizer_failure_does_not_write() -> None:
+    msgs = [_user(f"message {i}") for i in range(12)]
+    cp = _FakeCp(messages=msgs)
+
+    async def _boom(
+        messages: list[Any],
+        existing: CompactionState | None,
+    ) -> CompactionState:
+        del messages, existing
+        raise RuntimeError("model down")
+
+    with (
+        patch(
+            "cubeplex.services.conversation_compact.shared_checkpointer",
+            return_value=_CpCtx(cp),
+        ),
+        patch(
+            "cubeplex.services.conversation_compact.tail_start_by_tokens",
+            return_value=8,
+        ),
+        patch(
+            "cubeplex.services.conversation_compact.safe_boundary",
+            return_value=8,
+        ),
+    ):
+        result = await force_compact_conversation("conv-1", summarizer=_boom)
+
+    assert result.ok is False
+    assert result.compacted is False
+    assert result.reason == "summarizer_failed"
+    assert cp.saved is None
+    assert cp.appended is None

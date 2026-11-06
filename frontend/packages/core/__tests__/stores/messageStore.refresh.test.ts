@@ -68,6 +68,53 @@ describe('conversation baseline refresh', () => {
     expect(useMessageStore.getState()).toBe(before)
   })
 
+  it('collapses a local compaction marker into the persisted row', async () => {
+    useMessageStore.setState({
+      messages: {
+        [conversationId]: [
+          {
+            id: 'local-marker',
+            role: 'user',
+            content: [{ type: 'text', text: '' }],
+            metadata: {
+              synthetic: true,
+              synthetic_source: 'compaction',
+              kind: 'compaction',
+              compaction: { source: 'manual', boundary: 8 },
+            },
+          },
+        ],
+      },
+    })
+    fetchMock.mockResolvedValueOnce(
+      response('W/"compact"', {
+        messages: [
+          {
+            id: '',
+            seq: 4,
+            role: 'user',
+            content: [{ type: 'text', text: '' }],
+            metadata: {
+              synthetic: true,
+              synthetic_source: 'compaction',
+              kind: 'compaction',
+              compaction: { source: 'manual', boundary: 8 },
+            },
+          },
+        ],
+        oldest_seq: 4,
+      }),
+    )
+
+    await useMessageStore.getState().loadMessages(client, conversationId, refreshOptions)
+
+    const markers = (useMessageStore.getState().messages[conversationId] ?? []).filter(
+      (message) => message.metadata?.synthetic_source === 'compaction',
+    )
+    expect(markers).toHaveLength(1)
+    expect(markers[0]?.seq).toBe(4)
+  })
+
   it('updates control state without replacing unchanged history or card props', async () => {
     fetchMock.mockResolvedValueOnce(response('W/"one"'))
     await useMessageStore.getState().loadMessages(client, conversationId)
