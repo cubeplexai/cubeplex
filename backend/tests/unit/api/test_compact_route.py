@@ -33,6 +33,11 @@ def _session() -> MagicMock:
     return MagicMock()
 
 
+def _request() -> MagicMock:
+    app = SimpleNamespace(state=SimpleNamespace(encryption_backend=object()))
+    return MagicMock(app=app)
+
+
 @pytest.mark.asyncio
 async def test_compact_route_404_when_missing() -> None:
     repo = AsyncMock()
@@ -45,6 +50,7 @@ async def test_compact_route_404_when_missing() -> None:
             await compact_conversation(
                 conversation_id="missing",
                 session=_session(),
+                raw_request=_request(),
                 ctx=_ctx(),  # type: ignore[arg-type]
                 rds=_rds(),  # type: ignore[arg-type]
             )
@@ -65,6 +71,7 @@ async def test_compact_route_409_lock_not_acquired() -> None:
             await compact_conversation(
                 conversation_id="c1",
                 session=_session(),
+                raw_request=_request(),
                 ctx=_ctx(),  # type: ignore[arg-type]
                 rds=rds,  # type: ignore[arg-type]
             )
@@ -90,6 +97,7 @@ async def test_compact_route_409_when_active_run() -> None:
             await compact_conversation(
                 conversation_id="c1",
                 session=_session(),
+                raw_request=_request(),
                 ctx=_ctx(),  # type: ignore[arg-type]
                 rds=_rds(),  # type: ignore[arg-type]
             )
@@ -127,6 +135,7 @@ async def test_compact_route_success_with_marker() -> None:
         body = await compact_conversation(
             conversation_id="c1",
             session=_session(),
+            raw_request=_request(),
             ctx=_ctx(),  # type: ignore[arg-type]
             rds=_rds(),  # type: ignore[arg-type]
         )
@@ -161,6 +170,7 @@ async def test_compact_route_history_changed_409() -> None:
             await compact_conversation(
                 conversation_id="c1",
                 session=_session(),
+                raw_request=_request(),
                 ctx=_ctx(),  # type: ignore[arg-type]
                 rds=_rds(),  # type: ignore[arg-type]
             )
@@ -193,7 +203,41 @@ async def test_compact_route_busy_result_409() -> None:
             await compact_conversation(
                 conversation_id="c1",
                 session=_session(),
+                raw_request=_request(),
                 ctx=_ctx(),  # type: ignore[arg-type]
                 rds=_rds(),  # type: ignore[arg-type]
             )
     assert ei.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_compact_route_summarizer_failure_502() -> None:
+    repo = AsyncMock()
+    repo.get_by_id = AsyncMock(return_value=SimpleNamespace(id="c1"))
+
+    async def _force(conversation_id: str, **kwargs: Any) -> ForceCompactResult:
+        return ForceCompactResult(ok=False, compacted=False, reason="summarizer_failed")
+
+    with (
+        patch(
+            "cubeplex.api.routes.v1.conversations.ConversationRepository",
+            return_value=repo,
+        ),
+        patch(
+            "cubeplex.api.routes.v1.conversations.get_active_run",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "cubeplex.services.conversation_compact.force_compact_conversation",
+            new=_force,
+        ),
+    ):
+        with pytest.raises(HTTPException) as ei:
+            await compact_conversation(
+                conversation_id="c1",
+                raw_request=_request(),
+                session=_session(),
+                ctx=_ctx(),  # type: ignore[arg-type]
+                rds=_rds(),  # type: ignore[arg-type]
+            )
+    assert ei.value.status_code == 502

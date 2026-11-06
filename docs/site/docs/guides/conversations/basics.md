@@ -79,9 +79,10 @@ dismiss. Client commands never create a user message bubble for the slash text.
 | `/mcp` | Open workspace MCP connectors |
 | `/compact` | Force-compact older context for this conversation (idle only) |
 
-`/compact` does **not** post a chat bubble with the text `/compact`. When
-compaction succeeds, the timeline shows a centered **Context compacted** marker
-(and a short toast). That marker is stored in conversation history so it
+`/compact` does **not** post a chat bubble with the text `/compact`. It asks
+the compaction model to summarize older turns, and the request finishes when
+that summary is saved. The timeline then shows one centered **Context compacted**
+marker (and a short toast). That marker is stored in conversation history so it
 remains visible after reload — it is not a user message.
 
 Unknown text like `/zzzzz` with no match sends as a normal message (or steers

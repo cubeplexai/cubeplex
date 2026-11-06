@@ -2236,6 +2236,7 @@ async def get_run_meta_route(
 @router.post("/{conversation_id}/compact", status_code=status.HTTP_200_OK)
 async def compact_conversation(
     conversation_id: str,
+    raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
     rds: Annotated[RedisHandle, Depends(redis_dep)],
@@ -2265,7 +2266,9 @@ async def compact_conversation(
     # not let finally delete a later owner's lock).
     lock_key = f"{rds.key_prefix}:conversation_compact_lock:{conversation_id}"
     lock_token = secrets.token_hex(16)
-    acquired = bool(await rds.client.set(lock_key, lock_token, nx=True, ex=120))
+    # The summary model can outlast the old 120s window. A later compact must
+    # not start while this one is still calling the model.
+    acquired = bool(await rds.client.set(lock_key, lock_token, nx=True, ex=300))
     if not acquired:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -2288,7 +2291,15 @@ async def compact_conversation(
         result = await force_compact_conversation(
             conversation_id,
             is_busy=_run_active,
+            session=session,
+            org_id=ctx.org_id,
+            encryption_backend=getattr(raw_request.app.state, "encryption_backend", None),
         )
+        if result.reason in {"summarizer_failed", "summarizer_unavailable"}:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not summarize conversation context",
+            )
         if not result.ok and result.reason in {"busy", "busy_after_save"}:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
