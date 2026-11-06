@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from cubeloop.middleware.compaction import CompactionResult
 from cubeloop.middleware.compaction.state import CompactionState
 from cubeloop.providers.base import TextContent, UserMessage
 
@@ -19,6 +20,20 @@ from cubeplex.services.conversation_compact import (
 
 def _user(text: str) -> UserMessage:
     return UserMessage(content=[TextContent(text=text)])
+
+
+def _creds() -> dict[str, Any]:
+    return {"session": object(), "org_id": "org-1", "encryption_backend": object()}
+
+
+def _result(*, compacted: bool, reason: str | None, boundary: int = 8) -> CompactionResult:
+    state = CompactionState(summary="llm handoff", is_fallback=False) if compacted else None
+    return CompactionResult(
+        compacted=compacted,
+        reason=reason,
+        state=state,
+        boundary=boundary,
+    )
 
 
 class _FakeCp:
@@ -124,12 +139,8 @@ async def test_force_compact_busy_at_start() -> None:
     assert result.reason == "busy"
 
 
-async def _llm_summarizer(
-    messages: list[Any],
-    existing: CompactionState | None,
-) -> CompactionState:
-    del messages, existing
-    return CompactionState(summary="llm handoff", is_fallback=False)
+async def _ok(*_args: Any, **_kwargs: Any) -> CompactionResult:
+    return _result(compacted=True, reason=None)
 
 
 @pytest.mark.asyncio
@@ -141,16 +152,9 @@ async def test_force_compact_writes_extra_when_enough_messages() -> None:
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ),
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=8,
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _ok),
     ):
-        result = await force_compact_conversation("conv-1", summarizer=_llm_summarizer)
+        result = await force_compact_conversation("conv-1", **_creds())
 
     assert result.compacted is True
     assert result.boundary == 8
@@ -171,6 +175,11 @@ async def test_force_compact_writes_extra_when_enough_messages() -> None:
 async def test_force_compact_keep_tail_zero_uses_default() -> None:
     msgs = [_user(f"message {i}") for i in range(12)]
     cp = _FakeCp(messages=msgs)
+    seen: dict[str, Any] = {}
+
+    async def _capture(*_args: Any, **kwargs: Any) -> CompactionResult:
+        seen.update(kwargs)
+        return _result(compacted=True, reason=None)
 
     class _Cfg:
         def get(self, key: str, default: object = None) -> object:
@@ -186,67 +195,53 @@ async def test_force_compact_keep_tail_zero_uses_default() -> None:
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ) as tail,
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=8,
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _capture),
     ):
-        result = await force_compact_conversation("conv-1", summarizer=_llm_summarizer)
+        result = await force_compact_conversation("conv-1", **_creds())
     assert result.compacted is True
-    # Default keep-tail (8000) applied when config returns 0
-    tail.assert_called()
-    assert tail.call_args.args[1] == compact_mod._DEFAULT_KEEP_TAIL
+    assert seen["keep_tail_tokens"] == compact_mod._DEFAULT_KEEP_TAIL
 
 
 @pytest.mark.asyncio
 async def test_force_compact_no_boundary() -> None:
     msgs = [_user(f"message {i}") for i in range(12)]
     cp = _FakeCp(messages=msgs)
+
+    async def _none(*_args: Any, **_kwargs: Any) -> CompactionResult:
+        return _result(compacted=False, reason="no_boundary")
+
     with (
         patch(
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ),
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=None,
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _none),
     ):
-        result = await force_compact_conversation("conv-1")
+        result = await force_compact_conversation("conv-1", **_creds())
     assert result.compacted is False
     assert result.reason == "no_boundary"
+    assert cp.saved is None
 
 
 @pytest.mark.asyncio
-async def test_force_compact_nothing_new_when_boundary_not_advanced() -> None:
+async def test_force_compact_below_threshold_does_not_write() -> None:
     msgs = [_user(f"message {i}") for i in range(12)]
-    extra = {"compaction_until_msg_index": 8}
-    cp = _FakeCp(messages=msgs, extra=extra)
+    cp = _FakeCp(messages=msgs, extra={"compaction_until_msg_index": 8})
+
+    async def _under(*_args: Any, **_kwargs: Any) -> CompactionResult:
+        return _result(compacted=False, reason="below_threshold", boundary=8)
+
     with (
         patch(
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ),
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=8,  # <= prev_boundary
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _under),
     ):
-        result = await force_compact_conversation("conv-1")
+        result = await force_compact_conversation("conv-1", **_creds())
     assert result.compacted is False
-    assert result.reason == "no_boundary"
+    assert result.reason == "below_threshold"
+    assert cp.saved is None
 
 
 @pytest.mark.asyncio
@@ -264,20 +259,9 @@ async def test_force_compact_busy_before_write() -> None:
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ),
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=8,
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _ok),
     ):
-        result = await force_compact_conversation(
-            "conv-1",
-            is_busy=busy,
-            summarizer=_llm_summarizer,
-        )
+        result = await force_compact_conversation("conv-1", is_busy=busy, **_creds())
 
     assert result.ok is False
     assert result.reason == "busy"
@@ -300,20 +284,9 @@ async def test_force_compact_busy_after_save() -> None:
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ),
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=8,
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _ok),
     ):
-        result = await force_compact_conversation(
-            "conv-1",
-            is_busy=busy,
-            summarizer=_llm_summarizer,
-        )
+        result = await force_compact_conversation("conv-1", is_busy=busy, **_creds())
 
     assert result.ok is False
     assert result.reason == "busy_after_save"
@@ -332,16 +305,9 @@ async def test_force_compact_aborts_when_history_changes() -> None:
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ),
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=8,
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _ok),
     ):
-        result = await force_compact_conversation("conv-1", summarizer=_llm_summarizer)
+        result = await force_compact_conversation("conv-1", **_creds())
 
     assert result.compacted is False
     assert result.reason == "history_changed"
@@ -357,16 +323,9 @@ async def test_force_compact_history_null_on_reload() -> None:
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ),
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=8,
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _ok),
     ):
-        result = await force_compact_conversation("conv-1", summarizer=_llm_summarizer)
+        result = await force_compact_conversation("conv-1", **_creds())
     assert result.reason == "history_changed"
 
 
@@ -375,28 +334,17 @@ async def test_force_compact_summarizer_failure_does_not_write() -> None:
     msgs = [_user(f"message {i}") for i in range(12)]
     cp = _FakeCp(messages=msgs)
 
-    async def _boom(
-        messages: list[Any],
-        existing: CompactionState | None,
-    ) -> CompactionState:
-        del messages, existing
-        raise RuntimeError("model down")
+    async def _failed(*_args: Any, **_kwargs: Any) -> CompactionResult:
+        return _result(compacted=False, reason="summarizer_failed", boundary=0)
 
     with (
         patch(
             "cubeplex.services.conversation_compact.shared_checkpointer",
             return_value=_CpCtx(cp),
         ),
-        patch(
-            "cubeplex.services.conversation_compact.tail_start_by_tokens",
-            return_value=8,
-        ),
-        patch(
-            "cubeplex.services.conversation_compact.safe_boundary",
-            return_value=8,
-        ),
+        patch("cubeplex.services.conversation_compact._compact_with_model", _failed),
     ):
-        result = await force_compact_conversation("conv-1", summarizer=_boom)
+        result = await force_compact_conversation("conv-1", **_creds())
 
     assert result.ok is False
     assert result.compacted is False
