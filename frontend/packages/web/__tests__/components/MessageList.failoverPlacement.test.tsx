@@ -183,4 +183,28 @@ describe('MessageList failover banner placement', () => {
     expect(earlier.compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(result.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
+
+  it('hides per-turn action row on historical checkpoints of the active streaming run', () => {
+    useMessageStore.setState({
+      messages: { [CONV]: [userMsg, assistantMsg] },
+      isStreaming: true,
+      streamingConversationId: CONV,
+      currentRunId: 'run-1',
+      streamAgents: {
+        main: {
+          text: 'more text coming...',
+          toolCalls: [],
+          toolResults: [],
+          thinking: '',
+          blocks: [{ type: 'text', text: 'more text coming...' }],
+          name: null,
+        },
+      },
+    } as never)
+
+    render(<MessageList conversationId={CONV} />, { wrapper })
+
+    // Fork button has aria-label 'Fork conversation'
+    expect(screen.queryByRole('button', { name: 'Fork conversation' })).toBeNull()
+  })
 })
