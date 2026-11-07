@@ -12,6 +12,10 @@ from typing import Any
 
 import opensandbox
 from loguru import logger
+from opensandbox.adapters import command_adapter as _cmd_adapter
+from opensandbox.adapters.converter.command_execution import (
+    decode_sse_event_data as _decode_sse_event_data,
+)
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import SandboxApiException as _ProviderApiError
 from opensandbox.exceptions import SandboxException as _ProviderError
@@ -33,6 +37,29 @@ from cubeplex.sandbox.panel_token import (
     get_panel_secret,
     sign_panel_token,
 )
+
+_orig_aiter_sse_events = _cmd_adapter.aiter_sse_events  # type: ignore[attr-defined]
+
+
+async def _fast_aiter_sse_events(response: Any) -> Any:
+    """Stream SSE events and exit immediately upon execution completion.
+
+    OpenSandbox SDK's default foreground streaming drains to EOF instead of
+    breaking on ``execution_complete`` / ``error``, which adds a ~1s delay per
+    call because the execd server holds the chunked HTTP connection open for
+    a grace-period sleep (#1528 in opensandbox only broke for background mode).
+    By terminating the event stream as soon as terminal completion events arrive,
+    foreground commands complete in milliseconds over standard SSE with zero
+    polling.
+    """
+    async for event in _orig_aiter_sse_events(response):
+        yield event
+        node = _decode_sse_event_data(getattr(event, "data", ""))
+        if node is not None and node.type in ("execution_complete", "error"):
+            break
+
+
+_cmd_adapter.aiter_sse_events = _fast_aiter_sse_events  # type: ignore[attr-defined]
 
 # Sourced by /etc/bash.bashrc in the sandbox image — keep the two in sync.
 # /run is container-local: writing under /workspace would strand placeholders on
@@ -108,28 +135,16 @@ class OpenSandbox(Sandbox):
         as_root: bool = False,
         on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
-        """Run command and wait for its result.
-
-        Uses background=True so execd returns immediately after queueing the
-        command and closes the SSE stream once ``execution_complete`` arrives —
-        no extra 1-second grace-period wait that the foreground path imposes.
-        Output is retrieved via ``get_background_command_logs`` after the command
-        finishes.  ``on_chunk`` is still delivered in real-time via callbacks.
-        """
         # Merge: run-level env (set by manager) is the base; per-call envs win.
         merged = {**self._run_env, **(envs or {})}
         uid: int | None = None if as_root else self._run_uid
         gid: int | None = None if as_root or uid is None else self._run_gid
-        # background=True: execd closes the SSE stream on execution_complete
-        # instead of waiting a 1-second grace period.  We poll status and fetch
-        # logs ourselves, which saves ~1 s per call.
         opts = RunCommandOpts(
             working_directory=self._workdir,
             envs=merged if merged else None,
             timeout=timedelta(seconds=timeout) if timeout is not None else None,
             uid=uid,
             gid=gid,
-            background=True,
         )
 
         output_parts: list[str] = []
@@ -154,33 +169,26 @@ class OpenSandbox(Sandbox):
         async def _run() -> ExecuteResult:
             with _as_sandbox_error():
                 execution = await self._sandbox.commands.run(command, opts=opts, handlers=handlers)
-                ref = str(execution.id or "")
-
-                # Poll until the command finishes (typically already done).
-                exit_code: int | None = None
-                if ref:
-                    while True:
-                        status = await self._sandbox.commands.get_command_status(ref)
-                        running = getattr(status, "running", None)
-                        code = getattr(status, "exit_code", None)
-                        if running is False or code is not None:
-                            exit_code = code
-                            break
-                        await asyncio.sleep(0.05)
-
-                # Fetch any output not yet delivered via streaming callbacks.
-                if ref and not output_parts:
-                    try:
-                        logs = await self._sandbox.commands.get_background_command_logs(
-                            ref, cursor=0
-                        )
-                        content = getattr(logs, "content", "") or ""
-                        if content:
-                            output_parts.append(content)
-                    except Exception as exc:
-                        logger.warning("Could not fetch execute logs for {}: {}", ref, exc)
-
                 output = "".join(output_parts)
+                if not output and getattr(execution, "logs", None):
+                    lines = [m.text for m in execution.logs.stdout] + [
+                        m.text for m in execution.logs.stderr
+                    ]
+                    output = "\n".join(lines) if lines else ""
+
+                exit_code = getattr(execution, "exit_code", None)
+                exec_id = getattr(execution, "id", None)
+                if not isinstance(exit_code, int) and isinstance(exec_id, str):
+                    try:
+                        status = await self._sandbox.commands.get_command_status(exec_id)
+                        code = getattr(status, "exit_code", None)
+                        if isinstance(code, int):
+                            exit_code = code
+                    except Exception as e:
+                        logger.warning("Could not get exit code for command: {}", e)
+                if exit_code is not None and not isinstance(exit_code, int):
+                    exit_code = 0
+
                 return ExecuteResult(output=output, exit_code=exit_code)
 
         try:
