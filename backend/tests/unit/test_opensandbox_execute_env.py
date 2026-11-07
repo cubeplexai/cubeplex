@@ -354,3 +354,59 @@ async def test_null_run_uid_skips_privilege_drop() -> None:
     assert opts is not None
     assert opts.uid is None
     assert opts.gid is None
+
+
+@pytest.mark.asyncio
+async def test_execute_uses_background_mode_and_fetches_logs() -> None:
+    backend, raw = _make_backend()
+    status_mock = MagicMock(running=False, exit_code=0)
+    raw.commands.get_command_status = AsyncMock(return_value=status_mock)
+    logs_mock = MagicMock(content="hello output\n", cursor=13)
+    raw.commands.get_background_command_logs = AsyncMock(return_value=logs_mock)
+
+    async def fake_run_with_id(
+        command: str, *, opts: RunCommandOpts | None = None, **_: object
+    ) -> MagicMock:
+        backend._test_run_calls.append((command, opts))  # type: ignore[attr-defined]
+        result = MagicMock()
+        result.id = "cmd-123"
+        return result
+
+    raw.commands.run = fake_run_with_id
+
+    res = await backend.execute("echo test")
+    assert res.output == "hello output\n"
+    assert res.exit_code == 0
+    _, opts = backend._test_run_calls[0]  # type: ignore[attr-defined]
+    assert opts is not None
+    assert opts.background is True
+    raw.commands.get_command_status.assert_awaited_once_with("cmd-123")
+    raw.commands.get_background_command_logs.assert_awaited_once_with("cmd-123", cursor=0)
+
+
+@pytest.mark.asyncio
+async def test_execute_streams_chunks_via_handlers() -> None:
+    backend, raw = _make_backend()
+    status_mock = MagicMock(running=False, exit_code=0)
+    raw.commands.get_command_status = AsyncMock(return_value=status_mock)
+
+    chunks: list[str] = []
+
+    async def fake_run_stream(
+        command: str, *, opts: RunCommandOpts | None = None, handlers: object = None, **_: object
+    ) -> MagicMock:
+        backend._test_run_calls.append((command, opts))  # type: ignore[attr-defined]
+        if handlers is not None and hasattr(handlers, "on_stdout") and handlers.on_stdout:
+            msg = MagicMock(text="chunk 1")
+            await handlers.on_stdout(msg)
+            msg2 = MagicMock(text="chunk 2")
+            await handlers.on_stdout(msg2)
+        result = MagicMock()
+        result.id = "cmd-stream"
+        return result
+
+    raw.commands.run = fake_run_stream
+    res = await backend.execute("echo test", on_chunk=chunks.append)
+    assert res.output == "chunk 1chunk 2"
+    assert res.exit_code == 0
+    assert chunks == ["chunk 1", "chunk 2"]

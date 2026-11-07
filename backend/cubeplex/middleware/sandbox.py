@@ -912,7 +912,6 @@ def _make_execute_tool(
                         live_commands[command_id] = (handle, args.notify_on_complete)
                     if on_live is not None:
                         on_live()
-                    await _write_sandbox_log(sandbox, log_path, b"")
                     bg_deadline = time.monotonic() + AUTO_BACKGROUND_SECONDS
                     kill_at = (
                         time.monotonic() + background_timeout
@@ -1012,6 +1011,7 @@ def _make_execute_tool(
                             if handoff is not None and not handed_off:
                                 bg_deadline = now + _BACKGROUND_POLL_INTERVAL_SECONDS
                                 continue
+                            await _write_sandbox_log(sandbox, log_path, b"")
                             if handoff is None and kill_at is not None:
                                 _schedule_deadline(
                                     command_id,
