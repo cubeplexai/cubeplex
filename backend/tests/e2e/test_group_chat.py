@@ -209,6 +209,7 @@ class TestGroupChatRunContextResolution:
             sender_display_name,
             sandbox_mode,
             topic_creator_user_id,
+            topic_title,
         ) = await _resolve_topic_run_context(conv_row, ctx)
 
         assert topic_id_out == topic_id
@@ -218,6 +219,7 @@ class TestGroupChatRunContextResolution:
         assert sender_display_name is not None and "@" in sender_display_name
         assert sandbox_mode == "dedicated"
         assert topic_creator_user_id == creator_user_id
+        assert topic_title == "Resolver Probe"
 
     @pytest.mark.anyio
     async def test_personal_conversation_resolver_returns_no_group_chat(
@@ -266,6 +268,7 @@ class TestGroupChatRunContextResolution:
             sender_display_name,
             sandbox_mode,
             topic_creator_user_id,
+            topic_title,
         ) = await _resolve_topic_run_context(conv_row, ctx)
 
         assert topic_id is None
@@ -275,6 +278,7 @@ class TestGroupChatRunContextResolution:
         assert sender_display_name is not None
         assert sandbox_mode is None
         assert topic_creator_user_id is None
+        assert topic_title is None
 
 
 class TestDedicatedSandboxIsolation:

@@ -130,11 +130,11 @@ async def _resolve_topic_run_context(
     conversation: Conversation,
     ctx: RequestContext,
     session: AsyncSession | None = None,
-) -> tuple[str | None, bool, str | None, str | None, str | None]:
+) -> tuple[str | None, bool, str | None, str | None, str | None, str | None]:
     """Resolve topic fields needed to build a RunContext.
 
     Returns ``(topic_id, is_group_chat, sender_display_name, sandbox_mode,
-    topic_creator_user_id)``. ``is_group_chat`` is read straight off the
+    topic_creator_user_id, topic_title)``. ``is_group_chat`` is read straight off the
     conversation row — ``Conversation.is_group_chat`` is the source of
     truth. For personal (non-topic) conversations, topic-only fields are
     ``None``.
@@ -149,11 +149,12 @@ async def _resolve_topic_run_context(
     sender_display_name: str | None = None
     sandbox_mode: str | None = None
     topic_creator_user_id: str | None = None
+    topic_title: str | None = None
 
     if topic_id is not None:
         from cubeplex.repositories.topic import TopicRepository
 
-        async def _read(topic_session: AsyncSession) -> tuple[str | None, str | None]:
+        async def _read(topic_session: AsyncSession) -> tuple[str | None, str | None, str | None]:
             topic_repo = TopicRepository(
                 topic_session,
                 org_id=ctx.org_id,
@@ -162,14 +163,14 @@ async def _resolve_topic_run_context(
             )
             topic_obj = await topic_repo.get(topic_id)
             if topic_obj is None:
-                return None, None
-            return topic_obj.sandbox_mode, topic_obj.creator_user_id
+                return None, None, None
+            return topic_obj.sandbox_mode, topic_obj.creator_user_id, topic_obj.title
 
         if session is not None:
-            sandbox_mode, topic_creator_user_id = await _read(session)
+            sandbox_mode, topic_creator_user_id, topic_title = await _read(session)
         else:
             async with async_session_maker() as topic_session:
-                sandbox_mode, topic_creator_user_id = await _read(topic_session)
+                sandbox_mode, topic_creator_user_id, topic_title = await _read(topic_session)
 
     # Stamp the sender on every message (1:1 included) so a later 1:1→group
     # conversion can attribute past messages. Display is gated on is_group_chat
@@ -182,6 +183,7 @@ async def _resolve_topic_run_context(
         sender_display_name,
         sandbox_mode,
         topic_creator_user_id,
+        topic_title,
     )
 
 
@@ -1662,6 +1664,7 @@ async def send_message(
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
+        _topic_title,
     ) = await _resolve_topic_run_context(conversation, ctx)
 
     run_manager = raw_request.app.state.run_manager
@@ -1671,6 +1674,7 @@ async def send_message(
         workspace_id=ctx.workspace_id,
         conversation_id=conversation_id,
         topic_id=_topic_id,
+        topic_title=_topic_title,
         is_group_chat=_is_group_chat,
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,
@@ -2460,6 +2464,7 @@ async def steer_active_run(
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
+        _topic_title,
     ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
     steering_repo = SteeringMessageRepository(
@@ -2779,6 +2784,7 @@ async def submit_sandbox_confirm(
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
+        _topic_title,
     ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
     from cubeloop.hitl.types import ApproveAnswer
@@ -2815,6 +2821,7 @@ async def submit_sandbox_confirm(
         workspace_id=ctx.workspace_id,
         conversation_id=conversation_id,
         topic_id=_topic_id,
+        topic_title=_topic_title,
         is_group_chat=_is_group_chat,
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,
@@ -2888,6 +2895,7 @@ async def submit_ask_user_answer(
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
+        _topic_title,
     ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
     from cubeplex.agents.checkpointer import shared_checkpointer
@@ -2921,6 +2929,7 @@ async def submit_ask_user_answer(
         workspace_id=ctx.workspace_id,
         conversation_id=conversation_id,
         topic_id=_topic_id,
+        topic_title=_topic_title,
         is_group_chat=_is_group_chat,
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,

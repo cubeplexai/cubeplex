@@ -102,6 +102,7 @@ async def resume_paused_run(
     conversation_id, user_id, org_id, workspace_id, topic_id, is_group_chat = resolved
     sandbox_mode: str | None = None
     topic_creator_user_id: str | None = None
+    topic_title: str | None = None
     if topic_id is not None or is_group_chat:
         im_bound = False
         if topic_id is not None:
@@ -123,6 +124,7 @@ async def resume_paused_run(
                     im_bound = "im" in (topic_row.attributes or {})
                     sandbox_mode = topic_row.sandbox_mode
                     topic_creator_user_id = topic_row.creator_user_id
+                    topic_title = topic_row.title
 
         if not im_bound:
             logger.warning(
@@ -180,6 +182,7 @@ async def resume_paused_run(
         conversation_id=conversation_id,
         trigger="im",
         topic_id=topic_id,
+        topic_title=topic_title,
         is_group_chat=is_group_chat,
         sandbox_mode=sandbox_mode,
         topic_creator_user_id=topic_creator_user_id,
