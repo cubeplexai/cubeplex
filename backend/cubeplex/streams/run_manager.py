@@ -91,6 +91,7 @@ class RunContext:
     conversation_id: str
     trigger: str = "interactive"
     topic_id: str | None = None
+    topic_title: str | None = None
     is_group_chat: bool = False
     sender_display_name: str | None = None
     sandbox_mode: str | None = None
@@ -1527,6 +1528,7 @@ class RunManager:
                 conversation_id=conversation.id,
                 trigger="automated",
                 topic_id=conversation.topic_id,
+                topic_title=topic.title if topic is not None else None,
                 is_group_chat=conversation.is_group_chat,
                 sender_display_name=None,
                 sandbox_mode=topic.sandbox_mode if topic is not None else None,
@@ -3304,6 +3306,29 @@ class RunManager:
                 _user_msg_metadata["sender_user_id"] = ctx.user_id
                 _user_msg_metadata["sender_display_name"] = ctx.sender_display_name
 
+            if ctx.topic_id:
+                topic_title = ctx.topic_title
+                if not topic_title:
+                    try:
+                        from cubeplex.models.topic import Topic
+
+                        if catalog_session is not None:
+                            _t_obj = await catalog_session.get(Topic, ctx.topic_id)
+                            topic_title = _t_obj.title if _t_obj else None
+                        else:
+                            from cubeplex.db.engine import async_session_maker
+
+                            async with async_session_maker() as _t_session:
+                                _t_obj = await _t_session.get(Topic, ctx.topic_id)
+                                topic_title = _t_obj.title if _t_obj else None
+                    except Exception as _t_exc:
+                        logger.debug("Failed to lazily resolve topic title: {}", _t_exc)
+                if topic_title:
+                    _user_msg_metadata["topic_context"] = {
+                        "topic_id": ctx.topic_id,
+                        "topic_title": topic_title,
+                    }
+
             _user_msg = _UserMessage(
                 content=[_TextContent(text=content)],
                 timestamp=_time.time(),
@@ -4619,6 +4644,14 @@ class RunManager:
         tool_result_limit_mw = ToolResultLimitMiddleware(
             exclude_tool_names={"load_skill"},
         )
+
+        # 0. TopicContextMiddleware — no deps
+        try:
+            from cubeplex.middleware.topic_context import TopicContextMiddleware
+
+            cubeloop_middleware.append(TopicContextMiddleware())
+        except Exception as _exc:
+            logger.warning("TopicContextMiddleware unavailable: {}", _exc)
 
         # 1. AttachmentHintMiddleware — no deps
         try:

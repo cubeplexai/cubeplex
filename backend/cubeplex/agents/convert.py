@@ -19,6 +19,7 @@ def wire_input_to_cubeloop_user_message(
     *,
     attachments: list[dict[str, Any]] | None = None,
     memory_snapshot: dict[str, Any] | None = None,
+    topic_context: dict[str, Any] | None = None,
 ) -> UserMessage:
     """Build a cubeloop.UserMessage from an API-shaped user input.
 
@@ -32,12 +33,18 @@ def wire_input_to_cubeloop_user_message(
     (never re-derived from the live MemoryItem table) so
     ``MemoryMiddleware.transform_context`` can replay it byte-identically
     on subsequent turns.
+
+    topic_context: when provided, frozen onto ``metadata["topic_context"]``
+    so ``TopicContextMiddleware.transform_context`` can render
+    <conversation_context ... /> into the turn context deterministically.
     """
     metadata: dict[str, Any] = {}
     if attachments:
         metadata["attachments"] = list(attachments)
     if memory_snapshot is not None:
         metadata["memory_snapshot"] = memory_snapshot
+    if topic_context is not None:
+        metadata["topic_context"] = topic_context
     return UserMessage(
         content=[TextContent(text=text)],
         metadata=metadata,
