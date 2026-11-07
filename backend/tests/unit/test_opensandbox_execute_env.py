@@ -43,6 +43,7 @@ def _make_backend(
         result.logs.stdout = []
         result.logs.stderr = []
         result.id = None
+        result.exit_code = 0
         return result
 
     raw.commands.run = fake_run
@@ -357,38 +358,59 @@ async def test_null_run_uid_skips_privilege_drop() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_uses_background_mode_and_fetches_logs() -> None:
+async def test_execute_foreground_returns_output_and_exit_code() -> None:
     backend, raw = _make_backend()
-    status_mock = MagicMock(running=False, exit_code=0)
-    raw.commands.get_command_status = AsyncMock(return_value=status_mock)
-    logs_mock = MagicMock(content="hello output\n", cursor=13)
-    raw.commands.get_background_command_logs = AsyncMock(return_value=logs_mock)
 
-    async def fake_run_with_id(
-        command: str, *, opts: RunCommandOpts | None = None, **_: object
+    async def fake_run_foreground(
+        command: str, *, opts: RunCommandOpts | None = None, handlers: object = None, **_: object
     ) -> MagicMock:
         backend._test_run_calls.append((command, opts))  # type: ignore[attr-defined]
+        if handlers is not None and hasattr(handlers, "on_stdout") and handlers.on_stdout:
+            await handlers.on_stdout(MagicMock(text="hello output\n"))
         result = MagicMock()
         result.id = "cmd-123"
+        result.exit_code = 0
         return result
 
-    raw.commands.run = fake_run_with_id
+    raw.commands.run = fake_run_foreground
 
     res = await backend.execute("echo test")
     assert res.output == "hello output\n"
     assert res.exit_code == 0
     _, opts = backend._test_run_calls[0]  # type: ignore[attr-defined]
     assert opts is not None
-    assert opts.background is True
-    raw.commands.get_command_status.assert_awaited_once_with("cmd-123")
-    raw.commands.get_background_command_logs.assert_awaited_once_with("cmd-123", cursor=0)
+    assert opts.background is not True
+
+
+@pytest.mark.asyncio
+async def test_fast_aiter_sse_events_stops_on_execution_complete() -> None:
+    import httpx
+
+    from cubeplex.sandbox.opensandbox import _fast_aiter_sse_events
+
+    body = (
+        b'data: {"type": "init", "text": "cmd-1", "timestamp": 1}\n\n'
+        b'data: {"type": "stdout", "text": "line 1", "timestamp": 2}\n\n'
+        b'data: {"type": "execution_complete", "execution_time_in_millis": 5, "timestamp": 3}\n\n'
+        b'data: {"type": "stdout", "text": "should not be reached", "timestamp": 4}\n\n'
+    )
+
+    class AsyncStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield body
+
+    req = httpx.Request("POST", "http://test/command")
+    resp = httpx.Response(
+        200, headers={"content-type": "text/event-stream"}, stream=AsyncStream(), request=req
+    )
+
+    collected = [e async for e in _fast_aiter_sse_events(resp)]
+    assert len(collected) == 3
 
 
 @pytest.mark.asyncio
 async def test_execute_streams_chunks_via_handlers() -> None:
     backend, raw = _make_backend()
-    status_mock = MagicMock(running=False, exit_code=0)
-    raw.commands.get_command_status = AsyncMock(return_value=status_mock)
 
     chunks: list[str] = []
 
@@ -403,6 +425,7 @@ async def test_execute_streams_chunks_via_handlers() -> None:
             await handlers.on_stdout(msg2)
         result = MagicMock()
         result.id = "cmd-stream"
+        result.exit_code = 0
         return result
 
     raw.commands.run = fake_run_stream
