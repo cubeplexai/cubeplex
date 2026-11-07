@@ -108,52 +108,79 @@ class OpenSandbox(Sandbox):
         as_root: bool = False,
         on_chunk: Callable[[str], None] | None = None,
     ) -> ExecuteResult:
+        """Run command and wait for its result.
+
+        Uses background=True so execd returns immediately after queueing the
+        command and closes the SSE stream once ``execution_complete`` arrives —
+        no extra 1-second grace-period wait that the foreground path imposes.
+        Output is retrieved via ``get_background_command_logs`` after the command
+        finishes.  ``on_chunk`` is still delivered in real-time via callbacks.
+        """
         # Merge: run-level env (set by manager) is the base; per-call envs win.
         merged = {**self._run_env, **(envs or {})}
         uid: int | None = None if as_root else self._run_uid
         gid: int | None = None if as_root or uid is None else self._run_gid
+        # background=True: execd closes the SSE stream on execution_complete
+        # instead of waiting a 1-second grace period.  We poll status and fetch
+        # logs ourselves, which saves ~1 s per call.
         opts = RunCommandOpts(
             working_directory=self._workdir,
             envs=merged if merged else None,
             timeout=timedelta(seconds=timeout) if timeout is not None else None,
             uid=uid,
             gid=gid,
+            background=True,
         )
+
+        output_parts: list[str] = []
 
         async def _handle_output(msg: Any) -> None:
             text = getattr(msg, "text", "") or ""
-            if not text or on_chunk is None:
+            if not text:
                 return
-            try:
-                on_chunk(text)
-            except Exception:
-                logger.exception("OpenSandbox on_chunk failed")
+            if on_chunk is not None:
+                try:
+                    on_chunk(text)
+                except Exception:
+                    logger.exception("OpenSandbox on_chunk failed")
+            output_parts.append(text)
 
-        handlers = (
-            ExecutionHandlers(on_stdout=_handle_output, on_stderr=_handle_output)
-            if on_chunk is not None
-            else None
+        handlers = ExecutionHandlers(
+            on_stdout=_handle_output,
+            on_stderr=_handle_output,
+            skip_accumulation=True,
         )
 
         async def _run() -> ExecuteResult:
             with _as_sandbox_error():
                 execution = await self._sandbox.commands.run(command, opts=opts, handlers=handlers)
+                ref = str(execution.id or "")
 
-                output_lines: list[str] = []
-                for msg in execution.logs.stdout:
-                    output_lines.append(msg.text)
-                for msg in execution.logs.stderr:
-                    output_lines.append(msg.text)
-                output = "\n".join(output_lines) if output_lines else ""
-
+                # Poll until the command finishes (typically already done).
                 exit_code: int | None = None
-                if execution.id:
-                    try:
-                        status = await self._sandbox.commands.get_command_status(execution.id)
-                        exit_code = status.exit_code
-                    except Exception as e:
-                        logger.warning("Could not get exit code for command: {}", e)
+                if ref:
+                    while True:
+                        status = await self._sandbox.commands.get_command_status(ref)
+                        running = getattr(status, "running", None)
+                        code = getattr(status, "exit_code", None)
+                        if running is False or code is not None:
+                            exit_code = code
+                            break
+                        await asyncio.sleep(0.05)
 
+                # Fetch any output not yet delivered via streaming callbacks.
+                if ref and not output_parts:
+                    try:
+                        logs = await self._sandbox.commands.get_background_command_logs(
+                            ref, cursor=0
+                        )
+                        content = getattr(logs, "content", "") or ""
+                        if content:
+                            output_parts.append(content)
+                    except Exception as exc:
+                        logger.warning("Could not fetch execute logs for {}: {}", ref, exc)
+
+                output = "".join(output_parts)
                 return ExecuteResult(output=output, exit_code=exit_code)
 
         try:
