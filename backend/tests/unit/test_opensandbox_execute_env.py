@@ -310,20 +310,56 @@ async def test_start_browser_runs_as_root() -> None:
 
 @pytest.mark.asyncio
 async def test_upload_chowns_by_uid() -> None:
-    """Upload writes bytes then chowns by numeric uid (files API is root)."""
+    """Upload writes bytes then chowns by numeric uid and chmods non-script to 644."""
     backend, raw = _make_backend()
 
     await backend.upload([("/workspace/hello.txt", b"hi")])
 
-    raw.files.write_file.assert_awaited_once_with("/workspace/hello.txt", b"hi")
+    raw.files.write_file.assert_awaited_once_with("/workspace/hello.txt", b"hi", mode=644)
     calls = backend._test_run_calls  # type: ignore[attr-defined]
     assert len(calls) == 1
     cmd, opts = calls[0]
     assert "chown 1000:1000" in cmd
+    assert "chmod 644 /workspace/hello.txt" in cmd
     assert "/workspace/hello.txt" in cmd
     assert "-R" not in cmd
     assert opts is not None
     assert opts.uid is None  # as_root
+
+
+@pytest.mark.asyncio
+async def test_upload_script_sets_executable_mode() -> None:
+    """Upload sets 755 mode for scripts with shebang."""
+    backend, raw = _make_backend()
+
+    script_content = b"#!/usr/bin/env bash\necho hello"
+    await backend.upload([("/workspace/run.sh", script_content)])
+
+    raw.files.write_file.assert_awaited_once_with("/workspace/run.sh", script_content, mode=755)
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    assert len(calls) == 1
+    cmd, opts = calls[0]
+    assert "chown 1000:1000" in cmd
+    assert "chmod 755 /workspace/run.sh" in cmd
+
+
+@pytest.mark.asyncio
+async def test_upload_mixed_files_applies_correct_modes() -> None:
+    """Upload sets 644 for regular files and 755 for scripts in a single batch."""
+    backend, raw = _make_backend()
+
+    files = [
+        ("/workspace/doc.md", b"# Title\n"),
+        ("/workspace/script.sh", b"#!/bin/sh\nexit 0"),
+    ]
+    await backend.upload(files)
+
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    assert len(calls) == 1
+    cmd, _ = calls[0]
+    assert "chown 1000:1000" in cmd
+    assert "chmod 644 /workspace/doc.md" in cmd
+    assert "chmod 755 /workspace/script.sh" in cmd
 
 
 @pytest.mark.asyncio

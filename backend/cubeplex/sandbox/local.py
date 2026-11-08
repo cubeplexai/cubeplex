@@ -245,6 +245,8 @@ class LocalSandbox(Sandbox):
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(content)
+            mode = 0o755 if content.startswith(b"#!") else 0o644
+            p.chmod(mode)
 
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
         result = []
