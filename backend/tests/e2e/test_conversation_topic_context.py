@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from cubeloop.agent.types import AgentContext
 from cubeloop.providers.base import TextContent, UserMessage
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -15,6 +14,7 @@ from cubeplex.db.engine import _build_database_url
 from cubeplex.middleware.topic_context import TopicContextMiddleware
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.membership import Role
+from cubeplex.models.topic import Topic
 from cubeplex.models.user import User
 
 pytestmark = pytest.mark.e2e
@@ -107,10 +107,11 @@ class TestConversationTopicContextE2E:
         """Verify topic context in stored metadata and deterministic replay through middleware."""
         (admin_c, ws_id, _), (_, _, member_uid) = four_layer_admin_and_member
 
+        original_title = "API Modernization"
         resp = await admin_c.post(
             f"/api/v1/ws/{ws_id}/topics",
             json={
-                "title": "API Modernization",
+                "title": original_title,
                 "member_user_ids": [member_uid],
             },
         )
@@ -138,7 +139,7 @@ class TestConversationTopicContextE2E:
             role=Role.ADMIN,
         )
 
-        # Resolve topic context
+        # 1. Resolve topic context on the conversation
         (
             t_id,
             _,
@@ -148,10 +149,9 @@ class TestConversationTopicContextE2E:
             t_title,
         ) = await _resolve_topic_run_context(conv, ctx)
         assert t_id == topic_id
-        assert t_title == "API Modernization"
+        assert t_title == original_title
 
-        # Simulating UserMessage creation with metadata['topic_context']
-        # The stored message content MUST NOT have the <conversation_context> tag baked into content
+        # 2. Verify stored UserMessage: raw content MUST NOT have <conversation_context> baked in
         raw_prompt = "Migrate endpoints to v2"
         stored_user_msg = UserMessage(
             id="msg-turn-1",
@@ -165,19 +165,27 @@ class TestConversationTopicContextE2E:
         )
         assert "<conversation_context" not in stored_user_msg.content[0].text  # type: ignore[union-attr]
 
-        # TopicContextMiddleware transform_context injects tag
+        # 3. TopicContextMiddleware injects tag dynamically into message content
         mw = TopicContextMiddleware()
-        transformed = await mw.transform_context(
-            [stored_user_msg], ctx=AgentContext(session_id=conv_id)
-        )
-        expected_tag = f'<conversation_context topic_id="{t_id}" topic_title="{t_title}" />'
+        transformed = await mw.transform_context([stored_user_msg], ctx=None)  # type: ignore[arg-type]
+        expected_tag = f'<conversation_context topic_id="{t_id}" topic_title="{original_title}" />'
         assert transformed[0].content[0].text == f"{expected_tag}\n\n{raw_prompt}"  # type: ignore[union-attr]
         # Preserves message identity
         assert transformed[0].id == "msg-turn-1"
 
-        # Even if topic title subsequently changes in DB, historical replay reads stored metadata
-        # ensuring byte-identical prompt cache prefix
-        replay_transformed = await mw.transform_context(
-            [stored_user_msg], ctx=AgentContext(session_id=conv_id)
+        # 4. Simulate topic rename in DB: change title to 'API Modernization V2'
+        async with maker() as session:
+            topic_obj = await session.get(Topic, topic_id)
+            assert topic_obj is not None
+            topic_obj.title = "API Modernization V2"
+            session.add(topic_obj)
+            await session.commit()
+
+        # 5. Replay from stored_user_msg: historical replay reads the frozen metadata,
+        # ensuring the rendered tag keeps the original title (preserving prompt-cache hits)
+        replay_transformed = await mw.transform_context([stored_user_msg], ctx=None)  # type: ignore[arg-type]
+        assert (
+            replay_transformed[0].content[0].text
+            == f'<conversation_context topic_id="{t_id}" topic_title="{original_title}" />\n\n{raw_prompt}'
         )
         assert replay_transformed[0].content[0].text == transformed[0].content[0].text  # type: ignore[union-attr]
