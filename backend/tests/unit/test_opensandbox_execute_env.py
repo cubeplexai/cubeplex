@@ -10,7 +10,7 @@ Tests:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from opensandbox.exceptions import SandboxApiException
@@ -360,6 +360,30 @@ async def test_upload_mixed_files_applies_correct_modes() -> None:
     assert "chown 1000:1000" in cmd
     assert "chmod 644 /workspace/doc.md" in cmd
     assert "chmod 755 /workspace/script.sh" in cmd
+
+
+@pytest.mark.asyncio
+async def test_upload_falls_back_when_write_file_lacks_mode() -> None:
+    """Upload falls back to write_file without mode if write_file raises TypeError."""
+    backend, raw = _make_backend()
+
+    # Simulate an older driver or fake where write_file only takes (path, content)
+    async def legacy_write_file(path: str, content: bytes) -> None:
+        pass
+
+    raw.files.write_file = AsyncMock(side_effect=TypeError("unexpected keyword 'mode'"))
+    # Second call (fallback without mode) should succeed
+    raw.files.write_file.side_effect = [TypeError("unexpected keyword 'mode'"), None]
+
+    await backend.upload([("/workspace/compat.txt", b"compat content")])
+
+    assert raw.files.write_file.await_count == 2
+    assert raw.files.write_file.await_args_list[0] == call(
+        "/workspace/compat.txt", b"compat content", mode=644
+    )
+    assert raw.files.write_file.await_args_list[1] == call(
+        "/workspace/compat.txt", b"compat content"
+    )
 
 
 @pytest.mark.asyncio

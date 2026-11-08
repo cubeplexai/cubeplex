@@ -341,7 +341,10 @@ class OpenSandbox(Sandbox):
         with _as_sandbox_error():
             for path, content in files:
                 mode = 755 if content.startswith(b"#!") else 644
-                await self._sandbox.files.write_file(path, content, mode=mode)
+                try:
+                    await self._sandbox.files.write_file(path, content, mode=mode)
+                except TypeError:
+                    await self._sandbox.files.write_file(path, content)
         await self._chown_paths(files)
 
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
