@@ -387,6 +387,47 @@ async def test_upload_falls_back_when_write_file_lacks_mode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_upload_fixup_command_does_not_short_circuit_chmod() -> None:
+    """Fixup command separates steps with semicolons so chmod runs even if chown fails."""
+    backend, _ = _make_backend()
+
+    await backend.upload([("/workspace/test.txt", b"test")])
+
+    cmd, _ = backend._test_run_calls[0]  # type: ignore[attr-defined]
+    # Semicolons separate commands instead of '&&'
+    assert "; chmod 644" in cmd
+    # Output redirection wraps the entire command group
+    assert cmd.startswith("{ rc=0; ")
+    assert "} 2>/dev/null; exit ${rc:-0}" in cmd
+    # No trailing || true swallowing the exit code
+    assert "|| true" not in cmd
+
+
+@pytest.mark.asyncio
+async def test_upload_logs_warning_on_fixup_failure() -> None:
+    """A non-zero exit code from post-upload fixup logs a warning."""
+    from loguru import logger
+
+    from cubeplex.sandbox.base import ExecuteResult
+
+    backend, _ = _make_backend()
+    backend.execute = AsyncMock(  # type: ignore[method-assign]
+        return_value=ExecuteResult(output="chown: operation not permitted", exit_code=1)
+    )
+
+    messages: list[str] = []
+    handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        await backend.upload([("/workspace/hello.txt", b"hi")])
+    finally:
+        logger.remove(handler_id)
+
+    logged = "".join(messages)
+    assert "chown/chmod after upload failed on sandbox" in logged
+    assert "chown: operation not permitted" in logged
+
+
+@pytest.mark.asyncio
 async def test_ensure_workspace_owner_chowns_mount_point_only() -> None:
     """Create-time fix: chown the workdir, not a recursive tree walk."""
     backend, _ = _make_backend()

@@ -390,7 +390,8 @@ class OpenSandbox(Sandbox):
             quoted_scripts = " ".join(shlex.quote(p) for p in scripts)
             commands.append(f"chmod 755 {quoted_scripts}")
 
-        cmd = " && ".join(commands) + " 2>/dev/null || true"
+        steps = "; ".join(f"{c} || rc=$?" for c in commands)
+        cmd = f"{{ rc=0; {steps}; }} 2>/dev/null; exit ${{rc:-0}}"
         try:
             result = await self.execute(
                 cmd,
