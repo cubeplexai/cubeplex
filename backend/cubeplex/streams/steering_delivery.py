@@ -46,8 +46,13 @@ def _is_checkpoint_committed(receipt: InputReceipt) -> bool:
     return receipt.status == "committed" and receipt.durability == "checkpoint"
 
 
-def steering_message_to_cubeloop(row: SteeringMessage) -> UserMessage:
+def steering_message_to_cubeloop(
+    row: SteeringMessage,
+    topic_context: dict[str, Any] | None = None,
+) -> UserMessage:
     metadata: dict[str, Any] = {}
+    if topic_context:
+        metadata["topic_context"] = topic_context
     if row.source_kind == "background_task":
         metadata.update(
             source="background_task",
@@ -486,6 +491,27 @@ class DurableSteeringCoordinator:
                 await session.commit()
 
             checkpoint_committed_ids: list[str] = []
+            topic_context: dict[str, Any] | None = None
+            if claimed:
+                try:
+                    from cubeplex.models.conversation import Conversation
+                    from cubeplex.models.topic import Topic
+
+                    async with self._session_maker() as t_session:
+                        conv = await t_session.get(Conversation, scope.conversation_id)
+                        if conv and conv.topic_id:
+                            topic_obj = await t_session.get(Topic, conv.topic_id)
+                            if topic_obj and topic_obj.title:
+                                topic_context = {
+                                    "topic_id": conv.topic_id,
+                                    "topic_title": topic_obj.title,
+                                }
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "failed to resolve topic context for steering delivery on conversation {}",
+                        scope.conversation_id,
+                    )
+
             for index, row in enumerate(claimed):
                 try:
                     if not await self._claim_is_current(run_id, claim_token):
@@ -493,7 +519,7 @@ class DurableSteeringCoordinator:
                     receipt = execution_session.submit_input(
                         InputEnvelope(
                             input_id=row.client_steer_id,
-                            message=steering_message_to_cubeloop(row),
+                            message=steering_message_to_cubeloop(row, topic_context=topic_context),
                             mode="steer",
                         )
                     )

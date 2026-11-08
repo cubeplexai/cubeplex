@@ -26,9 +26,8 @@ def _augment_with_topic_context(
 ) -> UserMessage:
     """Return a fresh UserMessage with <conversation_context ... /> prepended.
 
-    Builds a new UserMessage rather than mutating the original so persisted
-    message history is never modified. Prepend to the first TextContent block
-    or insert as a leading TextContent.
+    Preserves message identity (id, run_id, timestamp) via model_copy so
+    compaction state remains stable across turns.
     """
     rendered = render_conversation_context(topic_id, topic_title)
     if not rendered:
@@ -48,11 +47,7 @@ def _augment_with_topic_context(
     if not prepended:
         new_content.insert(0, TextContent(text=rendered))
 
-    return UserMessage(
-        content=new_content,
-        timestamp=msg.timestamp,
-        metadata=dict(msg.metadata),
-    )
+    return msg.model_copy(update={"content": new_content, "metadata": dict(msg.metadata)})
 
 
 class TopicContextMiddleware(Middleware):

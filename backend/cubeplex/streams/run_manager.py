@@ -3306,28 +3306,31 @@ class RunManager:
                 _user_msg_metadata["sender_user_id"] = ctx.user_id
                 _user_msg_metadata["sender_display_name"] = ctx.sender_display_name
 
-            if ctx.topic_id:
-                topic_title = ctx.topic_title
-                if not topic_title:
-                    try:
-                        from cubeplex.models.topic import Topic
+            effective_topic_id = ctx.topic_id
+            topic_title = ctx.topic_title
 
-                        if catalog_session is not None:
-                            _t_obj = await catalog_session.get(Topic, ctx.topic_id)
+            if not effective_topic_id or not topic_title:
+                try:
+                    from cubeplex.db.engine import async_session_maker
+                    from cubeplex.models.conversation import Conversation
+                    from cubeplex.models.topic import Topic
+
+                    async with async_session_maker() as _t_session:
+                        if not effective_topic_id:
+                            _conv_obj = await _t_session.get(Conversation, conversation_id)
+                            if _conv_obj and _conv_obj.topic_id:
+                                effective_topic_id = _conv_obj.topic_id
+                        if effective_topic_id and not topic_title:
+                            _t_obj = await _t_session.get(Topic, effective_topic_id)
                             topic_title = _t_obj.title if _t_obj else None
-                        else:
-                            from cubeplex.db.engine import async_session_maker
+                except Exception as _t_exc:
+                    logger.warning("Failed to lazily resolve topic context: {}", _t_exc)
 
-                            async with async_session_maker() as _t_session:
-                                _t_obj = await _t_session.get(Topic, ctx.topic_id)
-                                topic_title = _t_obj.title if _t_obj else None
-                    except Exception as _t_exc:
-                        logger.debug("Failed to lazily resolve topic title: {}", _t_exc)
-                if topic_title:
-                    _user_msg_metadata["topic_context"] = {
-                        "topic_id": ctx.topic_id,
-                        "topic_title": topic_title,
-                    }
+            if effective_topic_id and topic_title:
+                _user_msg_metadata["topic_context"] = {
+                    "topic_id": effective_topic_id,
+                    "topic_title": topic_title,
+                }
 
             _user_msg = _UserMessage(
                 content=[_TextContent(text=content)],

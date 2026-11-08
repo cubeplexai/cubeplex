@@ -308,6 +308,7 @@ class TriggerPipeline:
                     workspace_id=event.workspace_id,
                     conversation_id=conversation_id,
                     trigger="automated",
+                    topic_id=snapshot.topic_id or trigger.topic_id,
                 ),
                 run_id=run_id,
                 model_key=snapshot.execution.model_key,

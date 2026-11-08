@@ -137,3 +137,31 @@ class TestTopicContextMiddleware:
         )
         assert first_pass[0].content[0].text == expected  # type: ignore[union-attr]
         assert second_pass[0].content[0].text == expected  # type: ignore[union-attr]
+
+    @pytest.mark.anyio
+    async def test_transform_context_preserves_message_identity(self) -> None:
+        mw = TopicContextMiddleware()
+        user_msg = UserMessage(
+            id="msg-fixed-identity-123",
+            run_id="run-test-456",
+            content=[TextContent(text="Run tests.")],
+            metadata={
+                "topic_context": {
+                    "topic_id": "top-identity-test",
+                    "topic_title": "Stability Verification",
+                }
+            },
+        )
+        out = await mw.transform_context([user_msg], ctx=None)  # type: ignore[arg-type]
+        assert len(out) == 1
+        transformed = out[0]
+        assert transformed.id == "msg-fixed-identity-123"
+        assert getattr(transformed, "run_id", None) == "run-test-456"
+        assert transformed.metadata.get("topic_context") == {
+            "topic_id": "top-identity-test",
+            "topic_title": "Stability Verification",
+        }
+        assert (
+            transformed.content[0].text  # type: ignore[union-attr]
+            == '<conversation_context topic_id="top-identity-test" topic_title="Stability Verification" />\n\nRun tests.'
+        )
