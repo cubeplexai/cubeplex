@@ -18,11 +18,8 @@ def sanitize_topic_title(title: str | None) -> str:
     """
     if not title:
         return ""
-    # Collapse newlines, tabs, and multiple spaces into a single space
-    cleaned = re.sub(r"\s+", " ", str(title)).strip()
-    # Hard truncate to 255 characters
-    cleaned = cleaned[:255]
-    # XML entity escaping (ampersand first to avoid double-escaping)
+    cleaned = re.sub(r"\s+", " ", str(title)).strip()[:255]
+    # Ampersand escaped first to prevent double-escaping downstream entities
     return (
         cleaned.replace("&", "&amp;")
         .replace("<", "&lt;")

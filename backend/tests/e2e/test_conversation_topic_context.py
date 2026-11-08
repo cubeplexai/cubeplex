@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from cubeloop.agent.types import AgentContext
+from cubeloop.providers.base import TextContent, UserMessage
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -10,6 +12,7 @@ from sqlalchemy.pool import NullPool
 from cubeplex.api.routes.v1.conversations import _resolve_topic_run_context
 from cubeplex.auth.context import RequestContext
 from cubeplex.db.engine import _build_database_url
+from cubeplex.middleware.topic_context import TopicContextMiddleware
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.membership import Role
 from cubeplex.models.user import User
@@ -96,3 +99,85 @@ class TestConversationTopicContextE2E:
 
         assert solo_topic_id is None
         assert solo_topic_title is None
+
+    @pytest.mark.anyio
+    async def test_topic_turn_metadata_and_middleware_replay(
+        self, four_layer_admin_and_member: FourLayerFixture
+    ) -> None:
+        """Verify topic context in stored metadata and deterministic replay through middleware."""
+        (admin_c, ws_id, _), (_, _, member_uid) = four_layer_admin_and_member
+
+        resp = await admin_c.post(
+            f"/api/v1/ws/{ws_id}/topics",
+            json={
+                "title": "API Modernization",
+                "member_user_ids": [member_uid],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        topic_data = resp.json()
+        conv_id = topic_data["conversation"]["id"]
+        topic_id = topic_data["topic"]["id"]
+
+        engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+        try:
+            maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with maker() as session:
+                conv = await session.get(Conversation, conv_id)
+                assert conv is not None
+                user = await session.get(User, conv.creator_user_id)
+                assert user is not None
+                org_id = conv.org_id
+        finally:
+            await engine.dispose()
+
+        ctx = RequestContext(
+            user=user,
+            org_id=org_id,
+            workspace_id=ws_id,
+            role=Role.ADMIN,
+        )
+
+        # Resolve topic context
+        (
+            t_id,
+            _,
+            _,
+            _,
+            _,
+            t_title,
+        ) = await _resolve_topic_run_context(conv, ctx)
+        assert t_id == topic_id
+        assert t_title == "API Modernization"
+
+        # Simulating UserMessage creation with metadata['topic_context']
+        # The stored message content MUST NOT have the <conversation_context> tag baked into content
+        raw_prompt = "Migrate endpoints to v2"
+        stored_user_msg = UserMessage(
+            id="msg-turn-1",
+            content=[TextContent(text=raw_prompt)],
+            metadata={
+                "topic_context": {
+                    "topic_id": t_id,
+                    "topic_title": t_title,
+                }
+            },
+        )
+        assert "<conversation_context" not in stored_user_msg.content[0].text  # type: ignore[union-attr]
+
+        # TopicContextMiddleware transform_context injects tag
+        mw = TopicContextMiddleware()
+        transformed = await mw.transform_context(
+            [stored_user_msg], ctx=AgentContext(session_id=conv_id)
+        )
+        expected_tag = f'<conversation_context topic_id="{t_id}" topic_title="{t_title}" />'
+        assert transformed[0].content[0].text == f"{expected_tag}\n\n{raw_prompt}"  # type: ignore[union-attr]
+        # Preserves message identity
+        assert transformed[0].id == "msg-turn-1"
+
+        # Even if topic title subsequently changes in DB, historical replay reads stored metadata
+        # ensuring byte-identical prompt cache prefix
+        replay_transformed = await mw.transform_context(
+            [stored_user_msg], ctx=AgentContext(session_id=conv_id)
+        )
+        assert replay_transformed[0].content[0].text == transformed[0].content[0].text  # type: ignore[union-attr]

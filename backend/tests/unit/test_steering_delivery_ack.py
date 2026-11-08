@@ -20,9 +20,12 @@ def test_wake_steer_attempt_keeps_canonical_notice_id() -> None:
         content="wake",
     )
 
-    message = steering_message_to_cubeloop(row)
+    message = steering_message_to_cubeloop(
+        row, topic_context={"topic_id": "top-1", "topic_title": "Project Alpha"}
+    )
 
     assert message.metadata == {
+        "topic_context": {"topic_id": "top-1", "topic_title": "Project Alpha"},
         "steer_id": "scmw-123:run-attempt",
         "sender_user_id": "user-1",
         "notice_id": "scmw-123",

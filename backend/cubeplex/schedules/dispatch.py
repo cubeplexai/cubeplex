@@ -343,6 +343,7 @@ async def dispatch_scheduled_run(
         workspace_id=task.workspace_id,
         conversation_id=conversation_id,
         trigger="automated",
+        topic_id=occurrence.topic_id or task.topic_id,
     )
     try:
         actual_run_id = await run_manager.start_run(
