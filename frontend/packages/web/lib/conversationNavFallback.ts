@@ -7,7 +7,10 @@
 
 export const CONVERSATION_NAV_FALLBACK_MS = 2000
 
-type BrowserLocation = Pick<Location, 'pathname' | 'assign'>
+type BrowserLocation = {
+  pathname: string
+  assign: (href: string) => void
+}
 
 let attempt = 0
 let timer: ReturnType<typeof setTimeout> | null = null

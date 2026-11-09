@@ -9,8 +9,19 @@ const FROM = '/w/ws-1/conversations/c1'
 const TARGET = '/w/ws-1/conversations/c2'
 const LATER = '/w/ws-1/conversations/c3'
 
-function fakeLocation(pathname: string): { pathname: string; assign: ReturnType<typeof vi.fn> } {
-  return { pathname, assign: vi.fn() }
+function fakeLocation(pathname: string): {
+  pathname: string
+  assign: (href: string) => void
+  assigned: string[]
+} {
+  const assigned: string[] = []
+  return {
+    pathname,
+    assigned,
+    assign(href: string) {
+      assigned.push(href)
+    },
+  }
 }
 
 describe('scheduleConversationNavFallback', () => {
@@ -29,8 +40,7 @@ describe('scheduleConversationNavFallback', () => {
     scheduleConversationNavFallback(TARGET, FROM, location)
     vi.advanceTimersByTime(CONVERSATION_NAV_FALLBACK_MS)
 
-    expect(location.assign).toHaveBeenCalledTimes(1)
-    expect(location.assign).toHaveBeenCalledWith(TARGET)
+    expect(location.assigned).toEqual([TARGET])
   })
 
   it('does nothing once the address has moved', () => {
@@ -40,7 +50,7 @@ describe('scheduleConversationNavFallback', () => {
     location.pathname = TARGET
     vi.advanceTimersByTime(CONVERSATION_NAV_FALLBACK_MS)
 
-    expect(location.assign).not.toHaveBeenCalled()
+    expect(location.assigned).toEqual([])
   })
 
   it('does not reload the conversation that is already open', () => {
@@ -49,7 +59,7 @@ describe('scheduleConversationNavFallback', () => {
     scheduleConversationNavFallback(FROM, FROM, location)
     vi.advanceTimersByTime(CONVERSATION_NAV_FALLBACK_MS)
 
-    expect(location.assign).not.toHaveBeenCalled()
+    expect(location.assigned).toEqual([])
   })
 
   it('keeps only the latest click', () => {
@@ -59,8 +69,7 @@ describe('scheduleConversationNavFallback', () => {
     scheduleConversationNavFallback(LATER, FROM, location)
     vi.advanceTimersByTime(CONVERSATION_NAV_FALLBACK_MS)
 
-    expect(location.assign).toHaveBeenCalledTimes(1)
-    expect(location.assign).toHaveBeenCalledWith(LATER)
+    expect(location.assigned).toEqual([LATER])
   })
 
   it('drops a pending fallback when the next click is the open conversation', () => {
@@ -70,7 +79,7 @@ describe('scheduleConversationNavFallback', () => {
     scheduleConversationNavFallback(FROM, FROM, location)
     vi.advanceTimersByTime(CONVERSATION_NAV_FALLBACK_MS)
 
-    expect(location.assign).not.toHaveBeenCalled()
+    expect(location.assigned).toEqual([])
   })
 
   it('waits out the fallback delay before loading', () => {
@@ -79,6 +88,6 @@ describe('scheduleConversationNavFallback', () => {
     scheduleConversationNavFallback(TARGET, FROM, location)
     vi.advanceTimersByTime(CONVERSATION_NAV_FALLBACK_MS - 1)
 
-    expect(location.assign).not.toHaveBeenCalled()
+    expect(location.assigned).toEqual([])
   })
 })
