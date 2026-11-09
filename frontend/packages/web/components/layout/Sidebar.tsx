@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
+import { scheduleConversationNavFallback } from '@/lib/conversationNavFallback'
 import { cn } from '@/lib/utils'
 import { useComposerChromeStore } from '@/lib/stores/composer-chrome'
 import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip'
@@ -196,14 +197,35 @@ export function ConversationRow({
     )
   }
 
+  const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>): void => {
+    setActive(convo.id)
+    useMessageStore.getState().clearUnread(convo.id)
+    // Modified clicks open a new tab. A prevented click is not a navigation.
+    if (
+      !currentWsId ||
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return
+    }
+    scheduleConversationNavFallback(
+      `/w/${currentWsId}/conversations/${convo.id}`,
+      window.location.pathname,
+    )
+  }
+
   return (
     <li>
       <Link
         href={currentWsId ? `/w/${currentWsId}/conversations/${convo.id}` : '/'}
-        onClick={() => {
-          setActive(convo.id)
-          useMessageStore.getState().clearUnread(convo.id)
-        }}
+        // Prefetch can leave this dynamic route with an empty segment. The
+        // click then never commits, so the address stays on the previous id.
+        prefetch={false}
+        onClick={handleOpen}
         className={baseRowClasses}
       >
         {isActive && (

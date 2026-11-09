@@ -1,9 +1,15 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Conversation } from '@cubeplex/core'
 import en from '../../messages/en.json'
 import { ConversationRow } from '../../components/layout/Sidebar'
+
+const navFallback = vi.hoisted(() => ({
+  scheduleConversationNavFallback: vi.fn(),
+}))
+
+vi.mock('@/lib/conversationNavFallback', () => navFallback)
 
 const storeMocks = vi.hoisted(() => ({
   isStreaming: false,
@@ -21,13 +27,26 @@ vi.mock('next/link', () => ({
   default: ({
     children,
     href,
+    prefetch,
+    onClick,
     ...rest
   }: {
     children: React.ReactNode
     href: string
+    prefetch?: boolean
+    onClick?: (event: React.MouseEvent<HTMLAnchorElement>) => void
     [key: string]: unknown
   }) => (
-    <a href={href} {...rest}>
+    <a
+      href={href}
+      data-prefetch={prefetch === undefined ? 'default' : String(prefetch)}
+      onClick={(event) => {
+        onClick?.(event)
+        // Next's Link prevents the native navigation after the click handler.
+        event.preventDefault()
+      }}
+      {...rest}
+    >
       {children}
     </a>
   ),
@@ -160,5 +179,55 @@ describe('ConversationRow running indicator', () => {
     renderRow(makeConvo({ id: 'c1' }))
 
     expect(screen.queryByLabelText(en.sidebar.conversationRunning)).not.toBeInTheDocument()
+  })
+
+  it('does not prefetch, and schedules a fallback load on a plain title click', () => {
+    renderRow(makeConvo({ id: 'c2', title: 'Beta chat' }))
+
+    const link = screen.getByRole('link')
+    expect(link).toHaveAttribute('href', '/w/ws-1/conversations/c2')
+    expect(link).toHaveAttribute('data-prefetch', 'false')
+
+    fireEvent.click(link)
+
+    expect(storeMocks.setActive).toHaveBeenCalledWith('c2')
+    expect(navFallback.scheduleConversationNavFallback).toHaveBeenCalledWith(
+      '/w/ws-1/conversations/c2',
+      window.location.pathname,
+    )
+  })
+
+  it('still highlights a modified click without scheduling a fallback load', () => {
+    renderRow(makeConvo({ id: 'c2', title: 'Beta chat' }))
+
+    fireEvent.click(screen.getByRole('link'), { metaKey: true })
+
+    expect(storeMocks.setActive).toHaveBeenCalledWith('c2')
+    expect(navFallback.scheduleConversationNavFallback).not.toHaveBeenCalled()
+  })
+
+  it('does not open the conversation from the row menu', () => {
+    renderRow(makeConvo({ id: 'c2', title: 'Beta chat' }))
+
+    fireEvent.click(screen.getByLabelText(en.sidebar.moreActions))
+
+    expect(storeMocks.setActive).not.toHaveBeenCalled()
+    expect(navFallback.scheduleConversationNavFallback).not.toHaveBeenCalled()
+  })
+
+  it('does not schedule a fallback when the row has no workspace', () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <ConversationRow
+          convo={makeConvo({ id: 'c2', title: 'Beta chat' })}
+          isActive={false}
+          currentWsId={null}
+        />
+      </NextIntlClientProvider>,
+    )
+
+    fireEvent.click(screen.getByRole('link'))
+
+    expect(navFallback.scheduleConversationNavFallback).not.toHaveBeenCalled()
   })
 })
