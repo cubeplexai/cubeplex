@@ -310,9 +310,12 @@ export function MessageList({ conversationId }: MessageListProps) {
   // it). Conversation row is loaded by the parent page; if it's not in the
   // store yet (rare race), assume false — a fork attempt will still get a
   // graceful 400 toast.
-  const isGroupChat = useConversationStore(
-    (s) => s.conversations.find((c) => c.id === conversationId)?.is_group_chat ?? false,
+  const conversation = useConversationStore((s) =>
+    s.conversations.find((c) => c.id === conversationId),
   )
+  const isGroupChat = conversation?.is_group_chat ?? false
+  const topicId = conversation?.topic_id ?? null
+  const isShared = isGroupChat || Boolean(topicId)
   const fetchConversationParticipants = useConversationStore((s) => s.fetchConversationParticipants)
   const conversationParticipants = useConversationStore(
     (s) => s.conversationParticipants[conversationId],
@@ -841,15 +844,16 @@ export function MessageList({ conversationId }: MessageListProps) {
                       backgroundResult === null && (
                         <>
                           {/* Sender identity is stamped on every user message (incl. 1:1)
-                    so a 1:1→group conversion attributes past messages, but the
-                    badge only shows in group chats. */}
-                          {isGroupChat &&
+                    so a 1:1→group conversion attributes past messages. Show the
+                    badge in group chats and topic conversations. */}
+                          {isShared &&
                             msg.metadata?.sender_display_name &&
                             msg.metadata?.sender_user_id && (
                               <SenderBadge
                                 userId={msg.metadata.sender_user_id}
                                 displayName={msg.metadata.sender_display_name}
                                 conversationId={conversationId}
+                                topicId={topicId}
                               />
                             )}
                           {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (

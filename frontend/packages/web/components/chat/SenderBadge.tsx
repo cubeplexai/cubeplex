@@ -1,23 +1,29 @@
 'use client'
 
-import { useAuthStore, useConversationStore } from '@cubeplex/core'
+import { useAuthStore, useConversationStore, useTopicStore } from '@cubeplex/core'
 import { Avatar, type AvatarStyle } from '@/components/ui/avatar-resolved'
 
 interface SenderBadgeProps {
   userId: string
   displayName: string
   conversationId?: string
+  topicId?: string | null
 }
 
-export function SenderBadge({ userId, displayName, conversationId }: SenderBadgeProps) {
+export function SenderBadge({ userId, displayName, conversationId, topicId }: SenderBadgeProps) {
   const currentUser = useAuthStore((s) => s.user)
-  const participant = useConversationStore((s) =>
+  const convParticipant = useConversationStore((s) =>
     conversationId
       ? s.conversationParticipants[conversationId]?.find((p) => p.user_id === userId)
       : undefined,
   )
+  const topicParticipant = useTopicStore((s) =>
+    topicId ? s.topicParticipants[topicId]?.find((p) => p.user_id === userId) : undefined,
+  )
 
   const isMe = currentUser?.id === userId
+  const participant = convParticipant ?? topicParticipant
+
   const src = isMe ? currentUser?.avatar_url : participant?.avatar_url
   const seed = isMe
     ? (currentUser?.avatar_seed ?? currentUser?.id)

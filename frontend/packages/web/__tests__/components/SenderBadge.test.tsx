@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SenderBadge } from '@/components/chat/SenderBadge'
-import type { ConversationParticipant, User } from '@cubeplex/core'
+import type { ConversationParticipant, TopicParticipant, User } from '@cubeplex/core'
 
 const storeMocks = vi.hoisted(() => ({
   currentUser: null as User | null,
   conversationParticipants: {} as Record<string, ConversationParticipant[]>,
+  topicParticipants: {} as Record<string, TopicParticipant[]>,
 }))
 
 vi.mock('@cubeplex/core', () => ({
@@ -16,6 +17,9 @@ vi.mock('@cubeplex/core', () => ({
       conversationParticipants: Record<string, ConversationParticipant[]>
     }) => unknown,
   ) => selector({ conversationParticipants: storeMocks.conversationParticipants }),
+  useTopicStore: (
+    selector: (state: { topicParticipants: Record<string, TopicParticipant[]> }) => unknown,
+  ) => selector({ topicParticipants: storeMocks.topicParticipants }),
 }))
 
 describe('SenderBadge', () => {
@@ -23,6 +27,7 @@ describe('SenderBadge', () => {
     vi.clearAllMocks()
     storeMocks.currentUser = null
     storeMocks.conversationParticipants = {}
+    storeMocks.topicParticipants = {}
   })
 
   it('renders display name and user avatar for current user with uploaded avatar_url', () => {
@@ -74,6 +79,43 @@ describe('SenderBadge', () => {
     const img = container.querySelector('img[src="/api/v1/avatar/user-bob?v=123456"]')
     expect(img).toBeInTheDocument()
     expect(img).toHaveAttribute('alt', 'Bob Other')
+  })
+
+  it('renders display name and participant avatar from topicParticipants when in topic conversation', () => {
+    storeMocks.currentUser = {
+      id: 'user-me',
+      email: 'me@example.com',
+    } as unknown as User
+
+    storeMocks.topicParticipants = {
+      'top-1': [
+        {
+          id: 'tp-1',
+          topic_id: 'top-1',
+          user_id: 'user-charlie',
+          joined_at: '2026-07-01T00:00:00Z',
+          role: 'member',
+          display_name: 'Charlie Topic',
+          avatar_url: '/api/v1/avatar/user-charlie?v=789',
+          avatar_seed: 'seed-charlie',
+          avatar_style: 'bottts',
+        },
+      ],
+    }
+
+    const { container } = render(
+      <SenderBadge
+        userId="user-charlie"
+        displayName="Charlie Topic"
+        conversationId="conv-topic-1"
+        topicId="top-1"
+      />,
+    )
+
+    expect(screen.getByText('Charlie Topic')).toBeInTheDocument()
+    const img = container.querySelector('img[src="/api/v1/avatar/user-charlie?v=789"]')
+    expect(img).toBeInTheDocument()
+    expect(img).toHaveAttribute('alt', 'Charlie Topic')
   })
 
   it('falls back to userId and generated avatar when participant not found in store', () => {
