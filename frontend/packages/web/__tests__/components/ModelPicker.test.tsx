@@ -207,8 +207,8 @@ describe('ModelPicker', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('defaults to the model default reasoning choice', () => {
-    expect(getPresetSelectionStore('ws_default').getState().thinking).toBe('default')
+  it('defaults to medium reasoning choice', () => {
+    expect(getPresetSelectionStore('ws_default').getState().thinking).toBe('medium')
   })
 
   it('shows tier labels with model names in the list; no mono primary or description body text', async () => {

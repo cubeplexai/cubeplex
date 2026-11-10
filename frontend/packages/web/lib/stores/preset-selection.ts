@@ -29,7 +29,7 @@ export interface PresetSelectionState {
    * model take effect without the user re-selecting. `null` = workspace default.
    */
   modelKey: string | null
-  /** Selected thinking level; default `"default"`. */
+  /** Selected thinking level; default `"medium"`. */
   thinking: ThinkingLevel
 
   setPresets: (p: WorkspacePresetSummary[]) => void
@@ -83,6 +83,13 @@ const stores = new Map<string, UseBoundStore<StoreApi<PresetSelectionState>>>()
  * expected to memoize this call by `wsId` so the same hook identity is
  * passed to React across renders.
  */
+function resolveThinking(allowed: ThinkingLevel[], candidate: ThinkingLevel): ThinkingLevel {
+  if (candidate !== 'default' && allowed.includes(candidate)) return candidate
+  if (allowed.includes('medium')) return 'medium'
+  if (allowed.includes('on')) return 'on'
+  return 'default'
+}
+
 export function getPresetSelectionStore(
   wsId: string,
 ): UseBoundStore<StoreApi<PresetSelectionState>> {
@@ -96,7 +103,7 @@ export function getPresetSelectionStore(
         presetFetchStatus: 'idle' as PresetFetchStatus,
         presetFetchError: null,
         modelKey: null,
-        thinking: 'default' as ThinkingLevel,
+        thinking: 'medium' as ThinkingLevel,
         setPresets: (presets) =>
           set((state) => {
             const selected =
@@ -105,9 +112,7 @@ export function getPresetSelectionStore(
               null
             return {
               presets,
-              thinking: reasoningLevels(selected).includes(state.thinking)
-                ? state.thinking
-                : 'default',
+              thinking: resolveThinking(reasoningLevels(selected), state.thinking),
             }
           }),
         setPresetFetchState: (presetFetchStatus, presetFetchError = null) =>
@@ -120,9 +125,7 @@ export function getPresetSelectionStore(
               null
             return {
               modelKey,
-              thinking: reasoningLevels(selected).includes(state.thinking)
-                ? state.thinking
-                : 'default',
+              thinking: resolveThinking(reasoningLevels(selected), state.thinking),
             }
           }),
         setThinking: (thinking) =>
@@ -138,10 +141,12 @@ export function getPresetSelectionStore(
                 : allowed.includes('on') &&
                     ['minimal', 'low', 'medium', 'high', 'max'].includes(thinking)
                   ? 'on'
-                  : 'default',
+                  : allowed.includes('medium')
+                    ? 'medium'
+                    : 'default',
             }
           }),
-        reset: () => set({ modelKey: null, thinking: 'default' as ThinkingLevel }),
+        reset: () => set({ modelKey: null, thinking: 'medium' as ThinkingLevel }),
       }),
       {
         name: storageKey(wsId),
@@ -160,13 +165,17 @@ export function getPresetSelectionStore(
         // on mount and resets it to null if unknown, so no further key remap
         // is needed. v2 dropped the `minimal` thinking level (deepseek's
         // schema rejects it); rewrite stale values so the dropdown has no
-        // orphan. v4 changed the default thinking level off → medium. Drop
-        // any persisted `thinking` so it re-defaults to medium; keep the
-        // model choice.
-        version: 6,
+        // orphan. v4 changed the default thinking level off → medium. v6
+        // switched to default. v7 re-defaults thinking to medium so reasoning
+        // models show thinking blocks out of the box. Drop any persisted
+        // "default" so it re-defaults to medium; keep explicit off/low/high/max choices.
+        version: 7,
         migrate: (persisted, _version) => {
           const p = (persisted as Partial<PresetSelectionState> & { modelPresetKey?: string }) ?? {}
-          return { modelKey: p.modelKey ?? p.modelPresetKey ?? null } as PresetSelectionState
+          return {
+            modelKey: p.modelKey ?? p.modelPresetKey ?? null,
+            thinking: p.thinking && p.thinking !== 'default' ? p.thinking : 'medium',
+          } as PresetSelectionState
         },
       },
     ),
