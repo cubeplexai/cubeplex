@@ -94,8 +94,25 @@ describe('preset-selection store', () => {
     ws.getState().reset()
     const st = ws.getState()
     expect(st.modelKey).toBeNull()
-    expect(st.thinking).toBe('default')
+    expect(st.thinking).toBe('medium')
     expect(st.presets).toHaveLength(1)
+  })
+
+  it('migrates v6 persisted state: re-defaults default to medium but keeps explicit choices', () => {
+    localStorage.setItem(
+      'preset-selection-v1:ws_migrated_default',
+      JSON.stringify({ state: { modelKey: 'pro', thinking: 'default' }, version: 6 }),
+    )
+    localStorage.setItem(
+      'preset-selection-v1:ws_migrated_explicit',
+      JSON.stringify({ state: { modelKey: 'lite', thinking: 'off' }, version: 6 }),
+    )
+
+    const wsDefault = getPresetSelectionStore('ws_migrated_default')
+    const wsExplicit = getPresetSelectionStore('ws_migrated_explicit')
+
+    expect(wsDefault.getState().thinking).toBe('medium')
+    expect(wsExplicit.getState().thinking).toBe('off')
   })
 
   it('clearAllPresetSelectionStores() removes persisted keys and registry', () => {
