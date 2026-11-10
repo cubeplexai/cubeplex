@@ -37,6 +37,7 @@ beforeEach(() => {
     statusPhase: null,
     error: null,
     todosByConversation: {},
+    todoLiveNonceByConversation: {},
     toolStartedMap: {},
     toolResultMap: {},
   })
@@ -436,6 +437,97 @@ describe('messageStore.send', () => {
         status: 'in_progress',
       },
     ])
+    expect(useMessageStore.getState().todoLiveNonceByConversation[CONV_ID]).toBe(2)
+  })
+
+  it('keeps the plan when a later write_todos call is not a list', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'todo-1',
+              name: 'write_todos',
+              arguments: {
+                todos: [{ content: 'Inspect frontend todo parsing', status: 'in_progress' }],
+              },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'todo-2',
+              name: 'write_todos',
+              arguments: { todos: null },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
+
+    await act(async () => {
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'fix todos')
+    })
+
+    expect(useMessageStore.getState().todosByConversation[CONV_ID]).toEqual([
+      {
+        id: null,
+        description: 'Inspect frontend todo parsing',
+        status: 'in_progress',
+      },
+    ])
+    expect(useMessageStore.getState().todoLiveNonceByConversation[CONV_ID]).toBe(1)
+  })
+
+  it('clears the plan when write_todos sends an empty list', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        mockSSEResponse([
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'todo-1',
+              name: 'write_todos',
+              arguments: {
+                todos: [{ content: 'Inspect frontend todo parsing', status: 'in_progress' }],
+              },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          {
+            type: 'tool_call',
+            data: {
+              tool_call_id: 'todo-2',
+              name: 'write_todos',
+              arguments: { todos: [] },
+            },
+            agent_id: null,
+            agent_name: null,
+            timestamp: '',
+          },
+          { type: 'done', data: {}, agent_id: null, agent_name: null, timestamp: '' },
+        ]),
+      ),
+    )
+
+    await act(async () => {
+      await useMessageStore.getState().send(mockClient as any, CONV_ID, 'fix todos')
+    })
+
+    expect(useMessageStore.getState().todosByConversation[CONV_ID]).toEqual([])
+    expect(useMessageStore.getState().todoLiveNonceByConversation[CONV_ID]).toBe(2)
   })
 
   it('replaces streamed tool-call placeholders with the finalized tool call', async () => {
