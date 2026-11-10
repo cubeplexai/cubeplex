@@ -11,10 +11,10 @@ const active: TodoItem[] = [
   { id: 'task-3', description: 'Verify the interaction', status: 'completed' },
 ]
 
-function renderStrip(todos: TodoItem[], conversationId: string) {
+function renderStrip(todos: TodoItem[], conversationId: string, liveNonce = 0) {
   return render(
     <NextIntlClientProvider locale="en" messages={en}>
-      <TaskProgressStrip conversationId={conversationId} todos={todos} />
+      <TaskProgressStrip conversationId={conversationId} todos={todos} liveNonce={liveNonce} />
     </NextIntlClientProvider>,
   )
 }
@@ -45,13 +45,29 @@ describe('TaskProgressStrip', () => {
     expect(done).not.toHaveClass('line-through')
   })
 
-  it('opens only when a list appears after being empty', () => {
+  it('stays collapsed when a restored list replaces the empty placeholder', () => {
+    const { rerender } = renderStrip([], 'conv-cold')
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={en}>
+        <TaskProgressStrip conversationId="conv-cold" todos={active} liveNonce={0} />
+      </NextIntlClientProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: /Inspect the current behavior/ })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+  })
+
+  it('opens only when a live write fills an empty list', () => {
     const { rerender } = renderStrip([], 'conv-appear')
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
 
     rerender(
       <NextIntlClientProvider locale="en" messages={en}>
-        <TaskProgressStrip conversationId="conv-appear" todos={active} />
+        <TaskProgressStrip conversationId="conv-appear" todos={active} liveNonce={1} />
       </NextIntlClientProvider>,
     )
 
@@ -59,6 +75,17 @@ describe('TaskProgressStrip', () => {
       'aria-expanded',
       'true',
     )
+  })
+
+  it('shows the only open step when the list would otherwise be empty', () => {
+    renderStrip(
+      [{ id: 'task-1', description: 'Inspect the current behavior', status: 'in_progress' }],
+      'conv-single',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Inspect the current behavior/ }))
+
+    expect(screen.getByRole('list')).toHaveTextContent('Inspect the current behavior')
   })
 
   it('stays collapsed when a later status update arrives', () => {
@@ -75,7 +102,7 @@ describe('TaskProgressStrip', () => {
     ]
     rerender(
       <NextIntlClientProvider locale="en" messages={en}>
-        <TaskProgressStrip conversationId="conv-stay" todos={next} />
+        <TaskProgressStrip conversationId="conv-stay" todos={next} liveNonce={1} />
       </NextIntlClientProvider>,
     )
 

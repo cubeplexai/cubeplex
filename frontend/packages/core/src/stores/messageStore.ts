@@ -247,6 +247,9 @@ export interface MessageStore {
   /** Latest write_todos list for each conversation. Keyed so a switch or a
    * 304 bootstrap cannot show another thread's plan. */
   todosByConversation: Record<string, TodoItem[]>
+  /** Bumps only when a live write_todos call is applied. Bootstrap restores
+   * the list without bumping, so a cold load does not look like a new plan. */
+  todoLiveNonceByConversation: Record<string, number>
   toolStartedMap: Record<string, number>
   toolResultMap: Record<
     string,
@@ -933,11 +936,13 @@ function normalizeTodoStatus(status: unknown): TodoItem['status'] {
   return status === 'in_progress' || status === 'completed' ? status : 'pending'
 }
 
-function parseTodosFromToolCall(args: Record<string, unknown>): TodoItem[] {
-  const rawTodos = Array.isArray(args.todos) ? args.todos : []
+function parseTodosFromToolCall(args: Record<string, unknown>): TodoItem[] | null {
+  // A non-list is a malformed call. Returning null keeps the previous plan.
+  // An empty list is a real clear.
+  if (!Array.isArray(args.todos)) return null
   const todos: TodoItem[] = []
 
-  for (const todo of rawTodos) {
+  for (const todo of args.todos) {
     if (!todo || typeof todo !== 'object') continue
     const raw = todo as { content?: unknown; status?: unknown }
     const description = typeof raw.content === 'string' ? raw.content.trim() : ''
@@ -1129,12 +1134,18 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const e = event as ToolCallEvent
     const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
     const existingStartedAt = state.toolStartedMap[e.data.tool_call_id]
+    const parsedTodos =
+      e.data.name === 'write_todos' ? parseTodosFromToolCall(e.data.arguments) : null
     const todoUpdate =
-      e.data.name === 'write_todos' && convId !== null
+      parsedTodos !== null && convId !== null
         ? {
             todosByConversation: {
               ...state.todosByConversation,
-              [convId]: parseTodosFromToolCall(e.data.arguments),
+              [convId]: parsedTodos,
+            },
+            todoLiveNonceByConversation: {
+              ...state.todoLiveNonceByConversation,
+              [convId]: (state.todoLiveNonceByConversation[convId] ?? 0) + 1,
             },
           }
         : {}
@@ -1986,6 +1997,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   errors: {},
   lastRunStatus: null,
   todosByConversation: {},
+  todoLiveNonceByConversation: {},
   toolStartedMap: {},
   toolResultMap: {},
   pendingConfirmMap: {},
@@ -3643,6 +3655,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       lastAppliedEventId: null,
       statusPhase: null,
       todosByConversation: {},
+      todoLiveNonceByConversation: {},
       toolStartedMap: {},
       toolResultMap: {},
     })

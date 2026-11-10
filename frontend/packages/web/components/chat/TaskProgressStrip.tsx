@@ -11,33 +11,57 @@ import { cn } from '@/lib/utils'
 
 const EMPTY_TODOS: TodoItem[] = []
 
-// Open or closed for this browser session. A list that appears after being
-// empty opens once. Later status updates do not reopen it.
+// Open or closed for this browser session. A live write_todos that fills an
+// empty list opens once. Restoring a list does not. Later updates do not
+// reopen it.
 const expandedPrefs = new Map<string, boolean>()
 
 interface TaskProgressStripProps {
   conversationId: string
   todos: TodoItem[]
+  /** Bumps when a live write_todos call is applied. A restored list does not. */
+  liveNonce?: number
 }
 
 export function ConversationTaskProgress({ conversationId }: { conversationId: string }) {
   const todos = useMessageStore((s) => s.todosByConversation[conversationId] ?? EMPTY_TODOS)
-  return <TaskProgressStrip conversationId={conversationId} todos={todos} />
+  const liveNonce = useMessageStore((s) => s.todoLiveNonceByConversation[conversationId] ?? 0)
+  return <TaskProgressStrip conversationId={conversationId} todos={todos} liveNonce={liveNonce} />
 }
 
-export function TaskProgressStrip({ conversationId, todos }: TaskProgressStripProps) {
+export function TaskProgressStrip({
+  conversationId,
+  todos,
+  liveNonce = 0,
+}: TaskProgressStripProps) {
   const t = useTranslations('chat')
   const listId = useId()
   const [expanded, setExpanded] = useState(() => expandedPrefs.get(conversationId) ?? false)
   const [showCompleted, setShowCompleted] = useState(false)
   const [trackedConversation, setTrackedConversation] = useState(conversationId)
   const [prevCount, setPrevCount] = useState(todos.length)
+  const [seenNonce, setSeenNonce] = useState(liveNonce)
 
   if (trackedConversation !== conversationId) {
     setTrackedConversation(conversationId)
     setExpanded(expandedPrefs.get(conversationId) ?? false)
     setShowCompleted(false)
     setPrevCount(todos.length)
+    setSeenNonce(liveNonce)
+  } else if (liveNonce !== seenNonce) {
+    setSeenNonce(liveNonce)
+    if (todos.length === 0) {
+      expandedPrefs.delete(conversationId)
+      setExpanded(false)
+      setShowCompleted(false)
+      setPrevCount(0)
+    } else if (prevCount === 0) {
+      expandedPrefs.set(conversationId, true)
+      setExpanded(true)
+      setPrevCount(todos.length)
+    } else if (prevCount !== todos.length) {
+      setPrevCount(todos.length)
+    }
   } else if (todos.length === 0) {
     if (prevCount !== 0 || expanded || showCompleted) {
       expandedPrefs.delete(conversationId)
@@ -45,10 +69,6 @@ export function TaskProgressStrip({ conversationId, todos }: TaskProgressStripPr
       setShowCompleted(false)
       setPrevCount(0)
     }
-  } else if (prevCount === 0) {
-    expandedPrefs.set(conversationId, true)
-    setExpanded(true)
-    setPrevCount(todos.length)
   } else if (prevCount !== todos.length) {
     setPrevCount(todos.length)
   }
@@ -62,7 +82,10 @@ export function TaskProgressStrip({ conversationId, todos }: TaskProgressStripPr
     todos.find((todo) => todo.status === 'in_progress') ??
     todos.find((todo) => todo.status === 'pending') ??
     null
-  const openItems = todos.filter((todo) => todo.status !== 'completed' && todo !== current)
+  const otherOpen = todos.filter((todo) => todo.status !== 'completed' && todo !== current)
+  // The header already names the current step. Repeat it in the list only
+  // when it is the only open item, so the panel is not an empty shell.
+  const openItems = otherOpen.length > 0 || current === null ? otherOpen : [current]
   const label = allDone
     ? t('tasksDone', { completed, total: todos.length })
     : (current?.description ?? t('tasksProgress'))
