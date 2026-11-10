@@ -330,17 +330,22 @@ class OpenSandbox(Sandbox):
             await self._sandbox.commands.interrupt(handle.provider_ref)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
-        """Write files then chown by numeric uid so agent can edit them.
+        """Write files then chown and set permissions so agent can edit them.
 
-        The files API typically writes as root; without a follow-up chown the
-        agent (uid 1000) cannot edit the uploaded path.
+        The files API typically writes as root with default 0755 permissions;
+        without follow-up chown and chmod, non-root users cannot edit files and
+        regular files get unintended executable permissions (causing git diff mode changes).
         """
         if not files:
             return
         with _as_sandbox_error():
             for path, content in files:
-                await self._sandbox.files.write_file(path, content)
-        await self._chown_paths([path for path, _ in files])
+                mode = 755 if content.startswith(b"#!") else 644
+                try:
+                    await self._sandbox.files.write_file(path, content, mode=mode)
+                except TypeError:
+                    await self._sandbox.files.write_file(path, content)
+        await self._chown_paths(files)
 
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
         with _as_sandbox_error():
@@ -355,24 +360,50 @@ class OpenSandbox(Sandbox):
                 result.append((path, content))
             return result
 
-    async def _chown_paths(self, paths: list[str]) -> None:
-        """Best-effort chown of paths to run_uid:run_gid (root only)."""
-        if self._run_uid is None or not paths:
+    async def _chown_paths(self, paths_or_files: list[str] | list[tuple[str, bytes]]) -> None:
+        """Best-effort chown and chmod of paths to run_uid:run_gid and appropriate mode."""
+        if not paths_or_files:
             return
-        gid = self._run_gid if self._run_gid is not None else self._run_uid
-        quoted = " ".join(shlex.quote(p) for p in paths)
+        items: list[tuple[str, bool | None]] = []
+        for item in paths_or_files:
+            if isinstance(item, tuple):
+                path, content = item
+                items.append((path, content.startswith(b"#!")))
+            else:
+                items.append((item, None))
+
+        commands: list[str] = []
+        all_paths = [p for p, _ in items]
+        quoted_all = " ".join(shlex.quote(p) for p in all_paths)
+
+        if self._run_uid is not None:
+            gid = self._run_gid if self._run_gid is not None else self._run_uid
+            commands.append(f"chown {self._run_uid}:{gid} {quoted_all}")
+
+        scripts = [p for p, is_script in items if is_script is True]
+        non_scripts = [p for p, is_script in items if is_script is not True]
+
+        if non_scripts:
+            quoted_non_scripts = " ".join(shlex.quote(p) for p in non_scripts)
+            commands.append(f"chmod 644 {quoted_non_scripts}")
+        if scripts:
+            quoted_scripts = " ".join(shlex.quote(p) for p in scripts)
+            commands.append(f"chmod 755 {quoted_scripts}")
+
+        steps = "; ".join(f"{c} || rc=$?" for c in commands)
+        cmd = f"{{ rc=0; {steps}; }} 2>/dev/null; exit ${{rc:-0}}"
         try:
             result = await self.execute(
-                f"chown {self._run_uid}:{gid} {quoted} 2>/dev/null || true",
+                cmd,
                 timeout=60,
                 as_root=True,
             )
         except Exception as exc:
-            logger.warning("chown after upload failed on sandbox {}: {}", self.id, exc)
+            logger.warning("chown/chmod after upload failed on sandbox {}: {}", self.id, exc)
             return
         if result.exit_code not in (0, None):
             logger.warning(
-                "chown after upload failed on sandbox {}: {}",
+                "chown/chmod after upload failed on sandbox {}: {}",
                 self.id,
                 result.output,
             )

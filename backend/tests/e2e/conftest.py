@@ -1372,7 +1372,10 @@ class _FakeFiles:
     def __init__(self) -> None:
         self._store: dict[str, bytes] = {}
 
-    async def write_file(self, path: str, content: bytes) -> None:
+    async def write_file(
+        self, path: str, content: bytes, *, mode: int = 755, **kwargs: Any
+    ) -> None:
+        del mode, kwargs
         self._store[path] = content
 
     async def read_bytes(self, path: str) -> bytes:

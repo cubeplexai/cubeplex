@@ -10,7 +10,7 @@ Tests:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from opensandbox.exceptions import SandboxApiException
@@ -310,20 +310,121 @@ async def test_start_browser_runs_as_root() -> None:
 
 @pytest.mark.asyncio
 async def test_upload_chowns_by_uid() -> None:
-    """Upload writes bytes then chowns by numeric uid (files API is root)."""
+    """Upload writes bytes then chowns by numeric uid and chmods non-script to 644."""
     backend, raw = _make_backend()
 
     await backend.upload([("/workspace/hello.txt", b"hi")])
 
-    raw.files.write_file.assert_awaited_once_with("/workspace/hello.txt", b"hi")
+    raw.files.write_file.assert_awaited_once_with("/workspace/hello.txt", b"hi", mode=644)
     calls = backend._test_run_calls  # type: ignore[attr-defined]
     assert len(calls) == 1
     cmd, opts = calls[0]
     assert "chown 1000:1000" in cmd
+    assert "chmod 644 /workspace/hello.txt" in cmd
     assert "/workspace/hello.txt" in cmd
     assert "-R" not in cmd
     assert opts is not None
     assert opts.uid is None  # as_root
+
+
+@pytest.mark.asyncio
+async def test_upload_script_sets_executable_mode() -> None:
+    """Upload sets 755 mode for scripts with shebang."""
+    backend, raw = _make_backend()
+
+    script_content = b"#!/usr/bin/env bash\necho hello"
+    await backend.upload([("/workspace/run.sh", script_content)])
+
+    raw.files.write_file.assert_awaited_once_with("/workspace/run.sh", script_content, mode=755)
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    assert len(calls) == 1
+    cmd, opts = calls[0]
+    assert "chown 1000:1000" in cmd
+    assert "chmod 755 /workspace/run.sh" in cmd
+
+
+@pytest.mark.asyncio
+async def test_upload_mixed_files_applies_correct_modes() -> None:
+    """Upload sets 644 for regular files and 755 for scripts in a single batch."""
+    backend, raw = _make_backend()
+
+    files = [
+        ("/workspace/doc.md", b"# Title\n"),
+        ("/workspace/script.sh", b"#!/bin/sh\nexit 0"),
+    ]
+    await backend.upload(files)
+
+    calls = backend._test_run_calls  # type: ignore[attr-defined]
+    assert len(calls) == 1
+    cmd, _ = calls[0]
+    assert "chown 1000:1000" in cmd
+    assert "chmod 644 /workspace/doc.md" in cmd
+    assert "chmod 755 /workspace/script.sh" in cmd
+
+
+@pytest.mark.asyncio
+async def test_upload_falls_back_when_write_file_lacks_mode() -> None:
+    """Upload falls back to write_file without mode if write_file raises TypeError."""
+    backend, raw = _make_backend()
+
+    # Simulate an older driver or fake where write_file only takes (path, content)
+    async def legacy_write_file(path: str, content: bytes) -> None:
+        pass
+
+    raw.files.write_file = AsyncMock(side_effect=TypeError("unexpected keyword 'mode'"))
+    # Second call (fallback without mode) should succeed
+    raw.files.write_file.side_effect = [TypeError("unexpected keyword 'mode'"), None]
+
+    await backend.upload([("/workspace/compat.txt", b"compat content")])
+
+    assert raw.files.write_file.await_count == 2
+    assert raw.files.write_file.await_args_list[0] == call(
+        "/workspace/compat.txt", b"compat content", mode=644
+    )
+    assert raw.files.write_file.await_args_list[1] == call(
+        "/workspace/compat.txt", b"compat content"
+    )
+
+
+@pytest.mark.asyncio
+async def test_upload_fixup_command_does_not_short_circuit_chmod() -> None:
+    """Fixup command separates steps with semicolons so chmod runs even if chown fails."""
+    backend, _ = _make_backend()
+
+    await backend.upload([("/workspace/test.txt", b"test")])
+
+    cmd, _ = backend._test_run_calls[0]  # type: ignore[attr-defined]
+    # Semicolons separate commands instead of '&&'
+    assert "; chmod 644" in cmd
+    # Output redirection wraps the entire command group
+    assert cmd.startswith("{ rc=0; ")
+    assert "} 2>/dev/null; exit ${rc:-0}" in cmd
+    # No trailing || true swallowing the exit code
+    assert "|| true" not in cmd
+
+
+@pytest.mark.asyncio
+async def test_upload_logs_warning_on_fixup_failure() -> None:
+    """A non-zero exit code from post-upload fixup logs a warning."""
+    from loguru import logger
+
+    from cubeplex.sandbox.base import ExecuteResult
+
+    backend, _ = _make_backend()
+    backend.execute = AsyncMock(  # type: ignore[method-assign]
+        return_value=ExecuteResult(output="chown: operation not permitted", exit_code=1)
+    )
+
+    messages: list[str] = []
+    handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        await backend.upload([("/workspace/hello.txt", b"hi")])
+    finally:
+        logger.remove(handler_id)
+
+    logged = "".join(messages)
+    assert "chown/chmod after upload failed on sandbox" in logged
+    assert "chown: operation not permitted" in logged
 
 
 @pytest.mark.asyncio
