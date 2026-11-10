@@ -28,7 +28,7 @@ beforeEach(() => {
     lastAppliedEventId: null,
     statusPhase: null,
     error: null,
-    todos: [],
+    todosByConversation: {},
     toolStartedMap: {},
     toolResultMap: {},
   })

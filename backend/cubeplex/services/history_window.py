@@ -115,6 +115,50 @@ async def load_history_window(
 _TODOS_LOOKBACK_ASSISTANTS = 100
 
 
+def latest_write_todos(content: object) -> list[dict[str, Any]] | None:
+    """Return the last valid ``write_todos`` list in one assistant message.
+
+    ``None`` means this message has no valid call. An empty list is a valid
+    call that clears the plan. A malformed call is skipped, so an earlier
+    valid call in the same message is kept.
+    """
+    if not isinstance(content, list):
+        return None
+    found: list[dict[str, Any]] | None = None
+    for block in content:
+        parsed = _parse_write_todos_block(block)
+        if parsed is None:
+            continue
+        found = parsed
+    return found
+
+
+def _parse_write_todos_block(block: object) -> list[dict[str, Any]] | None:
+    if not (
+        isinstance(block, dict)
+        and block.get("type") == "tool_call"
+        and block.get("name") == "write_todos"
+    ):
+        return None
+    args = block.get("arguments")
+    raw_todos = args.get("todos") if isinstance(args, dict) else None
+    if not isinstance(raw_todos, list):
+        # Mid-stream truncation or a schema drift. Skip this call.
+        return None
+    out: list[dict[str, Any]] = []
+    for item in raw_todos:
+        if not isinstance(item, dict):
+            continue
+        description = item.get("content")
+        if not isinstance(description, str) or not description.strip():
+            continue
+        status = item.get("status")
+        if status not in ("in_progress", "completed"):
+            status = "pending"
+        out.append({"id": None, "description": description.strip(), "status": status})
+    return out
+
+
 async def find_latest_todos(
     session: AsyncSession,
     thread_id: str,
@@ -126,8 +170,9 @@ async def find_latest_todos(
     The conversation bootstrap returns only a tail of the history, so a
     naive client-side walk over the tail can miss a still-current todo
     list whose ``write_todos`` call lives further back. We scan the
-    newest ``limit`` assistant rows directly; ``None`` means no todos
-    were ever written (or none within the bound).
+    newest ``limit`` assistant rows directly. Within a row, the last valid
+    call wins. ``None`` means no todos were ever written (or none within
+    the bound).
     """
     sql = (
         "SELECT payload FROM cubepi_messages "
@@ -137,34 +182,10 @@ async def find_latest_todos(
     rows = (await session.execute(text(sql), {"tid": thread_id, "limit": limit})).all()
     for (payload,) in rows:
         msg = msgpack.unpackb(bytes(payload), raw=False)
-        content = msg.get("content")
-        if not isinstance(content, list):
+        if not isinstance(msg, dict):
             continue
-        for block in content:
-            if not (
-                isinstance(block, dict)
-                and block.get("type") == "tool_call"
-                and block.get("name") == "write_todos"
-            ):
-                continue
-            args = block.get("arguments")
-            raw_todos = args.get("todos") if isinstance(args, dict) else None
-            if not isinstance(raw_todos, list):
-                # Malformed call (e.g. mid-stream tool args truncated, or a
-                # future schema with a different field name): fall through to
-                # an older assistant row rather than clobbering a still-valid
-                # todo list with an empty panel.
-                continue
-            out: list[dict[str, Any]] = []
-            for t in raw_todos:
-                if not isinstance(t, dict):
-                    continue
-                description = t.get("content")
-                if not isinstance(description, str) or not description.strip():
-                    continue
-                status = t.get("status")
-                if status not in ("in_progress", "completed"):
-                    status = "pending"
-                out.append({"id": None, "description": description.strip(), "status": status})
-            return out
+        parsed = latest_write_todos(msg.get("content"))
+        if parsed is None:
+            continue
+        return parsed
     return None

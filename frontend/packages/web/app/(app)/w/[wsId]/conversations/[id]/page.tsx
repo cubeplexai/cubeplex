@@ -20,6 +20,7 @@ import {
 
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
+import { ConversationTaskProgress } from '@/components/chat/TaskProgressStrip'
 import { ArtifactGallery } from '@/components/chat/ArtifactGallery'
 import { InputBar } from '@/components/layout/InputBar'
 import { ErrorState } from '@/components/shared/ErrorState'
@@ -182,8 +183,11 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
     <AppShell headerTitle={currentConvo?.title} conversationId={conversationId}>
       <ArtifactGallery conversationId={conversationId} />
       <MessageList conversationId={conversationId} />
-      <div className="border-t border-border px-4 py-3 bg-background">
-        <InputBar conversationId={conversationId} modelSyncPending={modelSyncPending} />
+      <div className="relative z-10 border-t border-border bg-background px-4">
+        <ConversationTaskProgress conversationId={conversationId} />
+        <div className="py-3">
+          <InputBar conversationId={conversationId} modelSyncPending={modelSyncPending} />
+        </div>
       </div>
     </AppShell>
   )
