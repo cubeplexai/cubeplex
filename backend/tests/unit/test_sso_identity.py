@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.auth.users import UserManager
 from cubeplex.models import ExternalIdentity, Organization, User
+from cubeplex.models.user import AvatarKind
 from cubeplex.sso.identity import (
     EnterpriseLoginPolicy,
     SSOLoginRejected,
@@ -80,6 +81,194 @@ async def test_resolve_links_existing_user_by_verified_email(
     assert result.created is False
     assert result.user.id == user.id
     assert result.external_identity.external_id == "google-sub-456"
+
+
+_GOOGLE_PICTURE = "https://lh3.googleusercontent.com/a/new-picture"
+
+
+@pytest.mark.asyncio
+async def test_social_link_keeps_email_account_avatar(
+    sso_session: AsyncSession,
+    sso_user_manager: UserManager,
+    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
+) -> None:
+    """Email signup, then Google login, must not replace the account avatar.
+
+    Registration leaves a generated picture (or none). The client draws that
+    stably. The Google ``picture`` claim must not swap it.
+    """
+    _, user = await make_org_with_user(email="email-first@example.com")
+    user.avatar_url = "avatars/email-first.png"
+    user.avatar_kind = AvatarKind.generated.value
+    user.avatar_seed = "kept-seed"
+    sso_session.add(user)
+    await sso_session.commit()
+
+    result = await resolve_identity(
+        sso_session,
+        user_manager=sso_user_manager,
+        provider_type="google",
+        provider_id="google",
+        external_id="google-sub-email-first",
+        external_email="email-first@example.com",
+        email_verified=True,
+        avatar_url=_GOOGLE_PICTURE,
+    )
+    assert result.created is False
+    assert result.user.id == user.id
+    assert result.user.avatar_url == "avatars/email-first.png"
+    assert result.user.avatar_kind == AvatarKind.generated.value
+    assert result.user.avatar_seed == "kept-seed"
+
+
+@pytest.mark.asyncio
+async def test_social_link_keeps_unset_email_avatar(
+    sso_session: AsyncSession,
+    sso_user_manager: UserManager,
+    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
+) -> None:
+    """The common email-signup state is no stored avatar at all."""
+    _, user = await make_org_with_user(email="plain-email@example.com")
+    assert user.avatar_url is None
+    assert user.avatar_kind is None
+
+    result = await resolve_identity(
+        sso_session,
+        user_manager=sso_user_manager,
+        provider_type="google",
+        provider_id="google",
+        external_id="google-sub-plain",
+        external_email="plain-email@example.com",
+        email_verified=True,
+        avatar_url=_GOOGLE_PICTURE,
+    )
+    assert result.created is False
+    assert result.user.avatar_url is None
+    assert result.user.avatar_kind is None
+
+
+@pytest.mark.asyncio
+async def test_social_relogin_does_not_replace_kept_avatar(
+    sso_session: AsyncSession,
+    sso_user_manager: UserManager,
+    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
+) -> None:
+    """A later Google login of an already-linked email account stays put."""
+    _, user = await make_org_with_user(email="relink@example.com")
+    user.avatar_url = "avatars/relink.png"
+    user.avatar_kind = AvatarKind.generated.value
+    sso_session.add(user)
+    sso_session.add(
+        ExternalIdentity(
+            user_id=user.id,
+            provider_type="google",
+            provider_id="google",
+            external_id="google-sub-relink",
+            external_email="relink@example.com",
+        )
+    )
+    await sso_session.commit()
+
+    result = await resolve_identity(
+        sso_session,
+        user_manager=sso_user_manager,
+        provider_type="google",
+        provider_id="google",
+        external_id="google-sub-relink",
+        external_email="relink@example.com",
+        email_verified=True,
+        avatar_url=_GOOGLE_PICTURE,
+    )
+    assert result.created is False
+    assert result.user.avatar_url == "avatars/relink.png"
+    assert result.user.avatar_kind == AvatarKind.generated.value
+
+
+@pytest.mark.asyncio
+async def test_social_login_sets_picture_for_new_user(
+    sso_session: AsyncSession, sso_user_manager: UserManager
+) -> None:
+    """A person who first appears via Google still gets the provider picture."""
+    result = await resolve_identity(
+        sso_session,
+        user_manager=sso_user_manager,
+        provider_type="google",
+        provider_id="google",
+        external_id="google-sub-brand-new",
+        external_email="brand-new@example.com",
+        email_verified=True,
+        avatar_url=_GOOGLE_PICTURE,
+        claims={"name": "Brand New"},
+    )
+    assert result.created is True
+    assert result.user.avatar_url == _GOOGLE_PICTURE
+    assert result.user.avatar_kind == AvatarKind.sso.value
+
+
+@pytest.mark.asyncio
+async def test_social_relogin_refreshes_sso_avatar(
+    sso_session: AsyncSession,
+    sso_user_manager: UserManager,
+    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
+) -> None:
+    """An avatar Google already owns is updated when the picture URL changes."""
+    _, user = await make_org_with_user(email="google-native@example.com")
+    user.avatar_url = "https://lh3.googleusercontent.com/a/old"
+    user.avatar_kind = AvatarKind.sso.value
+    sso_session.add(user)
+    sso_session.add(
+        ExternalIdentity(
+            user_id=user.id,
+            provider_type="google",
+            provider_id="google",
+            external_id="google-sub-native",
+            external_email="google-native@example.com",
+        )
+    )
+    await sso_session.commit()
+
+    result = await resolve_identity(
+        sso_session,
+        user_manager=sso_user_manager,
+        provider_type="google",
+        provider_id="google",
+        external_id="google-sub-native",
+        external_email="google-native@example.com",
+        email_verified=True,
+        avatar_url=_GOOGLE_PICTURE,
+    )
+    assert result.user.avatar_url == _GOOGLE_PICTURE
+    assert result.user.avatar_kind == AvatarKind.sso.value
+
+
+@pytest.mark.asyncio
+async def test_enterprise_sso_still_upgrades_generated_avatar(
+    sso_session: AsyncSession,
+    sso_user_manager: UserManager,
+    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
+) -> None:
+    """Enterprise SSO still replaces a generated avatar with the IdP picture."""
+    org, user = await make_org_with_user(email="member@corp.com")
+    user.avatar_url = "avatars/member.png"
+    user.avatar_kind = AvatarKind.generated.value
+    sso_session.add(user)
+    await sso_session.commit()
+
+    picture = "https://idp.example/picture.png"
+    result = await resolve_identity(
+        sso_session,
+        user_manager=sso_user_manager,
+        provider_type="oidc_sso",
+        provider_id="sso-corp",
+        external_id="oidc-sub-member",
+        external_email="member@corp.com",
+        email_verified=True,
+        avatar_url=picture,
+        policy=EnterpriseLoginPolicy(org_id=org.id, connection_active=True, auto_provision=True),
+    )
+    assert result.created is False
+    assert result.user.avatar_url == picture
+    assert result.user.avatar_kind == AvatarKind.sso.value
 
 
 @pytest.mark.asyncio

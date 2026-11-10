@@ -35,6 +35,26 @@ def _should_sso_overwrite_avatar(user: User, avatar_url: str | None) -> bool:
     return user.avatar_url != avatar_url
 
 
+def _should_apply_login_avatar(
+    user: User,
+    avatar_url: str | None,
+    *,
+    social: bool,
+) -> bool:
+    """Whether this login may write the IdP picture onto an existing account.
+
+    Enterprise SSO still upgrades a generated or unset avatar. Social login
+    (Google) does not: an email signup already shows a stable generated
+    picture, with ``avatar_kind`` unset or ``generated``, and a later Google
+    login must leave it alone. Social login only refreshes an avatar it
+    already owns (``avatar_kind == sso``). A brand-new social signup still
+    receives the provider picture through ``_should_sso_overwrite_avatar``.
+    """
+    if social and getattr(user, "avatar_kind", None) != "sso":
+        return False
+    return _should_sso_overwrite_avatar(user, avatar_url)
+
+
 class SSOProvisioningDenied(Exception):
     """Raised when auto-provisioning is disabled and user doesn't exist."""
 
@@ -141,8 +161,9 @@ async def resolve_identity(
         existing.external_email = external_email
         existing.metadata_ = claims or {}
         session.add(existing)
-        # Sync avatar from IdP on every login so profile picture stays current.
-        if _should_sso_overwrite_avatar(user, avatar_url):
+        # Refresh an avatar this IdP already owns. Social login must not
+        # replace the picture an email account already shows.
+        if _should_apply_login_avatar(user, avatar_url, social=policy is None):
             user.avatar_url = avatar_url
             user.avatar_kind = "sso"
             session.add(user)
@@ -218,7 +239,9 @@ async def resolve_identity(
                 )
             await _provision_org_membership(session, user, policy.org_id)
 
-    if not created and _should_sso_overwrite_avatar(user, avatar_url):
+    # First link of an existing account. Same rule as the returning-login
+    # path above: Google must not replace an email account's avatar.
+    if not created and _should_apply_login_avatar(user, avatar_url, social=policy is None):
         user.avatar_url = avatar_url
         user.avatar_kind = "sso"
         session.add(user)
