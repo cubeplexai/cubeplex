@@ -73,7 +73,7 @@ beforeEach(() => {
     statusPhase: null,
     error: null,
     errors: {},
-    todos: [],
+    todosByConversation: {},
     toolStartedMap: {},
     toolResultMap: {},
     pendingConfirmMap: {},

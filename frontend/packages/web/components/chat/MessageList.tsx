@@ -265,7 +265,6 @@ export function MessageList({ conversationId }: MessageListProps) {
     statusPhase,
     mainStream,
     subAgentStreams,
-    todos,
     toolResultMap,
     sessionUsage,
     contextWindow,
@@ -889,7 +888,6 @@ export function MessageList({ conversationId }: MessageListProps) {
                   statusPhase={statusPhase}
                   subAgentStreams={subAgentStreams}
                   toolResultMap={mergedToolResultMap}
-                  todos={todos}
                   conversationId={conversationId}
                   workspaceId={workspaceId}
                   pendingConfirmMap={pendingConfirmMap}

@@ -43,7 +43,6 @@ export function useMessages(conversationId: string) {
   const mainStream = useMessageStore((s) =>
     s.streamingConversationId === conversationId ? (s.streamAgents['main'] ?? null) : null,
   )
-  const todos = useMessageStore((s) => s.todos)
   const conversationError = useMessageStore((s) => s.errors[conversationId] ?? null)
   const toolResultMap = useMessageStore((s) =>
     s.streamingConversationId === conversationId ? s.toolResultMap : EMPTY_TOOL_RESULTS,
@@ -70,7 +69,6 @@ export function useMessages(conversationId: string) {
     statusPhase,
     mainStream,
     subAgentStreams,
-    todos,
     conversationError,
     toolResultMap,
     turnUsage,

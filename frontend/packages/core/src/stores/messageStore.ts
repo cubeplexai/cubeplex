@@ -244,7 +244,9 @@ export interface MessageStore {
   statusPhase: string | null
   errors: Record<string, { runId: string; data: ErrorEventData } | null>
   lastRunStatus: 'stale' | null
-  todos: TodoItem[]
+  /** Latest write_todos list for each conversation. Keyed so a switch or a
+   * 304 bootstrap cannot show another thread's plan. */
+  todosByConversation: Record<string, TodoItem[]>
   toolStartedMap: Record<string, number>
   toolResultMap: Record<
     string,
@@ -1127,8 +1129,15 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const e = event as ToolCallEvent
     const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
     const existingStartedAt = state.toolStartedMap[e.data.tool_call_id]
-    const nextTodos =
-      e.data.name === 'write_todos' ? parseTodosFromToolCall(e.data.arguments) : state.todos
+    const todoUpdate =
+      e.data.name === 'write_todos' && convId !== null
+        ? {
+            todosByConversation: {
+              ...state.todosByConversation,
+              [convId]: parseTodosFromToolCall(e.data.arguments),
+            },
+          }
+        : {}
     maybeAutoOpenBrowserPreview(convId, e.data.name, e.data.arguments)
     maybeAutoOpenFilePreview(convId, e.data.name, e.data.arguments, {
       agent_id: event.agent_id,
@@ -1138,7 +1147,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
 
     return {
       ...base,
-      todos: nextTodos,
+      ...todoUpdate,
       toolStartedMap: {
         ...state.toolStartedMap,
         [e.data.tool_call_id]:
@@ -1976,7 +1985,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   statusPhase: null,
   errors: {},
   lastRunStatus: null,
-  todos: [],
+  todosByConversation: {},
   toolStartedMap: {},
   toolResultMap: {},
   pendingConfirmMap: {},
@@ -2622,7 +2631,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                   ? s.hasMoreByConv[conversationId]
                   : bootstrap.has_more,
             },
-            todos: reuseEqualValue(s.todos, restoredTodos),
+            todosByConversation: {
+              ...s.todosByConversation,
+              [conversationId]: reuseEqualValue(
+                s.todosByConversation[conversationId] ?? [],
+                restoredTodos,
+              ),
+            },
             // Clear only when bootstrap has authoritative error state or persisted
             // assistant history; otherwise keep a live error visible through the
             // bootstrap race.
@@ -2898,7 +2913,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       streamConnection: 'connected',
       errors: { ...state.errors, [conversationId]: null },
       lastRunStatus: null,
-      todos: [],
+      todosByConversation: {
+        ...state.todosByConversation,
+        [conversationId]: [],
+      },
       toolStartedMap: {},
       toolResultMap: {},
       pendingConfirmMap: {},
@@ -3624,7 +3642,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       pendingRunClientMessageId: null,
       lastAppliedEventId: null,
       statusPhase: null,
-      todos: [],
+      todosByConversation: {},
       toolStartedMap: {},
       toolResultMap: {},
     })

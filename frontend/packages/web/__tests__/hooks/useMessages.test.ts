@@ -36,7 +36,7 @@ beforeEach(() => {
     lastAppliedEventId: null,
     statusPhase: null,
     error: null,
-    todos: [],
+    todosByConversation: {},
     toolStartedMap: {},
     toolResultMap: {},
   })
@@ -364,7 +364,7 @@ describe('messageStore.send', () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'fix todos')
     })
 
-    expect(useMessageStore.getState().todos).toEqual([
+    expect(useMessageStore.getState().todosByConversation[CONV_ID]).toEqual([
       {
         id: null,
         description: 'Inspect frontend todo parsing',
@@ -424,7 +424,7 @@ describe('messageStore.send', () => {
       await useMessageStore.getState().send(mockClient as any, CONV_ID, 'fix todos')
     })
 
-    expect(useMessageStore.getState().todos).toEqual([
+    expect(useMessageStore.getState().todosByConversation[CONV_ID]).toEqual([
       {
         id: null,
         description: 'Inspect frontend todo parsing',

@@ -8,7 +8,6 @@ import type {
   PendingConfirm,
   SessionUsage,
   SubagentSummary,
-  TodoItem,
   TurnUsage,
 } from '@cubeplex/core'
 import type { AgentStream } from '@cubeplex/core'
@@ -26,7 +25,6 @@ import { MarkdownArtifactCard } from './MarkdownArtifactCard'
 import { PresentedFileCard, type PresentedFileMeta } from './PresentedFileCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
-import { TaskProgressCard } from './TaskProgressCard'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ToolCallItem } from './ToolCallItem'
 import { MessageActions } from './MessageActions'
@@ -272,7 +270,6 @@ interface HistoryProps {
   isStreaming?: never
   statusPhase?: never
   subAgentStreams?: never
-  todos?: never
   pendingConfirmMap?: Record<string, PendingConfirm>
   onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
 }
@@ -298,7 +295,6 @@ interface StreamingProps {
   isStreaming: boolean
   statusPhase?: string | null
   subAgentStreams?: Record<string, AgentStream>
-  todos?: TodoItem[]
   pendingConfirmMap?: Record<string, PendingConfirm>
   onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
 }
@@ -649,25 +645,6 @@ function activityKey(piece: Extract<FoldPiece, { kind: 'activity' }>, index: num
   return `activity-${index}`
 }
 
-function extractTodosFromMessage(msg: AssistantMessageType): TodoItem[] {
-  const toolCalls = msg.content.filter(
-    (b): b is Extract<ContentBlock, { type: 'tool_call' }> => b.type === 'tool_call',
-  )
-  const tc = toolCalls.findLast((c) => c.name === 'write_todos')
-  if (!tc) return []
-  const raw = Array.isArray(tc.arguments.todos) ? tc.arguments.todos : []
-  const result: TodoItem[] = []
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue
-    const t = item as { content?: unknown; status?: unknown }
-    const desc = typeof t.content === 'string' ? t.content.trim() : ''
-    if (!desc) continue
-    const status = t.status === 'in_progress' || t.status === 'completed' ? t.status : 'pending'
-    result.push({ id: null, description: desc, status })
-  }
-  return result
-}
-
 export function AssistantMessage({
   message,
   stream,
@@ -676,7 +653,6 @@ export function AssistantMessage({
   subAgentStreams,
   subagentDataMap,
   toolResultMap,
-  todos,
   conversationId,
   workspaceId,
   isGroupChat,
@@ -696,8 +672,6 @@ export function AssistantMessage({
   const t = useTranslations('chat')
   const streamAgentId = stream ? 'main' : undefined
   const blocks: ContentBlock[] = stream ? stream.blocks : message!.content
-
-  const historyTodos = message ? extractTodosFromMessage(message) : []
 
   const msgCreatedAt = message?.timestamp
     ? new Date(message.timestamp * 1000).toISOString()
@@ -838,47 +812,37 @@ export function AssistantMessage({
           )}
         </div>
       )}
-      {(isStreaming && todos && todos.length > 0) ||
-      (!isStreaming && historyTodos.length > 0) ||
-      isStreaming ? (
+      {isStreaming && (
         <div className={cn(ASSISTANT_CONTENT_MAX_CLASS, 'space-y-2')}>
-          {isStreaming && todos && todos.length > 0 && (
-            <TaskProgressCard todos={todos} isStreaming={true} />
-          )}
-          {!isStreaming && historyTodos.length > 0 && (
-            <TaskProgressCard todos={historyTodos} isStreaming={false} />
-          )}
-          {isStreaming && (
-            <div className="flex flex-wrap items-center gap-2">
-              <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
-                {statusPhase === 'sandbox_creating' ? (
-                  <span className="text-xs text-muted-foreground animate-pulse">
-                    {t('sandboxPreparing')}
-                  </span>
-                ) : statusPhase === 'sandbox_failed' ? (
-                  <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
-                ) : (
-                  <>
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-primary
+          <div className="flex flex-wrap items-center gap-2">
+            <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
+              {statusPhase === 'sandbox_creating' ? (
+                <span className="text-xs text-muted-foreground animate-pulse">
+                  {t('sandboxPreparing')}
+                </span>
+              ) : statusPhase === 'sandbox_failed' ? (
+                <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
+              ) : (
+                <>
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:0ms]"
-                    />
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-primary
+                  />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:150ms]"
-                    />
-                    <span
-                      className="w-1.5 h-1.5 rounded-full bg-primary
+                  />
+                  <span
+                    className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:300ms]"
-                    />
-                  </>
-                )}
-              </div>
-              {runChip.status !== 'completed' && runChipEl}
+                  />
+                </>
+              )}
             </div>
-          )}
+            {runChip.status !== 'completed' && runChipEl}
+          </div>
         </div>
-      ) : null}
+      )}
     </div>
   )
 }

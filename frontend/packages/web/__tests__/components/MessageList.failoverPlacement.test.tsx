@@ -80,7 +80,7 @@ describe('MessageList failover banner placement', () => {
       pendingConfirmMap: {},
       cancellingConversationIds: {},
       lastRunStatus: null,
-      todos: [],
+      todosByConversation: {},
       toolResultMap: {},
       hasMoreByConv: {},
       loadingOlderByConv: {},
