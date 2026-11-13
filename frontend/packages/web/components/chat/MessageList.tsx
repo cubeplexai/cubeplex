@@ -471,20 +471,6 @@ export function MessageList({ conversationId }: MessageListProps) {
   // skipping it briefly hid the Thinking + Q/A card. Always render history.
   const lastAssistantId: string | null = null
 
-  // Failover/retry banners belong at the top of the current turn's model
-  // output. While streaming that is immediately above `mainStream`. After
-  // finalize, `mainStream` is gone and the same output lives in history —
-  // pin the banners immediately before the last assistant so they don't
-  // jump underneath the committed bubble.
-  const lastHistoryAssistantId = useMemo(() => {
-    const list = messages ?? []
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (list[i].role === 'assistant') return list[i].id
-    }
-    return null
-  }, [messages])
-  const bannersBeforeHistoryId = mainStream ? null : lastHistoryAssistantId
-
   // Per-run action row anchors: per cubeloop semantics fork is run-granular
   // (``cp.fork`` takes ``after_run_id``, copies the whole run). A run may
   // produce multiple assistant bubbles (thinking → tool_use → final text)
@@ -540,6 +526,49 @@ export function MessageList({ conversationId }: MessageListProps) {
   // One run's assistant rows are separate checkpoint messages. Fold them back
   // into the single activity the live stream showed, so refresh stays collapsed.
   const historyRows = useMemo(() => groupAssistantRuns(messages ?? []), [messages])
+
+  // Map failover events to either a specific assistant run in history, or to the
+  // live streaming assistant at the bottom. This prevents banners from drifting
+  // down as new turns or messages arrive.
+  const { failoverEventsByHistoryKey, liveFailoverEvents } = useMemo(() => {
+    const byKey = new Map<string, FailoverEvent[]>()
+    const live: FailoverEvent[] = []
+
+    const assistantRunRows = historyRows.filter(
+      (r): r is Extract<typeof r, { kind: 'assistant-run' }> => r.kind === 'assistant-run',
+    )
+    const runIdToKey = new Map<string, string>()
+    for (const r of assistantRunRows) {
+      const rid = r.messages.find((m) => m.run_id)?.run_id
+      if (rid) {
+        runIdToKey.set(rid, r.messages[0].id)
+      }
+    }
+
+    const lastAssistantRunKey =
+      assistantRunRows.length > 0
+        ? assistantRunRows[assistantRunRows.length - 1].messages[0].id
+        : null
+
+    for (const event of failoverEvents) {
+      if (event.run_id && runIdToKey.has(event.run_id)) {
+        const key = runIdToKey.get(event.run_id)!
+        const existing = byKey.get(key) ?? []
+        existing.push(event)
+        byKey.set(key, existing)
+      } else if (mainStream) {
+        live.push(event)
+      } else if (lastAssistantRunKey) {
+        const existing = byKey.get(lastAssistantRunKey) ?? []
+        existing.push(event)
+        byKey.set(lastAssistantRunKey, existing)
+      } else {
+        live.push(event)
+      }
+    }
+
+    return { failoverEventsByHistoryKey: byKey, liveFailoverEvents: live }
+  }, [historyRows, failoverEvents, mainStream])
 
   // --- Auto-scroll: keep chat pinned to bottom during streaming ---
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -750,13 +779,14 @@ export function MessageList({ conversationId }: MessageListProps) {
                   (acc, message) => Object.assign(acc, messageScopedToolResults[message.id]),
                   {},
                 )
+                const rowFailoverEvents = failoverEventsByHistoryKey.get(row.messages[0].id)
                 return (
                   <Fragment key={row.messages[0].id}>
-                    {row.messages.some((message) => message.id === bannersBeforeHistoryId) && (
+                    {rowFailoverEvents && rowFailoverEvents.length > 0 && (
                       <ModelChainBanners
-                        retryEvent={retryEvent}
-                        failoverEvents={failoverEvents}
-                        showRetry={isStreaming}
+                        retryEvent={null}
+                        failoverEvents={rowFailoverEvents}
+                        showRetry={false}
                       />
                     )}
                     <div
@@ -806,13 +836,6 @@ export function MessageList({ conversationId }: MessageListProps) {
               const backgroundResult = msg.role === 'user' ? backgroundResultFromMessage(msg) : null
               return (
                 <Fragment key={msg.id}>
-                  {msg.id === bannersBeforeHistoryId && (
-                    <ModelChainBanners
-                      retryEvent={retryEvent}
-                      failoverEvents={failoverEvents}
-                      showRetry={isStreaming}
-                    />
-                  )}
                   <div
                     id={msg.seq != null ? `msg-${msg.seq}` : undefined}
                     data-turn-id={turnIdByMessage.get(msg.id)}
@@ -876,10 +899,10 @@ export function MessageList({ conversationId }: MessageListProps) {
 
             {showPendingCompact && <CompactionMarker pending />}
 
-            {bannersBeforeHistoryId == null && (
+            {(liveFailoverEvents.length > 0 || (isStreaming && retryEvent != null)) && (
               <ModelChainBanners
                 retryEvent={retryEvent}
-                failoverEvents={failoverEvents}
+                failoverEvents={liveFailoverEvents}
                 showRetry={isStreaming}
               />
             )}
