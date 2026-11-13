@@ -1791,7 +1791,11 @@ async function consumeRunStream(
             // Append to the per-conversation banner list. Keep advancing the
             // applied-event cursor here so the next reattach doesn't replay it.
             get().clearRetryEvent(conversationId)
-            get().appendFailoverEvent(conversationId, event as FailoverEvent)
+            const failoverEvent: FailoverEvent = {
+              ...(event as FailoverEvent),
+              run_id: (event as FailoverEvent).run_id ?? runId,
+            }
+            get().appendFailoverEvent(conversationId, failoverEvent)
             set((s) => ({
               lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
             }))
@@ -2016,10 +2020,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   unreadConversationIds: {},
 
   appendFailoverEvent(conversationId, event) {
+    const withRunId = event.run_id ? event : { ...event, run_id: get().currentRunId }
     set((s) => ({
       failoverEvents: {
         ...s.failoverEvents,
-        [conversationId]: [...(s.failoverEvents[conversationId] ?? []), event],
+        [conversationId]: [...(s.failoverEvents[conversationId] ?? []), withRunId],
       },
     }))
   },
@@ -2933,7 +2938,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       toolResultMap: {},
       pendingConfirmMap: {},
       pendingAsk: null,
-      failoverEvents: { ...state.failoverEvents, [conversationId]: [] },
+      // Keep existing failover events so historical banners stay anchored to their turns
+      failoverEvents: state.failoverEvents,
       retryEvents: { ...state.retryEvents, [conversationId]: null },
       turnUsage: { ...state.turnUsage, [conversationId]: null },
     }))
@@ -3011,7 +3017,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             continue
           } else if (event.type === 'model_failover') {
             get().clearRetryEvent(conversationId)
-            get().appendFailoverEvent(conversationId, event as FailoverEvent)
+            const failoverEvent: FailoverEvent = {
+              ...(event as FailoverEvent),
+              run_id: (event as FailoverEvent).run_id ?? get().currentRunId,
+            }
+            get().appendFailoverEvent(conversationId, failoverEvent)
             set((s) => ({
               lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
             }))

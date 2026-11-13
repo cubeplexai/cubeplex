@@ -123,6 +123,48 @@ describe('MessageList failover banner placement', () => {
     expectBannerAboveAnswer()
   })
 
+  it('stays anchored to its originating turn across subsequent conversation turns', () => {
+    const secondUserMsg = {
+      id: 'msg-user-2',
+      role: 'user',
+      content: [{ type: 'text', text: 'second question' }],
+      timestamp: 1_700_000_010,
+    } as unknown as Message
+    const secondAssistantMsg = {
+      id: 'msg-asst-2',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'second answer' }],
+      timestamp: 1_700_000_011,
+      run_id: 'run-2',
+    } as unknown as Message
+
+    const run1Failover: FailoverEvent = {
+      ...failoverEvent,
+      run_id: 'run-1',
+    }
+
+    useMessageStore.setState({
+      failoverEvents: { [CONV]: [run1Failover] },
+      messages: { [CONV]: [userMsg, assistantMsg, secondUserMsg, secondAssistantMsg] },
+      isStreaming: false,
+      streamingConversationId: null,
+      streamAgents: {},
+    } as never)
+
+    render(<MessageList conversationId={CONV} />, { wrapper })
+
+    const banner = screen.getByTestId('failover-banner')
+    const firstAnswer = screen.getByText('backup answer')
+    const secondAnswer = screen.getByText('second answer')
+
+    expect(
+      banner.compareDocumentPosition(firstAnswer) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      firstAnswer.compareDocumentPosition(secondAnswer) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
   it('renders a delivered background result from its history message', () => {
     const earlierUserMsg = {
       ...userMsg,
