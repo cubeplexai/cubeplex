@@ -70,6 +70,25 @@ describe('foldToolActivity', () => {
     expect(pieces).toEqual([{ kind: 'activity', blocks: [tool('1'), tool('2')] }])
   })
 
+  it('keeps thinking that leads into a task update inside the open summary', () => {
+    const todo = {
+      type: 'tool_call' as const,
+      id: 'todo',
+      name: 'write_todos',
+      arguments: { todos: [] },
+    }
+    const pieces = foldToolActivity([
+      tool('1'),
+      thinking('status'),
+      todo,
+      thinking('next'),
+      tool('2'),
+    ])
+    expect(pieces).toEqual([
+      { kind: 'activity', blocks: [tool('1'), thinking('status'), thinking('next'), tool('2')] },
+    ])
+  })
+
   it('splits on a tool that renders its own card', () => {
     const subagent = tool('sub', 'subagent')
     const pieces = foldToolActivity([tool('1'), subagent, tool('2')])
@@ -118,6 +137,67 @@ describe('foldToolActivity', () => {
 })
 
 describe('groupAssistantRuns', () => {
+  it('keeps a task-list update inside the surrounding tool summary', () => {
+    const todo = assistant(
+      'a-todo',
+      'run-1',
+      [thinking('mark step 1 done'), tool('todo', 'write_todos')],
+      2,
+    )
+    const messages: Message[] = [
+      assistant('a1', 'run-1', [tool('1')], 1),
+      todo,
+      assistant('a3', 'run-1', [tool('2')], 3),
+    ]
+
+    const rows = groupAssistantRuns(messages)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      kind: 'assistant-run',
+      messages,
+      merged: { content: [tool('1'), ...todo.content, tool('2')] },
+    })
+    if (rows[0].kind !== 'assistant-run') return
+    expect(foldToolActivity(rows[0].merged.content)).toEqual([
+      { kind: 'activity', blocks: [tool('1'), thinking('mark step 1 done'), tool('2')] },
+    ])
+  })
+
+  it('keeps a task update after an answer from splitting the next summary', () => {
+    const todo = assistant('a-todo', 'run-1', [thinking('done'), tool('todo', 'write_todos')], 3)
+    const messages: Message[] = [
+      assistant('a1', 'run-1', [tool('1')], 1),
+      assistant('a-text', 'run-1', [text('here is the result')], 2),
+      todo,
+      assistant('a4', 'run-1', [tool('2')], 4),
+    ]
+
+    const rows = groupAssistantRuns(messages)
+    expect(
+      rows.map((row) => (row.kind === 'assistant-run' ? row.messages.map((m) => m.id) : row.kind)),
+    ).toEqual([['a1'], ['a-text', 'a-todo', 'a4']])
+    const tail = rows[1]
+    if (tail.kind !== 'assistant-run') return
+    expect(foldToolActivity(tail.merged.content).map((piece) => piece.kind)).toEqual([
+      'block',
+      'activity',
+    ])
+  })
+
+  it('does not pull later tool calls back above an answer', () => {
+    const answer = assistant('a-text', 'run-1', [text('here is the result')], 2)
+    const messages: Message[] = [
+      assistant('a1', 'run-1', [tool('1')], 1),
+      answer,
+      assistant('a3', 'run-1', [tool('2')], 3),
+    ]
+
+    const rows = groupAssistantRuns(messages)
+    expect(
+      rows.map((row) => (row.kind === 'assistant-run' ? row.messages.map((m) => m.id) : row.kind)),
+    ).toEqual([['a1'], ['a-text', 'a3']])
+  })
+
   it('joins same-run assistant rows across tool results', () => {
     const toolResult: Message = {
       id: 'tr',
@@ -134,7 +214,8 @@ describe('groupAssistantRuns', () => {
     ]
 
     expect(groupAssistantRuns(messages)).toMatchObject([
-      { kind: 'assistant-run', messages: [messages[0], messages[2], messages[3]] },
+      { kind: 'assistant-run', messages: [messages[0], messages[2]] },
+      { kind: 'assistant-run', messages: [messages[3]] },
     ])
   })
 
