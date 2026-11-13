@@ -1,9 +1,10 @@
 """Sandbox execution module"""
 
 from cubeplex.sandbox.base import SandboxError
+from cubeplex.sandbox.cubepod import CubePodSandbox
 from cubeplex.sandbox.opensandbox import OpenSandbox
 
-__all__ = ["OpenSandbox", "SandboxError"]
+__all__ = ["CubePodSandbox", "OpenSandbox", "SandboxError"]
 
 # SandboxManager is imported lazily to avoid circular imports.
 # Use cubeplex.sandbox.manager.get_sandbox_manager() to access.

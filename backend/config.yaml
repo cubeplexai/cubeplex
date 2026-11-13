@@ -85,6 +85,10 @@ default:
   # opensandbox timeout is set to None (disabled) — CubePlex controls termination via TTL.
   sandbox:
     enabled: true
+    # provider: "opensandbox" | "cubepod" (CUBEPLEX_SANDBOX__PROVIDER)
+    provider: "opensandbox"
+    # warm_pool_ref: Optional CubePod PodWarmPool name (CUBEPLEX_SANDBOX__WARM_POOL_REF)
+    warm_pool_ref: ""
     # Total deadline for newly reserved managed execute tasks, not an HTTP timeout.
     command_default_timeout_seconds: 3600
     # domain: "localhost:8090"

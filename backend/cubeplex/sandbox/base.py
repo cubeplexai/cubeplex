@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, TypeVar
@@ -248,6 +248,43 @@ class Sandbox(ABC):
         `Sandbox.resume(...)` server-side then connects; e2b's `connect`
         auto-resumes. Override in capable drivers."""
         raise NotImplementedError("connect_or_resume is not supported by this sandbox backend")
+
+    def supports_archive_sync(self) -> bool:
+        """Whether this driver supports single-request tar.gz archive sync."""
+        return False
+
+    async def archive_sync(
+        self,
+        archive: bytes,
+        *,
+        dest: str = "/workspace",
+        remove_paths: Sequence[str] | None = None,
+    ) -> None:
+        """Extract a tar.gz archive at ``dest`` and optionally remove paths."""
+        del archive, dest, remove_paths
+        raise NotImplementedError("archive_sync is not supported by this sandbox backend")
+
+    def supports_reset_rootfs(self) -> bool:
+        """Whether this driver can reset the RootFS upper layer while preserving /workspace."""
+        return False
+
+    async def reset_rootfs(self) -> None:
+        """Reset the persistent RootFS upper layer while keeping /workspace intact."""
+        raise NotImplementedError("reset_rootfs is not supported by this sandbox backend")
+
+    def supports_fork(self) -> bool:
+        """Whether this driver supports copy-on-write cloning of the sandbox."""
+        return False
+
+    async def fork(
+        self,
+        *,
+        volume_key: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> Sandbox:
+        """Clone this sandbox into a new independent instance."""
+        del volume_key, metadata
+        raise NotImplementedError("fork is not supported by this sandbox backend")
 
     # Container port the Neko browser live view is served on.
     BROWSER_PORT = 8080

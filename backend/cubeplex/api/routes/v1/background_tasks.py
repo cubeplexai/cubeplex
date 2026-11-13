@@ -31,6 +31,7 @@ from cubeplex.models.sandbox_command import SandboxCommand
 from cubeplex.repositories import ConversationRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox import SandboxError
+from cubeplex.sandbox.cubepod import CubePodSandbox, FileTooLargeError
 from cubeplex.sandbox.manager import get_sandbox_manager
 from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.services.background_task_query import (
@@ -305,18 +306,50 @@ async def get_background_task_output(
             sandbox = attachment.sandbox
             if isinstance(sandbox, OpenSandbox):
                 stack.push_async_callback(sandbox._sandbox.close)  # noqa: SLF001
+            elif isinstance(sandbox, CubePodSandbox):
+                stack.push_async_callback(sandbox.close)
         else:
             sandbox = await stack.enter_async_context(
                 manager.connect_command_instance(
                     command_id=command.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id
                 )
             )
-        if not isinstance(sandbox, OpenSandbox):
-            raise SandboxError("Task output requires OpenSandbox")
+        if not isinstance(sandbox, (OpenSandbox, CubePodSandbox)):
+            raise SandboxError("Task output requires OpenSandbox or CubePod")
         if not path.is_relative_to(sandbox.workdir) or ".." in path.parts:
             raise HTTPException(status_code=400, detail="Output path outside sandbox workdir")
-        files = sandbox._sandbox.files  # noqa: SLF001
         try:
+            if isinstance(sandbox, CubePodSandbox):
+                if download:
+                    cp_stream = await sandbox.stream_file_bytes(command.log_path)
+
+                    async def cp_output_chunks() -> AsyncIterator[bytes]:
+                        try:
+                            async for chunk in cp_stream:
+                                yield chunk
+                        finally:
+                            await stack.aclose()
+
+                    cp_response = StreamingResponse(
+                        cp_output_chunks(),
+                        media_type="text/plain",
+                        headers={
+                            "Content-Disposition": content_disposition(path.name),
+                            "Cache-Control": "no-store",
+                        },
+                        background=ResponseCleanup(stack.aclose),
+                    )
+                    streaming = True
+                    return cp_response
+                try:
+                    content = await sandbox.read_text_file(command.log_path, max_bytes=1_048_576)
+                except FileTooLargeError as exc:
+                    raise HTTPException(
+                        status_code=413, detail="Log too large; download full output"
+                    ) from exc
+                return {"content": content, "mime_type": "text/plain"}
+
+            files = sandbox._sandbox.files  # noqa: SLF001
             if download:
                 stream = await files.read_bytes_stream(command.log_path)
 

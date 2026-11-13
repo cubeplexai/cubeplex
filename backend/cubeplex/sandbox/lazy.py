@@ -122,38 +122,72 @@ async def _sync_skills(
             files = await _collect_files_for_push(catalog, diff.to_push)
         files_uploaded = bool(files)
         tarball_size: int | None = None
-        if files_uploaded:
-            tarball = await asyncio.to_thread(build_tarball, files)
-            tarball_size = len(tarball)
-            await sandbox.upload([(SKILLS_DELTA_TGZ_PATH, tarball)])
-
-        repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
-        cmd = build_extract_and_remove_cmd(
-            skills_root=SKILLS_ROOT,
-            has_push=files_uploaded,
-            to_repush_names=repush_names,
-            to_remove=diff.to_remove,
-        )
-        if cmd:
-            await sandbox.execute(cmd)
-
-        # Spec §7: if diff said to push skills but catalog returned no files,
-        # do NOT write the manifest (which would lie that the skills are synced).
-        # Return failed so the next sync retries.
         desired_push_count = len(diff.to_push)
-        if desired_push_count > 0 and not files_uploaded:
-            logger.warning(
-                "_sync_skills: catalog returned no files for {} to_push skill(s); "
-                "skipping manifest write so next sync retries",
-                desired_push_count,
+
+        if sandbox.supports_archive_sync() is True:
+            # Spec §7: fail early BEFORE mutating when catalog returned no files.
+            if desired_push_count > 0 and not files_uploaded:
+                logger.warning(
+                    "_sync_skills: catalog returned no files for {} to_push skill(s); "
+                    "skipping archive_sync and manifest write so next sync retries",
+                    desired_push_count,
+                )
+                return SyncResult(
+                    started_at=started,
+                    finished_at=datetime.now(UTC),
+                    status="failed",
+                    error_type="EmptyCollectFiles",
+                    error_message=(
+                        f"to_push had {desired_push_count} entries but collect_files returned empty"
+                    ),
+                )
+            tarball = (
+                await asyncio.to_thread(build_tarball, files)
+                if files_uploaded
+                else await asyncio.to_thread(build_tarball, [])
             )
-            return SyncResult(
-                started_at=started,
-                finished_at=datetime.now(UTC),
-                status="failed",
-                error_type="EmptyCollectFiles",
-                error_message=f"to_push had {desired_push_count} entries but collect_files returned empty",
+            tarball_size = len(tarball) if files_uploaded else None
+            repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
+            remove_paths = list(dict.fromkeys([*repush_names, *diff.to_remove]))
+            await sandbox.archive_sync(
+                tarball,
+                dest=SKILLS_ROOT,
+                remove_paths=remove_paths or None,
             )
+        else:
+            if files_uploaded:
+                tarball = await asyncio.to_thread(build_tarball, files)
+                tarball_size = len(tarball)
+                await sandbox.upload([(SKILLS_DELTA_TGZ_PATH, tarball)])
+
+            repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
+            cmd = build_extract_and_remove_cmd(
+                skills_root=SKILLS_ROOT,
+                has_push=files_uploaded,
+                to_repush_names=repush_names,
+                to_remove=diff.to_remove,
+            )
+            if cmd:
+                await sandbox.execute(cmd)
+
+            # Spec §7: if diff said to push skills but catalog returned no files,
+            # do NOT write the manifest (which would lie that the skills are synced).
+            # Return failed so the next sync retries.
+            if desired_push_count > 0 and not files_uploaded:
+                logger.warning(
+                    "_sync_skills: catalog returned no files for {} to_push skill(s); "
+                    "skipping manifest write so next sync retries",
+                    desired_push_count,
+                )
+                return SyncResult(
+                    started_at=started,
+                    finished_at=datetime.now(UTC),
+                    status="failed",
+                    error_type="EmptyCollectFiles",
+                    error_message=(
+                        f"to_push had {desired_push_count} entries but collect_files returned empty"
+                    ),
+                )
 
         # 5) Manifest last
         new_manifest = build_manifest(enabled)
@@ -421,6 +455,38 @@ class LazySandbox(Sandbox):
 
     def supports_pause(self) -> bool:
         return self._sandbox.supports_pause() if self._sandbox is not None else False
+
+    def supports_archive_sync(self) -> bool:
+        return self._sandbox.supports_archive_sync() if self._sandbox is not None else False
+
+    async def archive_sync(
+        self,
+        archive: bytes,
+        *,
+        dest: str = "/workspace",
+        remove_paths: Sequence[str] | None = None,
+    ) -> None:
+        sandbox = await self._ensure_with_retry()
+        await sandbox.archive_sync(archive, dest=dest, remove_paths=remove_paths)
+
+    def supports_reset_rootfs(self) -> bool:
+        return self._sandbox.supports_reset_rootfs() if self._sandbox is not None else False
+
+    async def reset_rootfs(self) -> None:
+        sandbox = await self._ensure_with_retry()
+        await sandbox.reset_rootfs()
+
+    def supports_fork(self) -> bool:
+        return self._sandbox.supports_fork() if self._sandbox is not None else False
+
+    async def fork(
+        self,
+        *,
+        volume_key: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> Sandbox:
+        sandbox = await self._ensure_with_retry()
+        return await sandbox.fork(volume_key=volume_key, metadata=metadata)
 
     async def _run_with_keepalive(self, awaitable: Awaitable[T]) -> T:
         """Keep last_activity and the in-use lease fresh while ``awaitable`` runs.

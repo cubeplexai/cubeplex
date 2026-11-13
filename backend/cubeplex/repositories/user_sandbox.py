@@ -34,6 +34,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         volumes_config: dict[str, Any] | None = None,
         ttl_seconds: int = 3600,
         paused_ttl_seconds: int | None = None,
+        provider: str = "opensandbox",
     ) -> UserSandbox:
         """Create a new user sandbox record.
 
@@ -49,6 +50,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             "image": image,
             "volumes_config": volumes_config,
             "ttl_seconds": ttl_seconds,
+            "provider": provider,
         }
         if paused_ttl_seconds is not None:
             fields["paused_ttl_seconds"] = paused_ttl_seconds
@@ -63,6 +65,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         scope_id: str,
         volumes_config: dict[str, Any] | None = None,
         ttl_seconds: int = 3600,
+        provider: str = "opensandbox",
     ) -> UserSandbox:
         """Insert a provisioning placeholder row BEFORE provider create.
 
@@ -88,6 +91,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             ttl_seconds=ttl_seconds,
             scope_type=scope_type,
             scope_id=scope_id,
+            provider=provider,
         )
         record.sandbox_id = f"pending-{record.id}"
         return await self.add(record)
@@ -129,7 +133,12 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         raise ValueError(f"sandbox record {record_id} cannot accept a provider instance")
 
     async def promote_to_running(
-        self, record_id: str, *, sandbox_id: str, image: str | None = None
+        self,
+        record_id: str,
+        *,
+        sandbox_id: str,
+        image: str | None = None,
+        provider: str | None = None,
     ) -> None:
         values: dict[str, Any] = {
             "sandbox_id": sandbox_id,
@@ -138,6 +147,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         }
         if image is not None:
             values["image"] = image
+        if provider is not None:
+            values["provider"] = provider
         stmt = (
             update(UserSandbox)
             .where(

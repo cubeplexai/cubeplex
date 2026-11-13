@@ -65,6 +65,63 @@ def _upstream_path(sandbox_id: str, port: int, full_path: str) -> str:
     return f"/sandboxes/{sandbox_id}/proxy/{port}/{full_path.lstrip('/')}"
 
 
+def _is_cubepod_provider() -> bool:
+    from cubeplex.config import config
+
+    return str(config.get("sandbox.provider", "opensandbox") or "").strip().lower() == "cubepod"
+
+
+def _cubepod_api_key() -> str:
+    from cubeplex.config import config
+
+    return str(config.get("sandbox.api_key", "") or "").strip()
+
+
+def _build_panel_http_upstream(
+    *,
+    sandbox_id: str,
+    port: int,
+    full_path: str,
+    query: str,
+    headers: dict[str, str],
+) -> tuple[str, dict[str, str]]:
+    if _is_cubepod_provider():
+        target = f"http://{_server_host()}/{full_path.lstrip('/')}"
+        headers["host"] = f"{port}-{sandbox_id}.cubepod.local"
+        api_key = _cubepod_api_key()
+        if api_key:
+            headers["authorization"] = f"Bearer {api_key}"
+    else:
+        target = f"http://{_server_host()}{_upstream_path(sandbox_id, port, full_path)}"
+    if query:
+        target = f"{target}?{query}"
+    return target, headers
+
+
+def _build_panel_ws_upstream(
+    *,
+    sandbox_id: str,
+    port: int,
+    full_path: str,
+    query: str,
+) -> tuple[str, dict[str, str] | None]:
+    if _is_cubepod_provider():
+        target = f"ws://{_server_host()}/{full_path.lstrip('/')}"
+        extra_headers: dict[str, str] | None = {
+            "Host": f"{port}-{sandbox_id}.cubepod.local",
+        }
+        api_key = _cubepod_api_key()
+        if api_key:
+            assert extra_headers is not None
+            extra_headers["Authorization"] = f"Bearer {api_key}"
+    else:
+        target = f"ws://{_server_host()}{_upstream_path(sandbox_id, port, full_path)}"
+        extra_headers = None
+    if query:
+        target = f"{target}?{query}"
+    return target, extra_headers
+
+
 @router.api_route(
     "/sandbox-panel/{token}/{full_path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
@@ -75,15 +132,19 @@ async def panel_http(token: str, request: Request, full_path: str = "") -> Respo
     except ValueError:
         return Response(status_code=HTTP_403_FORBIDDEN, content=b"invalid or expired panel token")
 
-    target = f"http://{_server_host()}{_upstream_path(claims.sandbox_id, claims.port, full_path)}"
-    if request.url.query:
-        target = f"{target}?{request.url.query}"
     fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP}
     # Force identity encoding to prevent opensandbox-server double-compression:
     # ttyd (libwebsockets) compresses when gzip is accepted, then opensandbox's nginx
     # compresses again, producing a corrupt/truncated response. httpx also adds its own
     # accept-encoding by default, so we must override explicitly here.
     fwd_headers["accept-encoding"] = "identity"
+    target, fwd_headers = _build_panel_http_upstream(
+        sandbox_id=claims.sandbox_id,
+        port=claims.port,
+        full_path=full_path,
+        query=request.url.query,
+        headers=fwd_headers,
+    )
     body = await request.body()
 
     # trust_env=False: opensandbox-server is an internal service — forwarding must
@@ -130,14 +191,18 @@ async def panel_ws(websocket: WebSocket, token: str, full_path: str = "") -> Non
         await websocket.close(code=_WS_POLICY_VIOLATION)
         return
 
-    target = f"ws://{_server_host()}{_upstream_path(claims.sandbox_id, claims.port, full_path)}"
-    if websocket.url.query:
-        target = f"{target}?{websocket.url.query}"
+    target, extra_headers = _build_panel_ws_upstream(
+        sandbox_id=claims.sandbox_id,
+        port=claims.port,
+        full_path=full_path,
+        query=websocket.url.query,
+    )
     subprotocols = [Subprotocol(s) for s in (websocket.scope.get("subprotocols") or [])]
 
     try:
         upstream = await websockets.connect(
             target,
+            additional_headers=extra_headers,
             subprotocols=subprotocols or None,
             open_timeout=15,
             max_size=None,

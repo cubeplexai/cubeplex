@@ -53,11 +53,18 @@ def validate_auth_secrets() -> None:
 
 
 def validate_sandbox_config() -> None:
-    """Require a complete OpenSandbox configuration before accepting requests."""
+    """Require a complete sandbox configuration before accepting requests."""
     from cubeplex.config import config, get_command_default_timeout_seconds
 
     if config.get("sandbox.enabled") is not True:
         raise RuntimeError("CUBEPLEX_SANDBOX__ENABLED must be true")
+
+    raw_provider = config.get("sandbox.provider", "opensandbox")
+    provider = str(raw_provider).strip().lower() if raw_provider is not None else "opensandbox"
+    if not provider:
+        provider = "opensandbox"
+    if provider not in {"opensandbox", "cubepod"}:
+        raise RuntimeError("CUBEPLEX_SANDBOX__PROVIDER must be 'opensandbox' or 'cubepod'")
 
     for setting, env_var in (
         ("sandbox.domain", "CUBEPLEX_SANDBOX__DOMAIN"),

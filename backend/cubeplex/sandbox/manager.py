@@ -59,6 +59,7 @@ from cubeplex.sandbox.base import (
     SandboxError,
     SandboxInstanceGoneError,
 )
+from cubeplex.sandbox.cubepod import CubePodControlClient, CubePodSandbox
 from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubeplex.sandbox_policy.rules import build_network_policy
@@ -181,6 +182,12 @@ class SandboxManager:
         self._encryption_backend = encryption_backend
 
         # Read config
+        self._provider: str = (
+            str(config.get("sandbox.provider", "opensandbox") or "opensandbox").strip().lower()
+        )
+        self._warm_pool_ref: str | None = (
+            str(config.get("sandbox.warm_pool_ref", "") or "").strip() or None
+        )
         self._domain: str = config.get("sandbox.domain")
         self._image: str = config.get("sandbox.image")
         self._api_key: str | None = config.get("sandbox.api_key", None)
@@ -310,6 +317,49 @@ class SandboxManager:
             run_user=self._run_user,
         )
 
+    def _build_cubepod_client(self, *, request_timeout: int | None = None) -> CubePodControlClient:
+        """Build CubePodControlClient from app config."""
+        return CubePodControlClient(
+            domain=self._domain,
+            api_key=self._api_key,
+            timeout=float(request_timeout or self._request_timeout),
+        )
+
+    def _wrap_cubepod_backend(
+        self,
+        sandbox_id: str,
+        client: CubePodControlClient,
+        *,
+        owns_client: bool = True,
+    ) -> CubePodSandbox:
+        """Attach cubeplex driver defaults to a CubePodSandbox."""
+        return CubePodSandbox(
+            sandbox_id=sandbox_id,
+            client=client,
+            owns_client=owns_client,
+            workdir=self._workdir,
+            run_uid=self._run_uid,
+            run_gid=self._run_gid,
+            run_user=self._run_user,
+        )
+
+    def _build_cubepod_network_policy(self, policy: EffectivePolicy) -> dict[str, Any]:
+        """Map EffectivePolicy network rules into CubePod networkPolicy JSON."""
+        net_policy = build_network_policy(
+            admin_rules=policy.network_rules,
+            default_action=policy.network_default_action,
+            force_allow_hosts=([self._exchange_host] if self._exchange_host else []),
+        )
+        payload: dict[str, Any] = {
+            "defaultAction": net_policy.default_action,
+            "egress": [
+                {"action": rule.action, "target": rule.target} for rule in (net_policy.egress or [])
+            ],
+        }
+        if policy.egress_proxy:
+            payload["egressProxy"] = policy.egress_proxy
+        return payload
+
     @asynccontextmanager
     async def connect_command_instance(
         self, *, command_id: str, org_id: str, workspace_id: str
@@ -337,6 +387,28 @@ class SandboxManager:
             instance_id, provider = command.sandbox_instance_id, command.provider
         if not instance_id:
             raise SandboxError("original command instance is unknown")
+        if provider == "cubepod":
+            cp_client: CubePodControlClient | None = None
+            try:
+                async with asyncio.timeout(10):
+                    cp_client = self._build_cubepod_client(request_timeout=10)
+                    cp_info = await cp_client.get_sandbox_raw(instance_id)
+                    state = str(cp_info.get("state", "") or "")
+                    if state in ("Failed", "Terminated", "Stopped"):
+                        raise SandboxInstanceGoneError(instance_id)
+                    if state != "Running":
+                        raise SandboxError(f"original sandbox instance is {state}")
+                yield self._wrap_cubepod_backend(instance_id, cp_client, owns_client=False)
+            except TimeoutError as exc:
+                raise SandboxError(f"could not observe original sandbox instance: {exc}") from exc
+            finally:
+                if cp_client is not None:
+                    try:
+                        async with asyncio.timeout(5):
+                            await cp_client.close()
+                    except Exception:
+                        logger.warning("failed to close command observer for {}", instance_id)
+            return
         if provider != "opensandbox":
             raise SandboxError(f"{provider} does not support cross-worker process reconnect")
 
@@ -379,9 +451,24 @@ class SandboxManager:
                     except Exception:
                         logger.warning("failed to close command observer for {}", instance_id)
 
-    async def _renew_provider_ttl(self, sandbox_id: str) -> None:
-        """Best-effort extend the provider-side expiration so the OpenSandbox
+    async def _renew_provider_ttl(self, sandbox_id: str, *, provider: str | None = None) -> None:
+        """Best-effort extend the provider-side expiration so the provider
         controller won't GC an actively-used sandbox. Non-fatal on failure."""
+        effective_provider = provider or self._provider
+        if effective_provider == "cubepod":
+            cp_client: CubePodControlClient | None = None
+            try:
+                cp_client = self._build_cubepod_client()
+                await cp_client.renew_timeout(sandbox_id, self._ttl)
+            except Exception:
+                logger.debug("Provider-side renew failed for {} (non-fatal)", sandbox_id)
+            finally:
+                if cp_client is not None:
+                    try:
+                        await cp_client.close()
+                    except Exception:
+                        pass
+            return
         conn_config = self._build_connection_config()
         raw: opensandbox.Sandbox | None = None
         try:
@@ -433,7 +520,7 @@ class SandboxManager:
     async def _apply_egress(
         self,
         session: AsyncSession,
-        backend: OpenSandbox,
+        backend: Sandbox,
         *,
         org_id: str,
         workspace_id: str,
@@ -652,6 +739,7 @@ class SandboxManager:
                     ttl_seconds=self._ttl,
                     scope_type=scope_type,
                     scope_id=scope_id,
+                    provider=self._provider,
                 )
                 backend = await self._provision_new_container(
                     session,
@@ -785,6 +873,105 @@ class SandboxManager:
             workspace_id=workspace_id,
         )
 
+    async def _provision_cubepod_container(
+        self,
+        session: AsyncSession,
+        record: UserSandbox,
+        *,
+        policy: EffectivePolicy,
+        user_id: str,
+        is_revive: bool = False,
+    ) -> CubePodSandbox:
+        """Create a fresh CubePod sandbox for an existing UserSandbox row."""
+        repo = UserSandboxRepository(
+            session, org_id=record.org_id, workspace_id=record.workspace_id
+        )
+        sandbox_id: str | None = None
+        promoted = False
+        injection: InjectionResult | None = None
+        signature: EgressSignature | None = None
+        try:
+            volume_key: str | None = None
+            if self._volume_enabled:
+                volume_key = build_sandbox_pvc_name(
+                    self._volume_pvc_prefix,
+                    record.workspace_id,
+                    record.scope_type,
+                    record.scope_id,
+                )
+            if self._exchange_host:
+                resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=record.org_id))
+                resolved = await resolver.resolve(workspace_id=record.workspace_id, user_id=user_id)
+                await self._decrypt_env_values(session, org_id=record.org_id, resolved=resolved)
+                signature = _egress_signature(resolved)
+                injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
+
+            network_policy = self._build_cubepod_network_policy(policy)
+            create_client = self._build_cubepod_client(request_timeout=self._create_timeout)
+            try:
+                info = await create_client.create_sandbox(
+                    template_id=policy.default_image,
+                    volume_key=volume_key,
+                    timeout_seconds=self._ttl,
+                    warm_pool_ref=self._warm_pool_ref,
+                    network_policy=network_policy,
+                    resource={
+                        "cpu": policy.resource_cpu or self._resource_cpu,
+                        "memory": policy.resource_memory or self._resource_memory,
+                    },
+                )
+            finally:
+                await create_client.close()
+            sandbox_id = str(info.get("sandboxID", ""))
+            if not sandbox_id:
+                raise SandboxError("CubePod create response missing sandboxID")
+
+            await repo.set_sandbox_id(record.id, sandbox_id)
+            await repo.promote_to_running(
+                record.id,
+                sandbox_id=sandbox_id,
+                image=policy.default_image,
+                provider="cubepod",
+            )
+            promoted = True
+        except SandboxCleanupRequestedError as exc:
+            if sandbox_id:
+                logger.warning(
+                    "CubePod {} finished creating after cleanup was requested",
+                    sandbox_id,
+                )
+            raise SandboxConflictError(str(exc)) from exc
+        except Exception:
+            if not promoted and not sandbox_id:
+                await self._release_failed_provisioning(repo, record.id, is_revive)
+            raise
+
+        client = self._build_cubepod_client()
+        backend = self._wrap_cubepod_backend(sandbox_id, client, owns_client=True)
+        await backend.ensure_workspace_owner()
+        if self._exchange_host:
+            try:
+                await self._apply_egress(
+                    session,
+                    backend,
+                    org_id=record.org_id,
+                    workspace_id=record.workspace_id,
+                    user_id=user_id,
+                    sandbox_id=sandbox_id,
+                    injection=injection,
+                    signature=signature,
+                )
+            except Exception:
+                logger.error(
+                    "Egress setup failed for newly created CubePod {}; terminating row",
+                    sandbox_id,
+                )
+                await backend.close()
+                await repo.mark_terminated(record.id)
+                await self._revoke_egress(session, sandbox_id)
+                raise
+        return backend
+
     async def _provision_new_container(
         self,
         session: AsyncSession,
@@ -794,8 +981,8 @@ class SandboxManager:
         policy: EffectivePolicy,
         user_id: str,
         is_revive: bool = False,
-    ) -> OpenSandbox:
-        """Create a fresh opensandbox container for an existing UserSandbox row
+    ) -> Sandbox:
+        """Create a fresh sandbox container for an existing UserSandbox row
         (either freshly reserved or revived from terminated/failed). Updates
         sandbox_id + status='running' on the row. The PVC stays mounted (keyed
         by the row's scope, not by container) so revived containers see the
@@ -810,6 +997,14 @@ class SandboxManager:
           with a real provider sandbox, so it is NOT deleted — the reaper / next
           reuse owns its lifecycle (deleting would orphan the provider sandbox).
         """
+        if self._provider == "cubepod":
+            return await self._provision_cubepod_container(
+                session,
+                record,
+                policy=policy,
+                user_id=user_id,
+                is_revive=is_revive,
+            )
         repo = UserSandboxRepository(
             session, org_id=record.org_id, workspace_id=record.workspace_id
         )
@@ -889,7 +1084,10 @@ class SandboxManager:
             )
 
             await repo.promote_to_running(
-                record.id, sandbox_id=sandbox_id, image=policy.default_image
+                record.id,
+                sandbox_id=sandbox_id,
+                image=policy.default_image,
+                provider="opensandbox",
             )
             promoted = True
         except ProviderSandboxError as exc:
@@ -1007,7 +1205,7 @@ class SandboxManager:
         *,
         conn_config: ConnectionConfig,
         user_id: str,
-    ) -> OpenSandbox:
+    ) -> Sandbox:
         """Connect + health-check an existing running sandbox, then refresh its
         egress env/refs. On unhealthy/unreachable: mark the row terminated
         (clearing the dead ``sandbox_id``) and revoke egress refs, then raise
@@ -1016,6 +1214,31 @@ class SandboxManager:
         sandbox_id = record.sandbox_id
         if sandbox_id is None:
             raise SandboxError(f"sandbox {record.id} has no sandbox_id; cannot connect")
+        record_provider = getattr(record, "provider", None) or self._provider
+        if record_provider == "cubepod":
+            logger.info("Found existing CubePod sandbox {} for user {}", sandbox_id, user_id)
+            cp_client = self._build_cubepod_client()
+            try:
+                await cp_client.get_sandbox(sandbox_id)
+            except Exception as e:
+                logger.warning("Failed to connect to CubePod sandbox {}: {}", sandbox_id, e)
+                await cp_client.close()
+                await repo.mark_terminated(record.id, clear_sandbox_id=True)
+                if self._exchange_host:
+                    await self._revoke_egress(session, sandbox_id)
+                raise SandboxError(f"sandbox {sandbox_id} unhealthy, will revive") from e
+            await repo.update_activity(record.id)
+            cp_backend = self._wrap_cubepod_backend(sandbox_id, cp_client, owns_client=True)
+            if self._exchange_host:
+                await self._apply_egress(
+                    session,
+                    cp_backend,
+                    org_id=record.org_id,
+                    workspace_id=record.workspace_id,
+                    user_id=user_id,
+                    sandbox_id=sandbox_id,
+                )
+            return cp_backend
         logger.info("Found existing sandbox {} for user {}", sandbox_id, user_id)
         try:
             raw_sandbox = await opensandbox.Sandbox.connect(
@@ -1432,7 +1655,7 @@ class SandboxManager:
         org_id: str,
         workspace_id: str,
         user_id: str,
-    ) -> "OpenSandbox | None":
+    ) -> "Sandbox | None":
         """Try to resume a paused row. Atomic ``paused -> resuming`` claim:
         the loser polls until the winner's row becomes ``running`` and connects
         to that same sandbox, so the two concurrent callers never both create.
@@ -1446,16 +1669,30 @@ class SandboxManager:
                 workspace_id=workspace_id,
                 user_id=user_id,
             )
+        record_provider = getattr(record, "provider", None) or self._provider
+        backend: Sandbox
         try:
-            backend = await OpenSandbox.connect_or_resume(
-                record.sandbox_id,
-                conn_config=conn_config,
-                resume_timeout=self._resume_timeout,
-                workdir=self._workdir,
-                run_uid=self._run_uid,
-                run_gid=self._run_gid,
-                run_user=self._run_user,
-            )
+            if record_provider == "cubepod":
+                backend = await CubePodSandbox.connect_or_resume(
+                    record.sandbox_id,
+                    domain=self._domain,
+                    api_key=self._api_key,
+                    request_timeout=float(self._request_timeout),
+                    workdir=self._workdir,
+                    run_uid=self._run_uid,
+                    run_gid=self._run_gid,
+                    run_user=self._run_user,
+                )
+            else:
+                backend = await OpenSandbox.connect_or_resume(
+                    record.sandbox_id,
+                    conn_config=conn_config,
+                    resume_timeout=self._resume_timeout,
+                    workdir=self._workdir,
+                    run_uid=self._run_uid,
+                    run_gid=self._run_gid,
+                    run_user=self._run_user,
+                )
         except Exception as exc:
             # Client-side exceptions (resume_timeout, network blip, transient
             # SDK error) are ambiguous: the provider may still be transitioning
@@ -1613,7 +1850,7 @@ class SandboxManager:
         org_id: str,
         workspace_id: str,
         user_id: str,
-    ) -> "OpenSandbox | None":
+    ) -> "Sandbox | None":
         """Race loser: wait for the winner's row to reach a stable state and
         attach to it.
 
@@ -1648,8 +1885,18 @@ class SandboxManager:
         # row.status == "running"
         assert row.sandbox_id, "running row must have sandbox_id"  # caller invariant
         sandbox_id = row.sandbox_id
-        raw = await opensandbox.Sandbox.connect(sandbox_id, connection_config=conn_config)
-        backend = self._wrap_backend(raw)
+        row_provider = getattr(row, "provider", None) or self._provider
+        if row_provider == "cubepod":
+            cp_client = self._build_cubepod_client()
+            try:
+                await cp_client.connect_sandbox(sandbox_id)
+            except Exception:
+                await cp_client.close()
+                raise
+            backend: Sandbox = self._wrap_cubepod_backend(sandbox_id, cp_client, owns_client=True)
+        else:
+            raw = await opensandbox.Sandbox.connect(sandbox_id, connection_config=conn_config)
+            backend = self._wrap_backend(raw)
         if self._exchange_host:
             async with self._session_factory() as session:
                 try:
@@ -1694,6 +1941,29 @@ class SandboxManager:
                 ):
                     continue  # touched / acquired / already-claimed between select+claim
                 assert record.sandbox_id, "pausing row must have sandbox_id"  # claim invariant
+                record_provider = getattr(record, "provider", None) or self._provider
+                if record_provider == "cubepod":
+                    cp_backend: CubePodSandbox | None = None
+                    try:
+                        cp_client = self._build_cubepod_client()
+                        cp_backend = self._wrap_cubepod_backend(
+                            record.sandbox_id, cp_client, owns_client=True
+                        )
+                        await cp_backend.pause()
+                    except Exception as exc:
+                        logger.warning(
+                            "CubePod pause failed for {}: {}; falling back to kill",
+                            record.sandbox_id,
+                            exc,
+                        )
+                        await self._kill_record(session, scoped, record, conn_config)
+                    finally:
+                        if cp_backend is not None:
+                            try:
+                                await cp_backend.close()
+                            except Exception:
+                                pass
+                    continue
                 raw: opensandbox.Sandbox | None = None
                 try:
                     raw = await opensandbox.Sandbox.connect(
@@ -1817,22 +2087,31 @@ class SandboxManager:
                     workspace_id=record.workspace_id,
                 )
                 raw: opensandbox.Sandbox | None = None
+                cp_client: CubePodControlClient | None = None
+                record_provider = getattr(record, "provider", None) or self._provider
                 try:
                     assert record.sandbox_id  # select invariant: transient rows have sandbox_id
-                    raw = await opensandbox.Sandbox.connect(
-                        record.sandbox_id,
-                        connection_config=conn_config,
-                        skip_health_check=True,
-                    )
-                    info = await raw.get_info()
-                    state = (info.status.state if info and info.status else "") or ""
+                    if record_provider == "cubepod":
+                        cp_client = self._build_cubepod_client()
+                        cp_info = await cp_client.get_sandbox_raw(record.sandbox_id)
+                        state = str(cp_info.get("state", "") or "")
+                    else:
+                        raw = await opensandbox.Sandbox.connect(
+                            record.sandbox_id,
+                            connection_config=conn_config,
+                            skip_health_check=True,
+                        )
+                        info = await raw.get_info()
+                        state = (info.status.state if info and info.status else "") or ""
                 except Exception as exc:
                     # 404 means the provider has GC'd the pod out-of-band;
                     # kill the row so it doesn't trap get_or_create in
                     # _await_stable_status forever. For non-404 errors
                     # (network blips, SDK glitches) just bump the check
                     # timestamp and try again next tick.
-                    is_gone = isinstance(exc, ProviderApiError) and exc.status_code == 404
+                    is_gone = isinstance(exc, SandboxInstanceGoneError) or (
+                        isinstance(exc, ProviderApiError) and exc.status_code == 404
+                    )
                     if is_gone:
                         logger.warning(
                             "Reconciler: provider reports {} gone (404 / "
@@ -1863,6 +2142,15 @@ class SandboxManager:
                         except Exception as exc:
                             logger.debug(
                                 "Reconciler probe close failed for {}: {}",
+                                record.sandbox_id,
+                                exc,
+                            )
+                    if cp_client is not None:
+                        try:
+                            await cp_client.close()
+                        except Exception as exc:
+                            logger.debug(
+                                "Reconciler CubePod probe close failed for {}: {}",
                                 record.sandbox_id,
                                 exc,
                             )
@@ -1904,7 +2192,7 @@ class SandboxManager:
                     # clobbered. The UPDATE only fires when the row is still
                     # in a transient state.
                     await scoped.mark_failed_from_transient(record.id)
-                elif state in ("Terminated", "Succeed"):
+                elif state in ("Terminated", "Succeed", "Stopped"):
                     # ``Succeed`` is documented in internals-note G3 as an
                     # empirically-observed terminal state (the local SDK enum
                     # omits it). Treat it like ``Terminated`` so a stuck
@@ -1934,19 +2222,28 @@ class SandboxManager:
         """
         assert record.sandbox_id, "kill target must have sandbox_id"  # caller invariant
         raw: opensandbox.Sandbox | None = None
+        cp_client: CubePodControlClient | None = None
+        record_provider = getattr(record, "provider", None) or self._provider
         killed = False
         try:
-            raw = await opensandbox.Sandbox.connect(
-                record.sandbox_id,
-                connection_config=conn_config,
-                skip_health_check=True,
-            )
-            await raw.kill()
-            logger.info("Killed sandbox {}", record.sandbox_id)
-            killed = True
+            if record_provider == "cubepod":
+                cp_client = self._build_cubepod_client()
+                await cp_client.kill_sandbox(record.sandbox_id)
+                logger.info("Killed CubePod sandbox {}", record.sandbox_id)
+                killed = True
+            else:
+                raw = await opensandbox.Sandbox.connect(
+                    record.sandbox_id,
+                    connection_config=conn_config,
+                    skip_health_check=True,
+                )
+                await raw.kill()
+                logger.info("Killed sandbox {}", record.sandbox_id)
+                killed = True
         except Exception as exc:
-            gone = isinstance(exc, ProviderApiError) and (
-                exc.status_code == 404 or "not found" in str(exc).lower()
+            gone = isinstance(exc, SandboxInstanceGoneError) or (
+                isinstance(exc, ProviderApiError)
+                and (exc.status_code == 404 or "not found" in str(exc).lower())
             )
             if gone:
                 logger.info("Sandbox {} already gone: {}", record.sandbox_id, exc)
@@ -1964,6 +2261,15 @@ class SandboxManager:
                 except Exception as exc:
                     logger.debug(
                         "_kill_record close failed for {}: {}",
+                        record.sandbox_id,
+                        exc,
+                    )
+            if cp_client is not None:
+                try:
+                    await cp_client.close()
+                except Exception as exc:
+                    logger.debug(
+                        "_kill_record CubePod close failed for {}: {}",
                         record.sandbox_id,
                         exc,
                     )
@@ -1999,6 +2305,109 @@ class SandboxManager:
                 await self._revoke_egress(session, record.sandbox_id)
         else:
             await scoped_repo.mark_kill_pending(record.id)
+
+    async def reset_user_sandbox_rootfs(self, user_sandbox_id: str) -> None:
+        """Reset RootFS upper on a running/paused CubePod sandbox, preserving /workspace."""
+        async with self._session_factory() as session:
+            record = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+            if record is None or record.deleted_at is not None or not record.sandbox_id:
+                raise SandboxError(f"sandbox {user_sandbox_id} not found")
+            if record.status not in ("running", "paused"):
+                raise SandboxConflictError(
+                    f"sandbox {user_sandbox_id} is {record.status}; cannot reset rootfs"
+                )
+            record_provider = getattr(record, "provider", None) or self._provider
+            if record_provider != "cubepod":
+                raise SandboxError("reset_rootfs is only supported by cubepod sandboxes")
+            repo = UserSandboxRepository(
+                session, org_id=record.org_id, workspace_id=record.workspace_id
+            )
+            cp_client = self._build_cubepod_client()
+            backend = self._wrap_cubepod_backend(record.sandbox_id, cp_client, owns_client=True)
+            try:
+                await backend.reset_rootfs()
+                await repo.update_activity(record.id)
+            finally:
+                await backend.close()
+
+    async def fork_user_sandbox(
+        self,
+        *,
+        source_user_sandbox_id: str,
+        target_scope_type: str,
+        target_scope_id: str,
+        user_id: str,
+    ) -> SandboxAttachment:
+        """CoW-clone a CubePod sandbox into a newly reserved target scope row."""
+        async with self._session_factory() as session:
+            source = await UserSandboxRepository.get_by_id_system(session, source_user_sandbox_id)
+            if source is None or source.deleted_at is not None or not source.sandbox_id:
+                raise SandboxError(f"source sandbox {source_user_sandbox_id} not found")
+            source_provider = getattr(source, "provider", None) or self._provider
+            if source_provider != "cubepod":
+                raise SandboxError("fork is only supported by cubepod sandboxes")
+
+            repo = UserSandboxRepository(
+                session, org_id=source.org_id, workspace_id=source.workspace_id
+            )
+            reserved = await repo.reserve(
+                user_id=user_id,
+                image=source.image,
+                scope_type=target_scope_type,
+                scope_id=target_scope_id,
+                ttl_seconds=self._ttl,
+                provider="cubepod",
+            )
+            volume_key: str | None = None
+            if self._volume_enabled:
+                volume_key = build_sandbox_pvc_name(
+                    self._volume_pvc_prefix,
+                    source.workspace_id,
+                    target_scope_type,
+                    target_scope_id,
+                )
+            src_client = self._build_cubepod_client()
+            src_backend = self._wrap_cubepod_backend(
+                source.sandbox_id, src_client, owns_client=True
+            )
+            promoted = False
+            child_id: str | None = None
+            try:
+                child = await src_backend.fork(volume_key=volume_key)
+                child_id = child.id
+                await repo.set_sandbox_id(reserved.id, child_id)
+                await repo.promote_to_running(
+                    reserved.id,
+                    sandbox_id=child_id,
+                    image=source.image,
+                    provider="cubepod",
+                )
+                promoted = True
+            except Exception:
+                if not promoted and not child_id:
+                    await self._release_failed_provisioning(repo, reserved.id, is_revive=False)
+                raise
+            finally:
+                await src_backend.close()
+
+            child_client = self._build_cubepod_client()
+            child_backend = self._wrap_cubepod_backend(child_id, child_client, owns_client=True)
+            if self._exchange_host:
+                try:
+                    await self._apply_egress(
+                        session,
+                        child_backend,
+                        org_id=source.org_id,
+                        workspace_id=source.workspace_id,
+                        user_id=user_id,
+                        sandbox_id=child_id,
+                    )
+                except Exception:
+                    await child_backend.close()
+                    await repo.mark_terminated(reserved.id)
+                    await self._revoke_egress(session, child_id)
+                    raise
+            return SandboxAttachment(sandbox=child_backend, user_sandbox_id=reserved.id)
 
 
 # ---------------------------------------------------------------------------

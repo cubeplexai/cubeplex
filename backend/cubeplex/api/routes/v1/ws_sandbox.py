@@ -35,6 +35,7 @@ from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.db.session import get_session
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox import SandboxError
+from cubeplex.sandbox.cubepod import CubePodSandbox, FileTooLargeError
 from cubeplex.sandbox.manager import get_sandbox_manager
 from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.utils.http import content_disposition
@@ -233,8 +234,26 @@ async def list_sandbox_files(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        if isinstance(sandbox, CubePodSandbox):
+            cp_entries = await sandbox.list_directory(normalized)
+            cp_result: list[SandboxFileEntry] = []
+            for cp_e in cp_entries:
+                name = cp_e.name or posixpath.basename(posixpath.normpath(cp_e.path))
+                if not name or name.startswith("."):
+                    continue
+                cp_result.append(
+                    SandboxFileEntry(
+                        path=cp_e.path or posixpath.join(normalized, name),
+                        name=name,
+                        is_dir=cp_e.is_dir,
+                        size=0 if cp_e.is_dir else cp_e.size,
+                        modified_at=utc_isoformat(cp_e.modified_at) if cp_e.modified_at else "",
+                    )
+                )
+            cp_result.sort(key=lambda r: (not r.is_dir, r.name.lower()))
+            return cp_result
         if not isinstance(sandbox, OpenSandbox):
-            raise SandboxError("filesystem operations require OpenSandbox backend")
+            raise SandboxError("filesystem operations require OpenSandbox or CubePod backend")
         raw = sandbox._sandbox  # noqa: SLF001
         from opensandbox.models.filesystem import DirectoryListEntry
 
@@ -306,19 +325,27 @@ async def get_sandbox_file_content(
             workspace_id=ctx.workspace_id,
         )
         sandbox = attachment.sandbox
-        if not isinstance(sandbox, OpenSandbox):
-            raise SandboxError("filesystem operations require OpenSandbox backend")
-        raw = sandbox._sandbox  # noqa: SLF001
-        info_map = await raw.files.get_file_info([normalized])
-        info = info_map.get(normalized)
-        if info and info.size > MAX_PREVIEW_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="file too large for preview; use download instead",
-            )
-        content = await raw.files.read_file(normalized)
+        if isinstance(sandbox, CubePodSandbox):
+            content = await sandbox.read_text_file(normalized, max_bytes=MAX_PREVIEW_BYTES)
+        elif isinstance(sandbox, OpenSandbox):
+            raw = sandbox._sandbox  # noqa: SLF001
+            info_map = await raw.files.get_file_info([normalized])
+            info = info_map.get(normalized)
+            if info and info.size > MAX_PREVIEW_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="file too large for preview; use download instead",
+                )
+            content = await raw.files.read_file(normalized)
+        else:
+            raise SandboxError("filesystem operations require OpenSandbox or CubePod backend")
     except HTTPException:
         raise
+    except FileTooLargeError:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="file too large for preview; use download instead",
+        ) from None
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -361,10 +388,13 @@ async def download_sandbox_file(
             workspace_id=ctx.workspace_id,
         )
         sandbox = attachment.sandbox
-        if not isinstance(sandbox, OpenSandbox):
-            raise SandboxError("filesystem operations require OpenSandbox backend")
-        raw = sandbox._sandbox  # noqa: SLF001
-        stream = await raw.files.read_bytes_stream(normalized)
+        if isinstance(sandbox, CubePodSandbox):
+            stream = await sandbox.stream_file_bytes(normalized)
+        elif isinstance(sandbox, OpenSandbox):
+            raw = sandbox._sandbox  # noqa: SLF001
+            stream = await raw.files.read_bytes_stream(normalized)
+        else:
+            raise SandboxError("filesystem operations require OpenSandbox or CubePod backend")
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -605,3 +635,33 @@ async def get_terminal(
             detail=("terminal endpoint requires header auth; not yet supported"),
         )
     return SandboxTerminalResponse(url=endpoint.url)
+
+
+@router.post("/reset-rootfs", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_sandbox_rootfs(
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    conversation_id: str | None = Query(default=None),
+) -> None:
+    """Reset the sandbox RootFS upper layer while preserving /workspace."""
+    manager = get_sandbox_manager()
+    scope_type, scope_id, _owner_user_id = await _resolve_sandbox_scope(
+        session, ctx, conversation_id
+    )
+    repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    record = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="sandbox not found")
+    provider = getattr(record, "provider", "opensandbox")
+    if provider != "cubepod":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="reset_rootfs is not supported by the active sandbox provider",
+        )
+    try:
+        await manager.reset_user_sandbox_rootfs(record.id)
+    except SandboxError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
