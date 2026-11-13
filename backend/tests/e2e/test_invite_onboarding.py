@@ -216,3 +216,90 @@ async def test_org_invite_reuse_rejected(
     )
     assert resp.status_code == 400, resp.text
     assert resp.json()["detail"] == "invite_invalid_or_expired"
+
+
+@pytest.mark.asyncio
+async def test_email_invite_does_not_add_member_until_that_address_accepts(
+    unauthenticated_memory_client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An email invite sends a link and grants membership only when that address accepts."""
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
+    sent: list[dict[str, str]] = []
+
+    class _Capture:
+        async def send(self, *, to: str, subject: str, html: str, text: str) -> None:
+            sent.append({"to": to, "subject": subject, "text": text, "html": html})
+
+    def _service() -> object:
+        from cubeplex.services.email import EmailService
+
+        return EmailService(backend=_Capture())  # type: ignore[arg-type]
+
+    monkeypatch.setattr("cubeplex.services.email.get_email_service", _service)
+
+    client = unauthenticated_memory_client
+    admin_email = f"mail-admin-{secrets.token_hex(4)}@example.com"
+    slug = f"mail-{secrets.token_hex(4)}"
+    invite_email = f"Invitee-{secrets.token_hex(4)}@Example.com"
+
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": admin_email, "password": "StrongPass1!"},
+    )
+    assert resp.status_code == 201
+    await _login(client, admin_email, "StrongPass1!")
+    resp = await client.post(
+        "/api/v1/onboarding",
+        json={"org_name": "Mail Org", "org_slug": slug, "workspace_name": "Mail WS"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = await client.post(
+        "/api/v1/admin/orgs/invites",
+        json={"role": "member", "email": admin_email},
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"] == "already_member"
+    assert sent == []
+
+    resp = await client.post(
+        "/api/v1/admin/orgs/invites",
+        json={"role": "member", "email": invite_email},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    token = body["token"]
+    assert body["email"] == invite_email.lower()
+    assert body["email_sent"] is True
+    assert body["invite_url"].endswith(f"/orgs/invites/accept?token={token}")
+    assert sent[0]["to"] == invite_email.lower()
+    assert token in sent[0]["text"]
+
+    members = await client.get("/api/v1/admin/members")
+    assert members.status_code == 200, members.text
+    assert invite_email.lower() not in {row["email"].lower() for row in members.json()}
+
+    other_email = f"other-{secrets.token_hex(4)}@example.com"
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": other_email, "password": "StrongPass1!"},
+    )
+    assert resp.status_code == 201
+    await _login(client, other_email, "StrongPass1!")
+    resp = await client.post("/api/v1/orgs/invites/accept", json={"token": token})
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == "invite_email_mismatch"
+
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": invite_email, "password": "StrongPass1!"},
+    )
+    assert resp.status_code == 201
+    await _login(client, invite_email, "StrongPass1!")
+    resp = await client.post("/api/v1/orgs/invites/accept", json={"token": token})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["role"] == "member"
+    me = await client.get("/api/v1/auth/me")
+    assert me.status_code == 200, me.text
+    assert any(row["role"] == "member" for row in me.json()["org_memberships"])

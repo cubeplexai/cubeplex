@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import {
   acceptOrgInvite,
+  ApiError,
   createApiClient,
   useAuthStore,
   type AcceptOrgInviteResult,
@@ -56,7 +57,11 @@ export default function AcceptOrgInvitePage({
           router.replace(`/login?next=${next}`)
           return
         }
-        setError(t('expiredOrUsed'))
+        if (err instanceof ApiError && err.message === 'invite_email_mismatch') {
+          setError(t('emailMismatch'))
+        } else {
+          setError(t('expiredOrUsed'))
+        }
         setLoading(false)
       })
     /* eslint-enable react-hooks/set-state-in-effect */

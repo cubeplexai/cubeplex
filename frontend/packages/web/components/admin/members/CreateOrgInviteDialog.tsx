@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { Check, Copy, X } from 'lucide-react'
-import { createApiClient, createOrgInvite } from '@cubeplex/core'
+import { ApiError, createApiClient, createOrgInvite } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -24,8 +25,11 @@ interface CreateOrgInviteDialogProps {
 export function CreateOrgInviteDialog({ open, onOpenChange }: CreateOrgInviteDialogProps) {
   const t = useTranslations('adminMembers.inviteDialog')
   const [role, setRole] = useState('member')
+  const [email, setEmail] = useState('')
   const [creating, setCreating] = useState(false)
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+  const [sentTo, setSentTo] = useState<string | null>(null)
+  const [emailSent, setEmailSent] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -33,7 +37,10 @@ export function CreateOrgInviteDialog({ open, onOpenChange }: CreateOrgInviteDia
     if (open) {
       /* eslint-disable react-hooks/set-state-in-effect */
       setRole('member')
+      setEmail('')
       setInviteUrl(null)
+      setSentTo(null)
+      setEmailSent(false)
       setCopied(false)
       setError(null)
       setCreating(false)
@@ -42,14 +49,21 @@ export function CreateOrgInviteDialog({ open, onOpenChange }: CreateOrgInviteDia
   }, [open])
 
   async function handleCreate(): Promise<void> {
+    const address = email.trim()
     setCreating(true)
     setError(null)
     try {
       const client = createApiClient('')
-      const result = await createOrgInvite(client, role as 'admin' | 'member')
+      const result = await createOrgInvite(client, role as 'admin' | 'member', address)
+      setSentTo(result.email ?? address)
+      setEmailSent(result.email_sent)
       setInviteUrl(result.invite_url)
     } catch (e) {
-      setError((e as Error).message)
+      if (e instanceof ApiError && e.status === 409) {
+        setError(t('alreadyMember'))
+      } else {
+        setError((e as Error).message)
+      }
     } finally {
       setCreating(false)
     }
@@ -112,7 +126,11 @@ export function CreateOrgInviteDialog({ open, onOpenChange }: CreateOrgInviteDia
 
           {inviteUrl ? (
             <div className="mt-4 flex flex-col gap-3">
-              <p className="text-sm text-muted-foreground">{t('linkReady')}</p>
+              <p className="text-sm text-muted-foreground">
+                {emailSent
+                  ? t('sent', { email: sentTo ?? '' })
+                  : t('sendFailed', { email: sentTo ?? '' })}
+              </p>
               <div className="flex items-center gap-2">
                 <input
                   readOnly
@@ -139,6 +157,16 @@ export function CreateOrgInviteDialog({ open, onOpenChange }: CreateOrgInviteDia
           ) : (
             <div className="mt-4 flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
+                <Label htmlFor="org-invite-email">{t('emailLabel')}</Label>
+                <Input
+                  id="org-invite-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={t('emailPlaceholder')}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
                 <Label htmlFor="org-invite-role">{t('roleLabel')}</Label>
                 <Select value={role} onValueChange={(v) => setRole(v ?? 'member')}>
                   <SelectTrigger id="org-invite-role">
@@ -152,7 +180,11 @@ export function CreateOrgInviteDialog({ open, onOpenChange }: CreateOrgInviteDia
               </div>
               <p className="text-xs text-muted-foreground">{t('description')}</p>
               {error && <div className="text-sm text-destructive">{error}</div>}
-              <Button type="button" disabled={creating} onClick={() => void handleCreate()}>
+              <Button
+                type="button"
+                disabled={creating || !email.trim()}
+                onClick={() => void handleCreate()}
+              >
                 {creating ? t('creating') : t('create')}
               </Button>
             </div>

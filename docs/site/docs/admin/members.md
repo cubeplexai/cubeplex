@@ -23,14 +23,15 @@ The role hierarchy is: **Owner > Admin > Member**. Higher roles inherit all perm
 
 ## Invite members
 
-Organization members join by accepting an invite. This page does not add an existing account by email.
+Entering an email sends an invitation. The person is not added to the organization until they accept it.
 
 1. Go to **Admin > Members**.
 2. Click **Invite member**.
-3. Select an organization role (Admin or Member).
-4. Click **Create invite link** and share the link.
+3. Enter the person's email address.
+4. Select an organization role (Admin or Member).
+5. Click **Send invite**.
 
-The link expires in 24 hours and can be used once. The recipient signs in, or creates an account, then accepts the invite. They join the organization at the selected role and then create their own workspace.
+CubePlex emails a single-use link to that address and also shows the link so you can copy it. The link expires in 24 hours and can be used once, and only by that email address. The recipient signs in, or creates an account with the same address, then accepts. They join at the selected role and then create their own workspace. If the address is already a member, the invite is refused.
 
 ## Change a member's org role
 

@@ -34,6 +34,8 @@ class OrgInviteToken(SQLModel, table=True):
     )
     org_id: str = Field(foreign_key="organizations.id", max_length=20)
     role: str = Field(max_length=32)  # OrgRole value: "admin" | "member"
+    # Set when the invite was addressed to one email. Only that address can accept.
+    email: str | None = Field(default=None, max_length=320)
     created_by: str = Field(foreign_key="users.id", max_length=20)
     expires_at: datetime = Field(
         default_factory=_default_expiry,
