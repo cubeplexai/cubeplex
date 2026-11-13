@@ -27,6 +27,7 @@ export interface TopicParticipant {
   email?: string | null
   avatar_url?: string | null
   avatar_seed?: string | null
+  avatar_style?: string | null
 }
 
 export interface TopicCreateResponse {
