@@ -696,7 +696,6 @@
   "adminMembers": {
     "title": "Members",
     "subtitle": "Manage organization members and their roles.",
-    "addMember": "Add member",
     "inviteMember": "Invite member",
     "inviteDialog": {
       "title": "Invite to organization",
@@ -719,16 +718,6 @@
     "owner": "owner",
     "admin": "admin",
     "member": "member",
-    "addDialog": {
-      "title": "Add member",
-      "emailLabel": "Email address",
-      "emailPlaceholder": "user@example.com",
-      "roleLabel": "Role",
-      "cancel": "Cancel",
-      "add": "Add",
-      "errorNotFound": "No user with this email",
-      "errorDuplicate": "Already a member"
-    },
     "roleConfirm": {
       "title": "Change role",
       "message": "Change {email} role to {role}?",

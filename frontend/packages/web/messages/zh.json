@@ -696,7 +696,6 @@
   "adminMembers": {
     "title": "成员",
     "subtitle": "管理组织成员及其角色。",
-    "addMember": "添加成员",
     "inviteMember": "邀请成员",
     "inviteDialog": {
       "title": "邀请加入组织",
@@ -719,16 +718,6 @@
     "owner": "所有者",
     "admin": "管理员",
     "member": "成员",
-    "addDialog": {
-      "title": "添加成员",
-      "emailLabel": "邮箱地址",
-      "emailPlaceholder": "user@example.com",
-      "roleLabel": "角色",
-      "cancel": "取消",
-      "add": "添加",
-      "errorNotFound": "未找到该邮箱的用户",
-      "errorDuplicate": "已经是成员"
-    },
     "roleConfirm": {
       "title": "更改角色",
       "message": "将 {email} 的角色更改为 {role}？",
