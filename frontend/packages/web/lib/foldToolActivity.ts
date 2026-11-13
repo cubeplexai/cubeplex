@@ -40,12 +40,33 @@ function hasTool(blocks: ActivityBlock[]): boolean {
   return blocks.some((block) => block.type === 'tool_call' || block.type === 'tool_call_streaming')
 }
 
+/** Text the user actually sees. Blank deltas and the hidden task-list call do not count. */
+function hasVisibleText(message: AssistantMessage): boolean {
+  return message.content.some((block) => block.type === 'text' && block.text.trim().length > 0)
+}
+
+/**
+ * A later assistant row of the same run stays in the open group unless it
+ * carries visible text of its own. Rows with text start their own group, so
+ * an answer never ends up folded underneath the tool activity that follows it.
+ * Rows without text (tool calls, thinking, task-list updates) stay with the
+ * surrounding group.
+ */
+function continuesToolActivity(_previous: AssistantMessage, next: AssistantMessage): boolean {
+  return !hasVisibleText(next)
+}
+
 /**
  * Fold a reply's blocks into activity groups.
  *
  * Thinking stays with the tool calls around it. A non-blank text block, or a
  * tool that has its own card, ends the group. Blank text and write_todos do
  * not. Thinking that never meets a tool call stays a normal thinking block.
+ *
+ * write_todos is not drawn in the transcript (the plan lives in the strip
+ * above the composer), but the thinking that leads into that call is part of
+ * the surrounding tool activity. Leaving it behind would close the summary
+ * and start a second "N tool calls" line after the status update.
  */
 export function foldToolActivity(blocks: ContentBlock[]): FoldPiece[] {
   const pieces: FoldPiece[] = []
@@ -88,6 +109,10 @@ export function foldToolActivity(blocks: ContentBlock[]): FoldPiece[] {
       (block.type === 'tool_call' || block.type === 'tool_call_streaming') &&
       block.name === 'write_todos'
     ) {
+      if (activity && pendingThinking.length > 0) {
+        activity.push(...pendingThinking)
+        pendingThinking = []
+      }
       continue
     }
 
@@ -118,6 +143,13 @@ export type HistoryDisplayRow =
  * Join assistant rows from one run so a refresh can fold them the same way
  * the live stream does. Tool-result rows are not bubbles and do not split
  * the run. A user message, or a new run id, does.
+ *
+ * A written answer ends one summary, so the assistant row that starts with
+ * that answer starts a new display row. Tool activity that continues after
+ * the answer stays on the answer's row: folding it forward would put the
+ * next summary above the text it follows. A row that is only a task-list
+ * update stays with the activity around it, because that call is not drawn
+ * and must not cut the tool-call count in two.
  */
 export function groupAssistantRuns(messages: Message[]): HistoryDisplayRow[] {
   const rows: HistoryDisplayRow[] = []
@@ -138,7 +170,10 @@ export function groupAssistantRuns(messages: Message[]): HistoryDisplayRow[] {
   for (const message of messages) {
     if (message.role === 'tool_result') continue
     if (message.role === 'assistant' && message.run_id) {
-      if (currentRunId === message.run_id) {
+      if (
+        currentRunId === message.run_id &&
+        continuesToolActivity(current[current.length - 1], message)
+      ) {
         current.push(message)
         continue
       }
