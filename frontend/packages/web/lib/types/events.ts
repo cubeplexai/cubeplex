@@ -15,6 +15,7 @@ export interface FailoverEvent {
     reason: string
   }
   agent_id: string | null
+  run_id?: string | null
 }
 
 export interface RetryEvent {
@@ -27,4 +28,5 @@ export interface RetryEvent {
     wait_s: number
   }
   agent_id: string | null
+  run_id?: string | null
 }
