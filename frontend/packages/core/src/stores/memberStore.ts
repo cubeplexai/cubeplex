@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
 import {
   listOrgMembers,
-  addOrgMember as apiAddOrgMember,
   updateOrgMemberRole as apiUpdateOrgMemberRole,
   removeOrgMember as apiRemoveOrgMember,
   listWsMembers,
@@ -24,7 +23,6 @@ export interface MemberStore {
   available: AvailableMember[]
 
   loadOrgMembers(client: ApiClient): Promise<void>
-  addOrgMember(client: ApiClient, email: string, role: string): Promise<void>
   updateOrgMemberRole(client: ApiClient, userId: string, role: string): Promise<void>
   removeOrgMember(client: ApiClient, userId: string): Promise<AccessRemovalResult>
 
@@ -52,11 +50,6 @@ export const useMemberStore = create<MemberStore>((set, get) => ({
     } finally {
       set({ orgLoading: false })
     }
-  },
-
-  async addOrgMember(client, email, role) {
-    await apiAddOrgMember(client, email, role)
-    await get().loadOrgMembers(client)
   },
 
   async updateOrgMemberRole(client, userId, role) {

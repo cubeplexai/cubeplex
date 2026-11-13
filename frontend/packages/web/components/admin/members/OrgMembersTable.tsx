@@ -22,38 +22,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { AddOrgMemberDialog } from './AddOrgMemberDialog'
 
-interface OrgMembersTableProps {
-  /** controlled "add member" dialog state, owned by the page header action */
-  addOpen: boolean
-  onAddOpenChange: (open: boolean) => void
-}
-
-export function OrgMembersTable({ addOpen, onAddOpenChange }: OrgMembersTableProps) {
+export function OrgMembersTable() {
   const t = useTranslations('adminMembers')
   const client = useMemo(() => createApiClient(''), [])
-  const {
-    orgMembers,
-    orgLoading,
-    loadOrgMembers,
-    addOrgMember,
-    updateOrgMemberRole,
-    removeOrgMember,
-  } = useMemberStore()
+  const { orgMembers, orgLoading, loadOrgMembers, updateOrgMemberRole, removeOrgMember } =
+    useMemberStore()
 
   const [removing, setRemoving] = useState<string | null>(null)
 
   useEffect(() => {
     void loadOrgMembers(client)
   }, [client, loadOrgMembers])
-
-  const handleAdd = useCallback(
-    async (email: string, role: string) => {
-      await addOrgMember(client, email, role)
-    },
-    [client, addOrgMember],
-  )
 
   const handleRoleChange = useCallback(
     async (userId: string, role: string) => {
@@ -68,7 +48,7 @@ export function OrgMembersTable({ addOpen, onAddOpenChange }: OrgMembersTablePro
       if (result.cleanup_pending) toast.info(t('cleanupPending'))
       setRemoving(null)
     },
-    [client, removeOrgMember],
+    [client, removeOrgMember, t],
   )
 
   function formatDate(iso: string): string {
@@ -122,8 +102,6 @@ export function OrgMembersTable({ addOpen, onAddOpenChange }: OrgMembersTablePro
           </Table>
         </div>
       )}
-
-      <AddOrgMemberDialog open={addOpen} onOpenChange={onAddOpenChange} onAdd={handleAdd} />
     </>
   )
 }

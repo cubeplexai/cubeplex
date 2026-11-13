@@ -21,15 +21,16 @@ Org-level member management happens at **Admin > Members** (`/admin/members`). W
 
 The role hierarchy is: **Owner > Admin > Member**. Higher roles inherit all permissions of lower roles.
 
-## Add members
+## Invite members
+
+Organization members join by accepting an invite. This page does not add an existing account by email.
 
 1. Go to **Admin > Members**.
-2. Click **Add Member**.
-3. Enter the person's email address.
-4. Select an organization role (Admin or Member).
-5. Click **Add**.
+2. Click **Invite member**.
+3. Select an organization role (Admin or Member).
+4. Click **Create invite link** and share the link.
 
-The person must already have a CubePlex account — the email is matched against existing accounts, and adding fails if no account with that email exists. Ask new teammates to sign up first, then add them to your organization. Once added, they immediately gain the access their org role grants.
+The link expires in 24 hours and can be used once. The recipient signs in, or creates an account, then accepts the invite. They join the organization at the selected role and then create their own workspace.
 
 ## Change a member's org role
 
@@ -48,7 +49,7 @@ The owner's role cannot be changed from the members list — the owner appears w
 2. Find the member and click **Remove**.
 3. Confirm the removal.
 
-Removing a member revokes their access to all workspaces in the organization and stops responses or background work admitted for that member. Work started by other members continues. Their past conversation history is preserved. If process cleanup is still running, the UI reports that removal succeeded and cleanup is continuing. Adding the member again does not revive previously stopped work.
+Removing a member revokes their access to all workspaces in the organization and stops responses or background work admitted for that member. Work started by other members continues. Their past conversation history is preserved. If process cleanup is still running, the UI reports that removal succeeded and cleanup is continuing. Accepting a new organization invite does not revive previously stopped work.
 
 ## Workspace roles
 

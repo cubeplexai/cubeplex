@@ -60,16 +60,6 @@ export async function listOrgMembers(client: ApiClient): Promise<OrgMember[]> {
   return (await res.json()) as OrgMember[]
 }
 
-export async function addOrgMember(
-  client: ApiClient,
-  email: string,
-  role: string,
-): Promise<{ user_id: string; email: string; role: string }> {
-  const res = await client.post('/api/v1/admin/members', { email, role })
-  if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as { user_id: string; email: string; role: string }
-}
-
 export async function updateOrgMemberRole(
   client: ApiClient,
   userId: string,
