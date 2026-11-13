@@ -1,0 +1,7 @@
+You're invited to join {{ org_name }} on CubePlex as {{ role }}.
+
+Open this link to accept. You are not a member until you do:
+
+{{ invite_url }}
+
+The link expires in 24 hours and works once. Sign in with this email address, or create an account with it, then accept.
