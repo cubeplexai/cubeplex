@@ -26,6 +26,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import opensandbox
+from cubepod import AsyncCubePod
 from loguru import logger
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import (
@@ -59,7 +60,12 @@ from cubeplex.sandbox.base import (
     SandboxError,
     SandboxInstanceGoneError,
 )
-from cubeplex.sandbox.cubepod import CubePodControlClient, CubePodSandbox
+from cubeplex.sandbox.cubepod import (
+    CubePodSandbox,
+    connect_cubepod_sandbox,
+    get_cubepod_sandbox,
+    translate_cubepod_errors,
+)
 from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubeplex.sandbox_policy.rules import build_network_policy
@@ -317,10 +323,10 @@ class SandboxManager:
             run_user=self._run_user,
         )
 
-    def _build_cubepod_client(self, *, request_timeout: int | None = None) -> CubePodControlClient:
-        """Build CubePodControlClient from app config."""
-        return CubePodControlClient(
-            domain=self._domain,
+    def _build_cubepod_client(self, *, request_timeout: int | None = None) -> AsyncCubePod:
+        """Build AsyncCubePod SDK client from app config."""
+        return AsyncCubePod(
+            base_url=self._domain,
             api_key=self._api_key,
             timeout=float(request_timeout or self._request_timeout),
         )
@@ -328,7 +334,7 @@ class SandboxManager:
     def _wrap_cubepod_backend(
         self,
         sandbox_id: str,
-        client: CubePodControlClient,
+        client: AsyncCubePod,
         *,
         owns_client: bool = True,
     ) -> CubePodSandbox:
@@ -388,13 +394,14 @@ class SandboxManager:
         if not instance_id:
             raise SandboxError("original command instance is unknown")
         if provider == "cubepod":
-            cp_client: CubePodControlClient | None = None
+            cp_client: AsyncCubePod | None = None
             try:
                 async with asyncio.timeout(10):
                     cp_client = self._build_cubepod_client(request_timeout=10)
-                    cp_info = await cp_client.get_sandbox_raw(instance_id)
+                    async with translate_cubepod_errors(sandbox_id=instance_id):
+                        cp_info = await cp_client.get_raw(instance_id)
                     state = str(cp_info.get("state", "") or "")
-                    if state in ("Failed", "Terminated", "Stopped"):
+                    if state in ("Failed", "Terminated", "Stopped", "Killed", "Succeed"):
                         raise SandboxInstanceGoneError(instance_id)
                     if state != "Running":
                         raise SandboxError(f"original sandbox instance is {state}")
@@ -456,7 +463,7 @@ class SandboxManager:
         controller won't GC an actively-used sandbox. Non-fatal on failure."""
         effective_provider = provider or self._provider
         if effective_provider == "cubepod":
-            cp_client: CubePodControlClient | None = None
+            cp_client: AsyncCubePod | None = None
             try:
                 cp_client = self._build_cubepod_client()
                 await cp_client.renew_timeout(sandbox_id, self._ttl)
@@ -909,20 +916,21 @@ class SandboxManager:
             network_policy = self._build_cubepod_network_policy(policy)
             create_client = self._build_cubepod_client(request_timeout=self._create_timeout)
             try:
-                info = await create_client.create_sandbox(
-                    template_id=policy.default_image,
-                    volume_key=volume_key,
-                    timeout_seconds=self._ttl,
-                    warm_pool_ref=self._warm_pool_ref,
-                    network_policy=network_policy,
-                    resource={
-                        "cpu": policy.resource_cpu or self._resource_cpu,
-                        "memory": policy.resource_memory or self._resource_memory,
-                    },
-                )
+                async with translate_cubepod_errors():
+                    info = await create_client.create(
+                        template_id=policy.default_image,
+                        volume_key=volume_key,
+                        timeout_seconds=self._ttl,
+                        warm_pool_ref=self._warm_pool_ref,
+                        network_policy=network_policy,
+                        resource={
+                            "cpu": policy.resource_cpu or self._resource_cpu,
+                            "memory": policy.resource_memory or self._resource_memory,
+                        },
+                    )
             finally:
                 await create_client.close()
-            sandbox_id = str(info.get("sandboxID", ""))
+            sandbox_id = info.sandbox_id
             if not sandbox_id:
                 raise SandboxError("CubePod create response missing sandboxID")
 
@@ -1219,7 +1227,7 @@ class SandboxManager:
             logger.info("Found existing CubePod sandbox {} for user {}", sandbox_id, user_id)
             cp_client = self._build_cubepod_client()
             try:
-                await cp_client.get_sandbox(sandbox_id)
+                await get_cubepod_sandbox(cp_client, sandbox_id)
             except Exception as e:
                 logger.warning("Failed to connect to CubePod sandbox {}: {}", sandbox_id, e)
                 await cp_client.close()
@@ -1889,7 +1897,7 @@ class SandboxManager:
         if row_provider == "cubepod":
             cp_client = self._build_cubepod_client()
             try:
-                await cp_client.connect_sandbox(sandbox_id)
+                await connect_cubepod_sandbox(cp_client, sandbox_id)
             except Exception:
                 await cp_client.close()
                 raise
@@ -2087,13 +2095,14 @@ class SandboxManager:
                     workspace_id=record.workspace_id,
                 )
                 raw: opensandbox.Sandbox | None = None
-                cp_client: CubePodControlClient | None = None
+                cp_client: AsyncCubePod | None = None
                 record_provider = getattr(record, "provider", None) or self._provider
                 try:
                     assert record.sandbox_id  # select invariant: transient rows have sandbox_id
                     if record_provider == "cubepod":
                         cp_client = self._build_cubepod_client()
-                        cp_info = await cp_client.get_sandbox_raw(record.sandbox_id)
+                        async with translate_cubepod_errors(sandbox_id=record.sandbox_id):
+                            cp_info = await cp_client.get_raw(record.sandbox_id)
                         state = str(cp_info.get("state", "") or "")
                     else:
                         raw = await opensandbox.Sandbox.connect(
@@ -2222,13 +2231,14 @@ class SandboxManager:
         """
         assert record.sandbox_id, "kill target must have sandbox_id"  # caller invariant
         raw: opensandbox.Sandbox | None = None
-        cp_client: CubePodControlClient | None = None
+        cp_client: AsyncCubePod | None = None
         record_provider = getattr(record, "provider", None) or self._provider
         killed = False
         try:
             if record_provider == "cubepod":
                 cp_client = self._build_cubepod_client()
-                await cp_client.kill_sandbox(record.sandbox_id)
+                async with translate_cubepod_errors(sandbox_id=record.sandbox_id):
+                    await cp_client.delete(record.sandbox_id)
                 logger.info("Killed CubePod sandbox {}", record.sandbox_id)
                 killed = True
             else:

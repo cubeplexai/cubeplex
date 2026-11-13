@@ -970,6 +970,7 @@ dependencies = [
     { name = "croniter" },
     { name = "cryptography" },
     { name = "cubeloop", extra = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"] },
+    { name = "cubepod" },
     { name = "dingtalk-stream" },
     { name = "discord-py" },
     { name = "dynaconf" },
@@ -1044,6 +1045,7 @@ requires-dist = [
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "cubeloop", extras = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"], git = "https://github.com/cubeplexai/cubeloop.git?rev=bb2d6336e537f286ccac3dec072218bbec13405b" },
+    { name = "cubepod", git = "https://github.com/cubeplexai/cubepod.git?subdirectory=sdks%2Fpython&rev=e93ce8636eb70af36965f79a794e7380e529f6bb" },
     { name = "dingtalk-stream", specifier = ">=0.24.3" },
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "dynaconf", specifier = ">=3.2.11" },
@@ -1104,6 +1106,14 @@ licensed = [{ name = "cubeplex-ee", editable = "ee" }]
 name = "cubeplex-ee"
 version = "0.3.0"
 source = { editable = "ee" }
+
+[[package]]
+name = "cubepod"
+version = "0.4.0"
+source = { git = "https://github.com/cubeplexai/cubepod.git?subdirectory=sdks%2Fpython&rev=e93ce8636eb70af36965f79a794e7380e529f6bb#e93ce8636eb70af36965f79a794e7380e529f6bb" }
+dependencies = [
+    { name = "httpx" },
+]
 
 [[package]]
 name = "dependency-injector"
