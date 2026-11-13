@@ -20,7 +20,7 @@ function renderStrip(todos: TodoItem[], conversationId: string, liveNonce = 0) {
 }
 
 describe('TaskProgressStrip', () => {
-  it('keeps the current step in the header and folds completed items', () => {
+  it('lists completed items when the strip opens', () => {
     renderStrip(active, 'conv-header')
 
     const toggle = screen.getByRole('button', { name: /Inspect the current behavior/ })
@@ -34,15 +34,11 @@ describe('TaskProgressStrip', () => {
     fireEvent.click(toggle)
 
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('Inspect the current behavior')).toBeInTheDocument()
     expect(screen.getByRole('list')).toHaveTextContent('Update the progress header')
-    expect(screen.queryByText('Verify the interaction')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '1 completed' }))
-
     const done = screen.getByText('Verify the interaction')
     expect(done).toBeInTheDocument()
     expect(done).not.toHaveClass('line-through')
+    expect(screen.queryByRole('button', { name: '1 completed' })).not.toBeInTheDocument()
   })
 
   it('stays collapsed when a restored list replaces the empty placeholder', () => {
@@ -130,11 +126,16 @@ describe('TaskProgressStrip', () => {
     ]
     renderStrip(done, 'conv-done')
 
-    expect(screen.getByRole('button', { name: '2/2 tasks done' })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    )
+    const toggle = screen.getByRole('button', { name: '2/2 tasks done' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByText('2/2 completed')).not.toBeInTheDocument()
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
+
+    fireEvent.click(toggle)
+
+    const list = screen.getByRole('list')
+    expect(list).toHaveTextContent('Inspect the current behavior')
+    expect(list).toHaveTextContent('Update the progress header')
+    expect(screen.queryByRole('button', { name: '2 completed' })).not.toBeInTheDocument()
   })
 })
