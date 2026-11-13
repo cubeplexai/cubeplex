@@ -303,3 +303,67 @@ async def test_email_invite_does_not_add_member_until_that_address_accepts(
     me = await client.get("/api/v1/auth/me")
     assert me.status_code == 200, me.text
     assert any(row["role"] == "member" for row in me.json()["org_memberships"])
+
+
+@pytest.mark.asyncio
+async def test_email_invite_keeps_the_link_when_the_address_or_send_is_unusable(
+    unauthenticated_memory_client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blank address stays a normal link. A bad address is refused. A failed send still returns the link."""
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
+    client = unauthenticated_memory_client
+    admin_email = f"shape-admin-{secrets.token_hex(4)}@example.com"
+    slug = f"shape-{secrets.token_hex(4)}"
+
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": admin_email, "password": "StrongPass1!"},
+    )
+    assert resp.status_code == 201
+    await _login(client, admin_email, "StrongPass1!")
+    resp = await client.post(
+        "/api/v1/onboarding",
+        json={"org_name": "Shape Org", "org_slug": slug, "workspace_name": "Shape WS"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    for address in (None, "  "):
+        resp = await client.post(
+            "/api/v1/admin/orgs/invites",
+            json={"role": "member", "email": address},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["email"] is None
+        assert resp.json()["email_sent"] is False
+
+    resp = await client.post(
+        "/api/v1/admin/orgs/invites",
+        json={"role": "member", "email": "not-an-email"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "invalid_email" in resp.text
+
+    class _Boom:
+        async def send(self, *, to: str, subject: str, html: str, text: str) -> None:
+            raise RuntimeError("smtp down")
+
+    def _service() -> object:
+        from cubeplex.services.email import EmailService
+
+        return EmailService(backend=_Boom())  # type: ignore[arg-type]
+
+    monkeypatch.setattr("cubeplex.services.email.get_email_service", _service)
+    invite_email = f"shape-invitee-{secrets.token_hex(4)}@example.com"
+    resp = await client.post(
+        "/api/v1/admin/orgs/invites",
+        json={"role": "member", "email": invite_email},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["email"] == invite_email
+    assert body["email_sent"] is False
+    assert body["invite_url"].endswith(f"/orgs/invites/accept?token={body['token']}")
+    members = await client.get("/api/v1/admin/members")
+    assert members.status_code == 200, members.text
+    assert invite_email not in {row["email"].lower() for row in members.json()}
