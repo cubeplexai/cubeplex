@@ -495,7 +495,6 @@
     "tasksDone": "{completed}/{total} 个任务已完成",
     "tasksProgress": "任务进度",
     "tasksCompleted": "{completed}/{total} 已完成",
-    "tasksCompletedGroup": "{count} 项已完成",
     "artifacts": "产出物",
     "expand": "展开",
     "collapse": "收起",

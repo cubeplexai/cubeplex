@@ -495,7 +495,6 @@
     "tasksDone": "{completed}/{total} tasks done",
     "tasksProgress": "Task progress",
     "tasksCompleted": "{completed}/{total} completed",
-    "tasksCompletedGroup": "{count} completed",
     "artifacts": "Artifacts",
     "expand": "Expand",
     "collapse": "Collapse",

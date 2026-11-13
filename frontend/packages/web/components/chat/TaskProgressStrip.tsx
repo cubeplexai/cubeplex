@@ -37,7 +37,6 @@ export function TaskProgressStrip({
   const t = useTranslations('chat')
   const listId = useId()
   const [expanded, setExpanded] = useState(() => expandedPrefs.get(conversationId) ?? false)
-  const [showCompleted, setShowCompleted] = useState(false)
   const [trackedConversation, setTrackedConversation] = useState(conversationId)
   const [prevCount, setPrevCount] = useState(todos.length)
   const [seenNonce, setSeenNonce] = useState(liveNonce)
@@ -45,7 +44,6 @@ export function TaskProgressStrip({
   if (trackedConversation !== conversationId) {
     setTrackedConversation(conversationId)
     setExpanded(expandedPrefs.get(conversationId) ?? false)
-    setShowCompleted(false)
     setPrevCount(todos.length)
     setSeenNonce(liveNonce)
   } else if (liveNonce !== seenNonce) {
@@ -53,7 +51,6 @@ export function TaskProgressStrip({
     if (todos.length === 0) {
       expandedPrefs.delete(conversationId)
       setExpanded(false)
-      setShowCompleted(false)
       setPrevCount(0)
     } else if (prevCount === 0) {
       expandedPrefs.set(conversationId, true)
@@ -63,10 +60,9 @@ export function TaskProgressStrip({
       setPrevCount(todos.length)
     }
   } else if (todos.length === 0) {
-    if (prevCount !== 0 || expanded || showCompleted) {
+    if (prevCount !== 0 || expanded) {
       expandedPrefs.delete(conversationId)
       setExpanded(false)
-      setShowCompleted(false)
       setPrevCount(0)
     }
   } else if (prevCount !== todos.length) {
@@ -143,41 +139,14 @@ export function TaskProgressStrip({
       </div>
       {expanded && (
         <ComposerOverlayShell id={listId} aria-label={t('tasksProgress')}>
-          <div className="overflow-y-auto p-2">
-            {openItems.length > 0 && (
-              <ul className="space-y-1">
-                {openItems.map((todo, index) => (
-                  <TodoRow key={`${todo.description}-${index}`} todo={todo} />
-                ))}
-              </ul>
-            )}
-            {completedItems.length > 0 && (
-              <div className={openItems.length > 0 ? 'mt-1' : undefined}>
-                <button
-                  type="button"
-                  aria-expanded={showCompleted}
-                  onClick={() => setShowCompleted((open) => !open)}
-                  className="flex min-h-8 w-full items-center gap-2 py-1 text-left text-xs
-                    text-muted-foreground hover:text-foreground
-                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {showCompleted ? (
-                    <ChevronDown aria-hidden className="size-3 shrink-0" />
-                  ) : (
-                    <ChevronRight aria-hidden className="size-3 shrink-0" />
-                  )}
-                  {t('tasksCompletedGroup', { count: completedItems.length })}
-                </button>
-                {showCompleted && (
-                  <ul className="space-y-1">
-                    {completedItems.map((todo, index) => (
-                      <TodoRow key={`${todo.description}-${index}`} todo={todo} />
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
+          <ul className="min-h-0 space-y-1 overflow-y-auto p-2">
+            {openItems.map((todo, index) => (
+              <TodoRow key={`open-${todo.description}-${index}`} todo={todo} />
+            ))}
+            {completedItems.map((todo, index) => (
+              <TodoRow key={`done-${todo.description}-${index}`} todo={todo} />
+            ))}
+          </ul>
         </ComposerOverlayShell>
       )}
     </div>
