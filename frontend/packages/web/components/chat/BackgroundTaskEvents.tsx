@@ -8,6 +8,8 @@ import type { BackgroundTaskEvent } from '@cubeplex/core'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { ASSISTANT_CONTENT_MAX_CLASS } from '@/lib/chatLayout'
+import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 interface BackgroundTaskEventsProps {
@@ -17,9 +19,11 @@ interface BackgroundTaskEventsProps {
 export function BackgroundTaskEventItem({
   event,
   conversationId,
+  className,
 }: {
   event: BackgroundTaskEvent
   conversationId: string
+  className?: string
 }) {
   const t = useTranslations('backgroundTasks')
   const openResult = usePanelStore((state) => state.openBackgroundTaskResult)
@@ -30,24 +34,28 @@ export function BackgroundTaskEventItem({
     ),
   )
   return (
-    <button
-      type="button"
-      onClick={() => openResult(conversationId, event)}
-      className="flex w-full max-w-full cursor-pointer items-center gap-2 text-xs
-          rounded-lg border border-transparent px-2 py-1 text-left leading-5
-          text-muted-foreground transition-colors hover:border-border/60 hover:bg-muted/55
-          hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <Terminal aria-hidden className="size-3.5 shrink-0 opacity-70" />
-      <span className="min-w-0 flex-1 truncate" title={task?.description || t('resultLabel')}>
-        <span className="font-medium text-foreground/90">{t('resultLabel')}</span>
-        {task?.description && (
-          <span className="ml-2 text-muted-foreground">{task.description}</span>
-        )}
-      </span>
-      <span className="shrink-0 text-2xs text-muted-foreground">{t(`events.${event.state}`)}</span>
-      <ChevronRight aria-hidden className="size-3 shrink-0" />
-    </button>
+    <div className={cn(ASSISTANT_CONTENT_MAX_CLASS, className)}>
+      <button
+        type="button"
+        onClick={() => openResult(conversationId, event)}
+        className="flex w-full max-w-full cursor-pointer items-center gap-2 text-xs
+            rounded-lg border border-transparent px-2 py-1 text-left leading-5
+            text-muted-foreground transition-colors hover:border-border/60 hover:bg-muted/55
+            hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Terminal aria-hidden className="size-3.5 shrink-0 opacity-70" />
+        <span className="min-w-0 flex-1 truncate" title={task?.description || t('resultLabel')}>
+          <span className="font-medium text-foreground/90">{t('resultLabel')}</span>
+          {task?.description && (
+            <span className="ml-2 text-muted-foreground">{task.description}</span>
+          )}
+        </span>
+        <span className="shrink-0 text-2xs text-muted-foreground">
+          {t(`events.${event.state}`)}
+        </span>
+        <ChevronRight aria-hidden className="size-3 shrink-0" />
+      </button>
+    </div>
   )
 }
 
