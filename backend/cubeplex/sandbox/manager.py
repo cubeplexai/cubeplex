@@ -1775,64 +1775,76 @@ class SandboxManager:
                     org_id=record.org_id,
                     workspace_id=record.workspace_id,
                 )
-                assert record.sandbox_id, "transient rows must have sandbox_id"
-                provider = self._provider_for_record(record)
                 try:
-                    state = await provider.inspect_state(record.sandbox_id)
-                except Exception as exc:
-                    logger.warning(
-                        "Reconciler: inspect_state failed for {}: {}",
-                        record.sandbox_id,
-                        exc,
-                    )
-                    await scoped.touch_provider_check(record.id)
-                    continue
-
-                if state is None:
-                    logger.warning(
-                        "Reconciler: provider reports {} gone (404 / NOT_FOUND); killing the row",
-                        record.sandbox_id,
-                    )
-                    await self._kill_record(session, scoped, record)
-                    await scoped.touch_provider_check(record.id)
-                    continue
-
-                if state == ProviderInstanceState.PAUSED:
-                    await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
-                elif state == ProviderInstanceState.RUNNING:
-                    last_active = (
-                        record.last_activity_at.replace(tzinfo=UTC)
-                        if record.last_activity_at.tzinfo is None
-                        else record.last_activity_at
-                    )
-                    pause_idle_age = (datetime.now(UTC) - last_active).total_seconds()
-                    if (
-                        record.status == "pausing"
-                        and pause_idle_age >= self._pause_attempt_grace_seconds
-                    ):
+                    if not record.sandbox_id:
                         logger.warning(
-                            "Reconciler: {} stuck pausing on no-op-pause backend "
-                            "(idle {}s >= grace {}s); killing instead of reverting",
+                            "Reconciler: transient row {} has no sandbox_id; skipping",
+                            record.id,
+                        )
+                        await scoped.touch_provider_check(record.id)
+                        continue
+                    try:
+                        provider = self._provider_for_record(record)
+                        state = await provider.inspect_state(record.sandbox_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Reconciler: inspect_state failed for {}: {}",
                             record.sandbox_id,
-                            int(pause_idle_age),
-                            self._pause_attempt_grace_seconds,
+                            exc,
+                        )
+                        await scoped.touch_provider_check(record.id)
+                        continue
+
+                    if state is None:
+                        logger.warning(
+                            "Reconciler: provider reports {} gone (404 / NOT_FOUND); killing row",
+                            record.sandbox_id,
                         )
                         await self._kill_record(session, scoped, record)
-                    else:
-                        await scoped.mark_running(
-                            record.id,
-                            last_resumed_at=(
-                                datetime.now(UTC) if record.status == "resuming" else None
-                            ),
-                        )
-                elif state == ProviderInstanceState.FAILED:
-                    await scoped.mark_failed_from_transient(record.id)
-                elif state == ProviderInstanceState.TERMINATED:
-                    await self._kill_record(session, scoped, record)
-                else:
-                    logger.debug("Reconciler: {} still {}", record.sandbox_id, state.value)
+                        await scoped.touch_provider_check(record.id)
+                        continue
 
-                await scoped.touch_provider_check(record.id)
+                    if state == ProviderInstanceState.PAUSED:
+                        await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
+                    elif state == ProviderInstanceState.RUNNING:
+                        last_active = (
+                            record.last_activity_at.replace(tzinfo=UTC)
+                            if record.last_activity_at.tzinfo is None
+                            else record.last_activity_at
+                        )
+                        pause_idle_age = (datetime.now(UTC) - last_active).total_seconds()
+                        if (
+                            record.status == "pausing"
+                            and pause_idle_age >= self._pause_attempt_grace_seconds
+                        ):
+                            logger.warning(
+                                "Reconciler: {} stuck pausing on no-op-pause backend "
+                                "(idle {}s >= grace {}s); killing instead of reverting",
+                                record.sandbox_id,
+                                int(pause_idle_age),
+                                self._pause_attempt_grace_seconds,
+                            )
+                            await self._kill_record(session, scoped, record)
+                        else:
+                            await scoped.mark_running(
+                                record.id,
+                                last_resumed_at=(
+                                    datetime.now(UTC) if record.status == "resuming" else None
+                                ),
+                            )
+                    elif state == ProviderInstanceState.FAILED:
+                        await scoped.mark_failed_from_transient(record.id)
+                    elif state == ProviderInstanceState.TERMINATED:
+                        await self._kill_record(session, scoped, record)
+                    else:
+                        logger.debug("Reconciler: {} still {}", record.sandbox_id, state.value)
+
+                    await scoped.touch_provider_check(record.id)
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "Reconciler: unexpected error reconciling {}",
+                        record.id,
+                    )
 
     async def _kill_record(
         self,

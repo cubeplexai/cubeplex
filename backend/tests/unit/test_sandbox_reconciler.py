@@ -401,3 +401,34 @@ async def test_reconcile_forwards_claim_timeout_to_repo_query(mock_encryption_ba
     repo_cls.list_transient_for_reconcile_system.assert_awaited_once()
     _, kwargs = repo_cls.list_transient_for_reconcile_system.call_args
     assert kwargs.get("claim_timeout") == 15
+
+
+@pytest.mark.asyncio
+async def test_reconcile_unknown_provider_logs_and_continues_remaining_rows(
+    mock_encryption_backend: Any,
+) -> None:
+    factory, _session = _make_session_factory()
+    registry, _provider = _make_registry(state=ProviderInstanceState.PAUSED)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
+    mgr._exchange_host = ""
+
+    unknown_record = _make_record(record_id="rec-bad", sandbox_id="sbx-bad", status="resuming")
+    unknown_record.provider = "removed-provider"
+    valid_record = _make_record(record_id="rec-ok", sandbox_id="sbx-ok", status="pausing")
+    valid_record.provider = "opensandbox"
+
+    scoped_bad = _scoped_repo()
+    scoped_ok = _scoped_repo()
+
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
+        repo_cls.list_transient_for_reconcile_system = AsyncMock(
+            return_value=[unknown_record, valid_record]
+        )
+        repo_cls.side_effect = [scoped_bad, scoped_ok]
+
+        await mgr.reconcile_transients(claim_timeout=0)
+
+    scoped_bad.touch_provider_check.assert_awaited_once_with(unknown_record.id)
+    scoped_bad.mark_paused.assert_not_called()
+    scoped_ok.mark_paused.assert_awaited_once()
+    scoped_ok.touch_provider_check.assert_awaited_once_with(valid_record.id)

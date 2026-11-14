@@ -656,6 +656,23 @@ async def test_reset_rootfs_protects_lease_activity_runs_kill_commands_and_handl
 
     monkeypatch.setattr(command_coordinator, "kill_sandbox_commands", _spy_kill)
 
+    orig_list_transient = UserSandboxRepository.list_transient_for_reconcile_system
+
+    async def _scoped_list_transient(
+        session: AsyncSession,
+        *,
+        claim_timeout: int = 60,
+    ) -> list[UserSandbox]:
+        # Run the real SQL query (including in_use_until filtering), isolated to this workspace.
+        rows = await orig_list_transient(session, claim_timeout=claim_timeout)
+        return [r for r in rows if r.workspace_id == ws_id]
+
+    monkeypatch.setattr(
+        UserSandboxRepository,
+        "list_transient_for_reconcile_system",
+        _scoped_list_transient,
+    )
+
     inspected_during_reset: list[str] = []
     orig_inspect = cpod.inspect_state
 
@@ -678,7 +695,7 @@ async def test_reset_rootfs_protects_lease_activity_runs_kill_commands_and_handl
             assert inflight.last_activity_at > old_activity
 
         await get_sandbox_manager().reconcile_transients(claim_timeout=0)
-        assert sandbox_id not in inspected_during_reset
+        assert inspected_during_reset == []
 
         await orig_reset_rootfs(target_id)
 

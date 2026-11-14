@@ -575,8 +575,17 @@ class CubePodProvider(SandboxProvider):
     def _request_timeout_seconds(self) -> float:
         return float(config.get("sandbox.request_timeout", 1860.0))
 
+    def _prune_closed_loops_locked(self) -> None:
+        closed_loops = [loop for loop in self._loop_states if loop.is_closed()]
+        for loop in closed_loops:
+            del self._loop_states[loop]
+        self._retired_clients = [
+            (loop, client) for loop, client in self._retired_clients if not loop.is_closed()
+        ]
+
     def _state_for_loop(self, loop: asyncio.AbstractEventLoop) -> _LoopClientState:
         with self._states_guard:
+            self._prune_closed_loops_locked()
             state = self._loop_states.get(loop)
             if state is None:
                 state = _LoopClientState(lock=asyncio.Lock())
@@ -600,6 +609,7 @@ class CubePodProvider(SandboxProvider):
                 return state.client
             if state.client is not None:
                 with self._states_guard:
+                    self._prune_closed_loops_locked()
                     self._retired_clients.append((loop, state.client))
             state.client = AsyncCubePod(
                 base_url=base_url,

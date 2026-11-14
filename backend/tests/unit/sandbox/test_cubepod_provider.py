@@ -845,6 +845,7 @@ def test_cubepod_provider_loop_bound_client_pool_and_request_timeout(
         assert states1 == [ProviderInstanceState.RUNNING] * 4
         assert len({id(c) for c in clients1}) == 1
         assert clients1[0]._client.timeout == httpx.Timeout(1860.0)
+        assert len(provider._loop_states) == 1
 
         async def _probe_second_loop() -> tuple[list[ProviderInstanceState], AsyncCubePod]:
             states = await asyncio.gather(
@@ -855,12 +856,28 @@ def test_cubepod_provider_loop_bound_client_pool_and_request_timeout(
             api_key = "k2"
             c_after = await provider._get_client()
             assert c_after is not c_before
-            await provider.aclose()
+            # Closed loop 1 must already be pruned when loop 2 registered.
+            assert len(provider._loop_states) <= 1
+            assert all(not lp.is_closed() for lp in provider._loop_states)
+            assert all(not lp.is_closed() for lp, _ in provider._retired_clients)
             return list(states), c_before
 
         states2, client_loop2 = asyncio.run(_probe_second_loop())
         assert states2 == [ProviderInstanceState.RUNNING] * 3
         assert client_loop2 is not clients1[0]
+
+        async def _probe_third_loop() -> list[ProviderInstanceState]:
+            states = [await provider.inspect_state("cpod-c-0")]
+            # Closed loop 2 and its unclosed retired client must be pruned on loop 3.
+            assert len(provider._loop_states) <= 1
+            assert all(not lp.is_closed() for lp in provider._loop_states)
+            assert provider._retired_clients == []
+            await provider.aclose()
+            assert len(provider._loop_states) == 0
+            return states
+
+        states3 = asyncio.run(_probe_third_loop())
+        assert states3 == [ProviderInstanceState.RUNNING]
     finally:
         server.shutdown()
         server.server_close()
