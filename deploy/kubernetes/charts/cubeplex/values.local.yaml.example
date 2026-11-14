@@ -96,7 +96,7 @@ rustfs:
 #   sandboxNamespace: "opensandbox"
 #   webhook:
 #     image:
-#       tag: "v0.9.4"                        # same release version as backend/frontend
+#       tag: "v0.9.5"                        # same release version as backend/frontend
 #     # MUST match opensandbox-server's configured egress.image exactly.
 #     # Chart default is the Aliyun release-1.1.1 image. If configToml overrides
 #     # [egress].image, this string has to be that same value.
