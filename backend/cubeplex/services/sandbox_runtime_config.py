@@ -127,16 +127,32 @@ def serialize_env_inventory(
     return out, truncated
 
 
+def _default_egress_proxy_supported() -> bool:
+    from cubeplex.config import config
+    from cubeplex.sandbox.registry import get_provider_registry
+
+    exchange_host = str(config.get("sandbox.egress_exchange_host", "") or "").strip()
+    if not exchange_host:
+        return False
+    return get_provider_registry().default().capabilities.egress_proxy
+
+
 async def resolve_env_inventory(
     session: AsyncSession,
     *,
     org_id: str,
     workspace_id: str,
     user_id: str,
+    egress_proxy_supported: bool | None = None,
 ) -> list[EnvInventoryItem]:
     """Winning valid rows only (same inject set as SandboxEnvResolver)."""
     repo = SandboxEnvRepository(session, org_id=org_id)
     rows = await repo.list_for_resolution(workspace_id=workspace_id, user_id=user_id)
+    can_proxy_secrets = (
+        _default_egress_proxy_supported()
+        if egress_proxy_supported is None
+        else egress_proxy_supported
+    )
     best: dict[str, Any] = {}
     for row in rows:
         cur = best.get(row.env_name)
@@ -144,12 +160,16 @@ async def resolve_env_inventory(
             best[row.env_name] = row
     items: list[EnvInventoryItem] = []
     for r in best.values():
+        raw_status = getattr(r, "status", None) or "valid"
+        status = (
+            "skipped_provider_unsupported" if r.is_secret and not can_proxy_secrets else raw_status
+        )
         items.append(
             EnvInventoryItem(
                 env_name=r.env_name,
                 kind="secret" if r.is_secret else "plain",
                 scope=r.scope,
-                status=getattr(r, "status", None) or "valid",
+                status=status,
                 hosts=list(r.hosts) if r.hosts is not None else None,
                 header_names=list(r.header_names) if r.header_names is not None else None,
             )
@@ -167,6 +187,7 @@ async def load_agent_view(
     default_image: str,
     max_rules: int = DEFAULT_MAX_RULES,
     max_env: int = DEFAULT_MAX_ENV,
+    egress_proxy_supported: bool | None = None,
 ) -> dict[str, Any]:
     """Load and serialize effective policy + env inventory for the agent tool.
 
@@ -181,12 +202,21 @@ async def load_agent_view(
         default_image=default_image,
     ).resolve()
     policy_source = POLICY_SOURCE_ORG_DB if policy_row is not None else POLICY_SOURCE_BUILT_IN
-    inventory = await resolve_env_inventory(
-        session,
-        org_id=org_id,
-        workspace_id=workspace_id,
-        user_id=user_id,
-    )
+    if egress_proxy_supported is None:
+        inventory = await resolve_env_inventory(
+            session,
+            org_id=org_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+    else:
+        inventory = await resolve_env_inventory(
+            session,
+            org_id=org_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            egress_proxy_supported=egress_proxy_supported,
+        )
     network = serialize_network_policy(policy, max_rules=max_rules, policy_source=policy_source)
     env_list, env_truncated = serialize_env_inventory(inventory, max_items=max_env)
     command_rules = serialize_command_rules(policy, max_rules=max_rules)

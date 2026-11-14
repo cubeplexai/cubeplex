@@ -52,9 +52,9 @@ async def test_touch_calls_renew_on_provider() -> None:
 
     mock_session = MagicMock()
     mock_repo = AsyncMock()
-    mock_raw = AsyncMock()
-    mock_raw.renew = AsyncMock()
-    mock_raw.close = AsyncMock()
+    mock_control = AsyncMock()
+    mock_control.renew_sandbox = AsyncMock()
+    mock_control.close = AsyncMock()
 
     @asynccontextmanager
     async def _session_cm():
@@ -64,7 +64,10 @@ async def test_touch_calls_renew_on_provider() -> None:
 
     with (
         patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=mock_repo),
-        patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=mock_raw),
+        patch(
+            "cubeplex.sandbox.providers.opensandbox.opensandbox.SandboxManager.create",
+            return_value=mock_control,
+        ),
     ):
         await mgr.touch(
             "sbx-123",
@@ -72,9 +75,10 @@ async def test_touch_calls_renew_on_provider() -> None:
             workspace_id="ws-1",
         )
 
-    mock_raw.renew.assert_called_once()
-    call_args = mock_raw.renew.call_args[0]
-    assert call_args[0].total_seconds() == 600
+    mock_control.renew_sandbox.assert_called_once()
+    call_args = mock_control.renew_sandbox.call_args[0]
+    assert call_args[0] == "sbx-123"
+    assert call_args[1].total_seconds() == 600
 
 
 @pytest.mark.asyncio
@@ -84,9 +88,9 @@ async def test_touch_renew_failure_is_nonfatal() -> None:
 
     mock_session = MagicMock()
     mock_repo = AsyncMock()
-    mock_raw = AsyncMock()
-    mock_raw.renew = AsyncMock(side_effect=Exception("server unavailable"))
-    mock_raw.close = AsyncMock()
+    mock_control = AsyncMock()
+    mock_control.renew_sandbox = AsyncMock(side_effect=Exception("server unavailable"))
+    mock_control.close = AsyncMock()
 
     @asynccontextmanager
     async def _session_cm():
@@ -96,7 +100,10 @@ async def test_touch_renew_failure_is_nonfatal() -> None:
 
     with (
         patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=mock_repo),
-        patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=mock_raw),
+        patch(
+            "cubeplex.sandbox.providers.opensandbox.opensandbox.SandboxManager.create",
+            return_value=mock_control,
+        ),
     ):
         # Should not raise
         await mgr.touch(

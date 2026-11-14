@@ -8,8 +8,6 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from opensandbox.exceptions import SandboxApiException as ProviderApiError
-from opensandbox.exceptions import SandboxException as ProviderSandboxError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask as ResponseCleanup
 
@@ -30,9 +28,13 @@ from cubeplex.models.background_task import TERMINAL_TASK_STATES, TaskStopReason
 from cubeplex.models.sandbox_command import SandboxCommand
 from cubeplex.repositories import ConversationRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
-from cubeplex.sandbox import SandboxError
+from cubeplex.sandbox import (
+    SandboxCapabilityUnsupportedError,
+    SandboxError,
+    SandboxFileTooLargeError,
+    close_sandbox_handle,
+)
 from cubeplex.sandbox.manager import get_sandbox_manager
-from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.services.background_task_query import (
     BackgroundTaskQueryService,
     InvalidBackgroundTaskCursorError,
@@ -300,56 +302,54 @@ async def get_background_task_output(
             if record is None or record.deleted_at is not None:
                 raise SandboxError("Original output storage unavailable")
             attachment = await manager.ensure_running(record.id)
+            sandbox = attachment.sandbox
+            stack.push_async_callback(close_sandbox_handle, sandbox)
             if attachment.user_sandbox_id != record.id:
                 raise SandboxError("Original output storage changed")
-            sandbox = attachment.sandbox
-            if isinstance(sandbox, OpenSandbox):
-                stack.push_async_callback(sandbox._sandbox.close)  # noqa: SLF001
         else:
             sandbox = await stack.enter_async_context(
                 manager.connect_command_instance(
                     command_id=command.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id
                 )
             )
-        if not isinstance(sandbox, OpenSandbox):
-            raise SandboxError("Task output requires OpenSandbox")
         if not path.is_relative_to(sandbox.workdir) or ".." in path.parts:
             raise HTTPException(status_code=400, detail="Output path outside sandbox workdir")
-        files = sandbox._sandbox.files  # noqa: SLF001
+        if download:
+            stream = await stack.enter_async_context(sandbox.stream_file(command.log_path))
+
+            async def output_chunks() -> AsyncIterator[bytes]:
+                try:
+                    async for chunk in stream:
+                        yield chunk
+                finally:
+                    await stack.aclose()
+
+            response = StreamingResponse(
+                output_chunks(),
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": content_disposition(path.name),
+                    "Cache-Control": "no-store",
+                },
+                background=ResponseCleanup(stack.aclose),
+            )
+            # StreamingResponse closes the observer after consuming the provider stream.
+            streaming = True
+            return response
         try:
-            if download:
-                stream = await files.read_bytes_stream(command.log_path)
-
-                async def output_chunks() -> AsyncIterator[bytes]:
-                    try:
-                        async for chunk in stream:
-                            yield chunk
-                    finally:
-                        await stack.aclose()
-
-                response = StreamingResponse(
-                    output_chunks(),
-                    media_type="text/plain",
-                    headers={
-                        "Content-Disposition": content_disposition(path.name),
-                        "Cache-Control": "no-store",
-                    },
-                    background=ResponseCleanup(stack.aclose),
-                )
-                # StreamingResponse closes the observer after consuming the provider stream.
-                streaming = True
-                return response
-            info = (await files.get_file_info([command.log_path])).get(command.log_path)
-            if info is not None and info.size > 1_048_576:
-                raise HTTPException(status_code=413, detail="Log too large; download full output")
-            return {"content": await files.read_file(command.log_path), "mime_type": "text/plain"}
-        except ProviderApiError as exc:
-            if exc.status_code == 404:
-                raise HTTPException(status_code=404, detail="Task output not found") from exc
-            raise
+            content = await sandbox.read_text(command.log_path, max_bytes=1_048_576)
+        except SandboxFileTooLargeError as exc:
+            raise HTTPException(
+                status_code=413, detail="Log too large; download full output"
+            ) from exc
+        return {"content": content, "mime_type": "text/plain"}
+    except HTTPException:
+        raise
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Task output not found") from exc
-    except (SandboxError, LookupError, ProviderSandboxError) as exc:
+    except SandboxCapabilityUnsupportedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except (SandboxError, LookupError) as exc:
         raise HTTPException(status_code=503, detail="Original task sandbox unavailable") from exc
     finally:
         if not streaming:

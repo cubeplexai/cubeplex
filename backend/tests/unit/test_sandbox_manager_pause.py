@@ -17,12 +17,35 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cubeplex.sandbox.base import SandboxCapabilities
 from cubeplex.sandbox.manager import SandboxManager
+from cubeplex.sandbox.registry import ProviderRegistry
+
+
+def _make_registry(
+    *,
+    pause_supported: bool = True,
+    pause_side_effect: object | None = None,
+    resume_return: object | None = None,
+    resume_side_effect: object | None = None,
+    terminate_side_effect: object | None = None,
+) -> tuple[ProviderRegistry, MagicMock]:
+    provider = MagicMock(name="FakeProvider")
+    provider.name = "opensandbox"
+    provider.capabilities = SandboxCapabilities(pause=pause_supported)
+    provider.default_workdir = "/workspace"
+    provider.default_image = "ubuntu:22.04"
+    provider.pause = AsyncMock(side_effect=pause_side_effect)
+    provider.resume = AsyncMock(return_value=resume_return, side_effect=resume_side_effect)
+    provider.terminate = AsyncMock(side_effect=terminate_side_effect)
+    return ProviderRegistry({"opensandbox": provider}, default_name="opensandbox"), provider
 
 
 def _make_session_factory() -> tuple[MagicMock, MagicMock]:
-    """Build a session_factory whose `async with ...()` yields a MagicMock session."""
     session = MagicMock(name="session")
+    empty_result = MagicMock()
+    empty_result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=empty_result)
 
     @asynccontextmanager
     async def _cm() -> Any:
@@ -45,6 +68,7 @@ def _make_record(
     record.sandbox_id = sandbox_id
     record.org_id = org_id
     record.workspace_id = workspace_id
+    record.provider = "opensandbox"
     return record
 
 
@@ -66,7 +90,8 @@ def manager(mock_encryption_backend: Any) -> SandboxManager:
 @pytest.mark.asyncio
 async def test_pause_idle_pauses_on_successful_claim(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, provider = _make_registry(pause_supported=True)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
     mgr._pause_on_idle = True  # exercise the pause path explicitly
 
@@ -78,40 +103,22 @@ async def test_pause_idle_pauses_on_successful_claim(mock_encryption_backend: An
     scoped_repo.mark_running = AsyncMock(return_value=True)
     scoped_repo.mark_terminated = AsyncMock()
 
-    raw_sandbox = MagicMock(name="raw_sandbox")
-    raw_sandbox.kill = AsyncMock()
-    raw_sandbox.close = AsyncMock()
-
-    backend = MagicMock(name="OpenSandbox-backend")
-    backend.supports_pause = MagicMock(return_value=True)
-    backend.pause = AsyncMock()
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-        patch("cubeplex.sandbox.manager.OpenSandbox") as backend_cls,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_idle_to_pause_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped_repo
-        op.Sandbox.connect = AsyncMock(return_value=raw_sandbox)
-        backend_cls.return_value = backend
 
         await mgr.pause_idle()
 
     scoped_repo.claim_pausing.assert_awaited_once_with(
         record.id, idle_ttl_seconds=mgr._idle_ttl_seconds
     )
-    backend.pause.assert_awaited_once()
+    provider.pause.assert_awaited_once_with(record.sandbox_id)
     # Per internals-note G1, pause() is async (202) — the row stays
     # `pausing` until the reconciler reads provider state and advances
     # it. pause_idle must NOT call mark_paused synchronously.
     scoped_repo.mark_paused.assert_not_called()
     scoped_repo.mark_terminated.assert_not_called()
     scoped_repo.mark_running.assert_not_called()
-    # Per internals-note G8, pause() does NOT tear down the SDK transport;
-    # pause_idle must close the raw handle to avoid leaking httpx clients
-    # across the long-running cleanup loop.
-    raw_sandbox.close.assert_awaited_once()
 
 
 # -------------------------------------------------------------------------
@@ -122,7 +129,8 @@ async def test_pause_idle_pauses_on_successful_claim(mock_encryption_backend: An
 @pytest.mark.asyncio
 async def test_pause_idle_skips_when_claim_pausing_false(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, provider = _make_registry(pause_supported=True)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
     mgr._pause_on_idle = True  # exercise the pause path explicitly
 
@@ -134,38 +142,31 @@ async def test_pause_idle_skips_when_claim_pausing_false(mock_encryption_backend
     scoped_repo.mark_running = AsyncMock()
     scoped_repo.mark_terminated = AsyncMock()
 
-    backend = MagicMock()
-    backend.supports_pause = MagicMock(return_value=True)
-    backend.pause = AsyncMock()
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-        patch("cubeplex.sandbox.manager.OpenSandbox") as backend_cls,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_idle_to_pause_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped_repo
-        op.Sandbox.connect = AsyncMock()
-        backend_cls.return_value = backend
 
         await mgr.pause_idle()
 
     scoped_repo.claim_pausing.assert_awaited_once()
-    backend.pause.assert_not_called()
-    op.Sandbox.connect.assert_not_called()
+    provider.pause.assert_not_called()
     scoped_repo.mark_paused.assert_not_called()
     scoped_repo.mark_terminated.assert_not_called()
 
 
 # -------------------------------------------------------------------------
-# (c) provider.pause() raises -> mark_running revert + kill fallback
+# (c) provider.pause() raises -> kill fallback without reverting to running
 # -------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_pause_idle_pause_raises_reverts_and_kills(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, provider = _make_registry(
+        pause_supported=True,
+        pause_side_effect=RuntimeError("boom"),
+    )
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
     mgr._pause_on_idle = True  # exercise the pause path explicitly
 
@@ -177,46 +178,32 @@ async def test_pause_idle_pause_raises_reverts_and_kills(mock_encryption_backend
     scoped_repo.mark_running = AsyncMock(return_value=True)
     scoped_repo.mark_terminated = AsyncMock()
 
-    raw_sandbox = MagicMock()
-    raw_sandbox.kill = AsyncMock()
-    raw_sandbox.close = AsyncMock()
-
-    backend = MagicMock()
-    backend.supports_pause = MagicMock(return_value=True)
-    backend.pause = AsyncMock(side_effect=RuntimeError("boom"))
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-        patch("cubeplex.sandbox.manager.OpenSandbox") as backend_cls,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_idle_to_pause_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped_repo
-        op.Sandbox.connect = AsyncMock(return_value=raw_sandbox)
-        backend_cls.return_value = backend
 
         await mgr.pause_idle()
 
-    backend.pause.assert_awaited_once()
+    provider.pause.assert_awaited_once_with(record.sandbox_id)
     scoped_repo.mark_paused.assert_not_called()
     # Don't flip the row back to `running` before killing — a concurrent
     # get_or_create could observe `running` and return a handle to a
     # sandbox we're about to terminate (codex P2 round 3).
     scoped_repo.mark_running.assert_not_called()
-    # _kill_record killed the sandbox and marked terminated.
-    raw_sandbox.kill.assert_awaited_once()
+    provider.terminate.assert_awaited_once_with(record.sandbox_id)
     scoped_repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
 
 
 # -------------------------------------------------------------------------
-# (e) supports_pause()==False -> kill path
+# (e) capabilities.pause==False -> kill path
 # -------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_pause_idle_no_capability_kills_record(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, provider = _make_registry(pause_supported=False)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
     mgr._pause_on_idle = True  # exercise the pause path explicitly
 
@@ -228,31 +215,17 @@ async def test_pause_idle_no_capability_kills_record(mock_encryption_backend: An
     scoped_repo.mark_running = AsyncMock(return_value=True)
     scoped_repo.mark_terminated = AsyncMock()
 
-    raw_sandbox = MagicMock()
-    raw_sandbox.kill = AsyncMock()
-    raw_sandbox.close = AsyncMock()
-
-    backend = MagicMock()
-    backend.supports_pause = MagicMock(return_value=False)
-    backend.pause = AsyncMock()
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-        patch("cubeplex.sandbox.manager.OpenSandbox") as backend_cls,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_idle_to_pause_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped_repo
-        op.Sandbox.connect = AsyncMock(return_value=raw_sandbox)
-        backend_cls.return_value = backend
 
         await mgr.pause_idle()
 
-    backend.pause.assert_not_called()
+    provider.pause.assert_not_called()
     # Same race rationale as the pause-failure path: never flip the
     # claimed row back to `running` before killing.
     scoped_repo.mark_running.assert_not_called()
-    raw_sandbox.kill.assert_awaited_once()
+    provider.terminate.assert_awaited_once_with(record.sandbox_id)
     scoped_repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
 
 
@@ -266,7 +239,10 @@ async def test_resume_record_marks_running_and_stamps_last_resumed_at(
     mock_encryption_backend: Any,
 ) -> None:
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    backend = MagicMock(name="OpenSandbox-backend")
+    backend.renew = AsyncMock()
+    registry, provider = _make_registry(resume_return=backend)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -278,24 +254,17 @@ async def test_resume_record_marks_running_and_stamps_last_resumed_at(
     repo.mark_failed = AsyncMock()
     repo.update_activity = AsyncMock()
 
-    backend = MagicMock(name="OpenSandbox-backend")
-
-    with patch(
-        "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
-        new=AsyncMock(return_value=backend),
-    ) as connect_or_resume:
-        result = await mgr._resume_record(
-            session,
-            repo,
-            record,
-            conn_config=MagicMock(),
-            org_id="org-1",
-            workspace_id="ws-1",
-            user_id="user-1",
-        )
+    result = await mgr._resume_record(
+        session,
+        repo,
+        record,
+        org_id="org-1",
+        workspace_id="ws-1",
+        user_id="user-1",
+    )
 
     assert result is backend
-    connect_or_resume.assert_awaited_once()
+    provider.resume.assert_awaited_once()
     repo.mark_resuming.assert_awaited_once_with(record.id)
     repo.mark_running.assert_awaited_once()
     _, kwargs = repo.mark_running.call_args
@@ -314,7 +283,10 @@ async def test_resume_record_recovers_when_reconciler_reverts_to_paused(
     re-claims ``paused -> resuming`` and the second ``mark_running`` wins.
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    backend = MagicMock(name="OpenSandbox-backend")
+    backend.renew = AsyncMock()
+    registry, _provider = _make_registry(resume_return=backend)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -326,27 +298,16 @@ async def test_resume_record_recovers_when_reconciler_reverts_to_paused(
     repo.mark_failed = AsyncMock()
     repo.update_activity = AsyncMock()
 
-    # Probe session re-fetches the row on a fresh session and observes the
-    # reconciler-reverted ``paused`` status.
     paused_view = _make_record()
     paused_view.status = "paused"
     probe_repo = MagicMock()
     probe_repo.get = AsyncMock(return_value=paused_view)
 
-    backend = MagicMock(name="OpenSandbox-backend")
-
-    with (
-        patch(
-            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
-            new=AsyncMock(return_value=backend),
-        ),
-        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo):
         result = await mgr._resume_record(
             session,
             repo,
             record,
-            conn_config=MagicMock(),
             org_id="org-1",
             workspace_id="ws-1",
             user_id="user-1",
@@ -369,7 +330,10 @@ async def test_resume_record_accepts_reconciler_won_running(mock_encryption_back
     would fail because the row is ``running``, not ``paused``).
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    backend = MagicMock(name="OpenSandbox-backend")
+    backend.renew = AsyncMock()
+    registry, _provider = _make_registry(resume_return=backend)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -386,20 +350,11 @@ async def test_resume_record_accepts_reconciler_won_running(mock_encryption_back
     probe_repo = MagicMock()
     probe_repo.get = AsyncMock(return_value=running_view)
 
-    backend = MagicMock(name="OpenSandbox-backend")
-
-    with (
-        patch(
-            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
-            new=AsyncMock(return_value=backend),
-        ),
-        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo):
         result = await mgr._resume_record(
             session,
             repo,
             record,
-            conn_config=MagicMock(),
             org_id="org-1",
             workspace_id="ws-1",
             user_id="user-1",
@@ -420,7 +375,10 @@ async def test_resume_record_returns_none_when_row_terminal(mock_encryption_back
     backend whose DB row disagrees with the provider.
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    backend = MagicMock(name="OpenSandbox-backend")
+    backend.close = AsyncMock()
+    registry, _provider = _make_registry(resume_return=backend)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -437,20 +395,11 @@ async def test_resume_record_returns_none_when_row_terminal(mock_encryption_back
     probe_repo = MagicMock()
     probe_repo.get = AsyncMock(return_value=failed_view)
 
-    backend = MagicMock(name="OpenSandbox-backend")
-
-    with (
-        patch(
-            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
-            new=AsyncMock(return_value=backend),
-        ),
-        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo):
         result = await mgr._resume_record(
             session,
             repo,
             record,
-            conn_config=MagicMock(),
             org_id="org-1",
             workspace_id="ws-1",
             user_id="user-1",
@@ -471,7 +420,10 @@ async def test_resume_record_recovery_bounce_tolerates_flapping_reconciler(
     (codex P2 round 14).
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    backend = MagicMock(name="OpenSandbox-backend")
+    backend.renew = AsyncMock()
+    registry, _provider = _make_registry(resume_return=backend)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -490,20 +442,11 @@ async def test_resume_record_recovery_bounce_tolerates_flapping_reconciler(
     repo.update_activity = AsyncMock()
     repo.mark_failed = AsyncMock()
 
-    backend = MagicMock(name="OpenSandbox-backend")
-
-    with (
-        patch(
-            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
-            new=AsyncMock(return_value=backend),
-        ),
-        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo):
         result = await mgr._resume_record(
             session,
             repo,
             record,
-            conn_config=MagicMock(),
             org_id="org-1",
             workspace_id="ws-1",
             user_id="user-1",
@@ -523,7 +466,10 @@ async def test_resume_record_recovery_gives_up_at_ceiling(mock_encryption_backen
     than livelocking. (codex P2 round 14 bounded-recovery requirement)
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    backend = MagicMock(name="OpenSandbox-backend")
+    backend.close = AsyncMock()
+    registry, _provider = _make_registry(resume_return=backend)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -540,20 +486,11 @@ async def test_resume_record_recovery_gives_up_at_ceiling(mock_encryption_backen
     repo.update_activity = AsyncMock()
     repo.mark_failed = AsyncMock()
 
-    backend = MagicMock(name="OpenSandbox-backend")
-
-    with (
-        patch(
-            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
-            new=AsyncMock(return_value=backend),
-        ),
-        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo),
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo):
         result = await mgr._resume_record(
             session,
             repo,
             record,
-            conn_config=MagicMock(),
             org_id="org-1",
             workspace_id="ws-1",
             user_id="user-1",
@@ -579,7 +516,8 @@ async def test_resume_record_exception_leaves_row_resuming_for_reconciler(
     (codex P1 round 13)
     """
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(resume_side_effect=RuntimeError("resume failed"))
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -592,19 +530,14 @@ async def test_resume_record_exception_leaves_row_resuming_for_reconciler(
     repo.mark_failed = AsyncMock()
     repo.update_activity = AsyncMock()
 
-    with patch(
-        "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
-        new=AsyncMock(side_effect=RuntimeError("resume failed")),
-    ):
-        result = await mgr._resume_record(
-            session,
-            repo,
-            record,
-            conn_config=MagicMock(),
-            org_id="org-1",
-            workspace_id="ws-1",
-            user_id="user-1",
-        )
+    result = await mgr._resume_record(
+        session,
+        repo,
+        record,
+        org_id="org-1",
+        workspace_id="ws-1",
+        user_id="user-1",
+    )
 
     assert result is None
     repo.mark_resuming.assert_awaited_once_with(record.id)
@@ -626,7 +559,8 @@ async def test_kill_record_marks_kill_pending_on_failure(
     mock_encryption_backend: Any,
 ) -> None:
     factory, session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(terminate_side_effect=RuntimeError("gone already"))
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record()
@@ -634,9 +568,7 @@ async def test_kill_record_marks_kill_pending_on_failure(
     scoped.mark_terminated = AsyncMock()
     scoped.mark_kill_pending = AsyncMock()
 
-    with patch("cubeplex.sandbox.manager.opensandbox") as op:
-        op.Sandbox.connect = AsyncMock(side_effect=RuntimeError("gone already"))
-        await mgr._kill_record(session, scoped, record, conn_config=MagicMock())
+    await mgr._kill_record(session, scoped, record)
 
     scoped.mark_kill_pending.assert_awaited_once_with(record.id)
     scoped.mark_terminated.assert_not_awaited()

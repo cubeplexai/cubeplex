@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from cubeplex.sandbox.base import SandboxCapabilities
+
 
 class SandboxPolicyOut(BaseModel):
     default_image: str
@@ -48,6 +50,34 @@ SandboxStatusValue = Literal[
 ]
 
 
+class SandboxCapabilitiesOut(BaseModel):
+    """Capabilities supported by the active/default sandbox provider."""
+
+    background: bool
+    reconnect: bool
+    persistent_volume: bool
+    pause: bool
+    reset_rootfs: bool
+    terminal: bool
+    browser: bool
+    egress_proxy: bool
+    network_policy: bool
+
+    @classmethod
+    def from_capabilities(cls, caps: SandboxCapabilities) -> "SandboxCapabilitiesOut":
+        return cls(
+            background=caps.background,
+            reconnect=caps.reconnect,
+            persistent_volume=caps.persistent_volume,
+            pause=caps.pause,
+            reset_rootfs=caps.reset_rootfs,
+            terminal=caps.terminal,
+            browser=caps.browser,
+            egress_proxy=caps.egress_proxy,
+            network_policy=caps.network_policy,
+        )
+
+
 class SandboxStatusOut(BaseModel):
     """Workspace-scope read-only sandbox status payload.
 
@@ -57,6 +87,8 @@ class SandboxStatusOut(BaseModel):
     """
 
     status: SandboxStatusValue
+    provider: str
+    capabilities: SandboxCapabilitiesOut
     default_image: str | None
     last_activity_at: str | None
     browser_url: str | None

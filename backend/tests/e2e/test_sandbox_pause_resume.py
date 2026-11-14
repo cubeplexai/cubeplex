@@ -34,8 +34,8 @@ from cubeplex.models import Organization, Workspace
 from cubeplex.models.user import User
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
-from cubeplex.sandbox.local import LocalSandbox
 from cubeplex.sandbox.manager import SandboxManager
+from cubeplex.sandbox.providers.local import LocalSandbox
 
 pytestmark = pytest.mark.e2e
 
@@ -344,7 +344,7 @@ async def test_browser_endpoint_after_resume(
     or if G11 blocks the pause."""
     # Try to start the browser; if the image doesn't have it, skip — this is
     # documented in spec OQ-3 / browser skill notes and is not a defect.
-    from cubeplex.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
     pre_backend = OpenSandbox(sandbox=sandbox_handle)
     try:

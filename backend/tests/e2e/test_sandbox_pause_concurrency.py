@@ -24,7 +24,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from cryptography.fernet import Fernet
-from opensandbox.config import ConnectionConfig
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -157,6 +156,7 @@ def _make_manager() -> tuple[SandboxManager, MagicMock]:
     mgr._resume_timeout = 5
     # Force the egress branch off — keeps the test focused on the race.
     mgr._exchange_host = ""
+    mgr._apply_egress = AsyncMock()  # type: ignore[method-assign]
     return mgr, poll_session
 
 
@@ -180,15 +180,14 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
     """Two overlapping ``_resume_record`` calls on a single paused row:
 
     - ``mark_resuming`` returns True once, False the second time.
-    - ``OpenSandbox.connect_or_resume`` is invoked exactly once (winner).
-    - The loser polls, observes ``running``, and uses
-      ``opensandbox.Sandbox.connect`` to attach to the *same* sandbox_id —
-      both calls return a handle wrapping that one sandbox.
+    - ``provider.resume`` is invoked exactly once (winner).
+    - The loser polls, observes ``running``, and uses ``provider.connect`` to
+      attach to the *same* sandbox_id — both calls return handles to that sandbox.
     """
     mgr, _poll_session = _make_manager()
     session = MagicMock(spec=AsyncSession)
     record = _paused_record(scope)
-    conn_config = ConnectionConfig(domain="example.invalid")
+    provider = mgr._registry.get("opensandbox")
 
     # Repo: mark_resuming wins once then loses; get() reports running once the
     # winner flips status. update_activity / mark_running are no-ops we just
@@ -203,17 +202,19 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
     repo.get = AsyncMock(return_value=running_view)
 
     winner_backend = MagicMock(name="winner_backend")
-    loser_raw = MagicMock(name="loser_raw_sandbox")
+    loser_backend = MagicMock(name="loser_backend")
 
     with (
-        patch(
-            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
+        patch.object(
+            provider,
+            "resume",
             new=AsyncMock(return_value=winner_backend),
-        ) as cor,
-        patch(
-            "cubeplex.sandbox.manager.opensandbox.Sandbox.connect",
-            new=AsyncMock(return_value=loser_raw),
-        ) as raw_connect,
+        ) as resume_fn,
+        patch.object(
+            provider,
+            "connect",
+            new=AsyncMock(return_value=loser_backend),
+        ) as connect_fn,
         # The loser's _await_resumed_by_winner constructs a fresh repo per
         # poll iteration so the identity-map cache can't hide the winner's
         # committed status. Redirect that construction to the test's repo.
@@ -224,7 +225,6 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
             session,
             repo,
             record,
-            conn_config,
             org_id=scope["org_id"],
             workspace_id=scope["workspace_id"],
             user_id=scope["user_id"],
@@ -233,7 +233,6 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
             session,
             repo,
             record,
-            conn_config,
             org_id=scope["org_id"],
             workspace_id=scope["workspace_id"],
             user_id=scope["user_id"],
@@ -241,16 +240,13 @@ async def test_double_resume_guard_winner_succeeds_loser_connects(
 
     assert repo.mark_resuming.await_count == 2
     # Provider resume ran exactly once (no duplicate sandbox creation).
-    assert cor.await_count == 1
+    assert resume_fn.await_count == 1
     # Loser attached to the same sandbox via plain connect — not a new resume.
-    assert raw_connect.await_count == 1
-    args, kwargs = raw_connect.await_args
+    assert connect_fn.await_count == 1
+    args, _kwargs = connect_fn.await_args
     assert args[0] == record.sandbox_id
-    # Winner got the resumed backend; loser got a fresh wrapper around the
-    # same underlying raw sandbox.
     assert winner is winner_backend
-    assert loser is not None
-    assert loser._sandbox is loser_raw
+    assert loser is loser_backend
 
 
 async def test_double_resume_guard_winner_fails_reconciler_settles_loser_bails(
@@ -261,12 +257,12 @@ async def test_double_resume_guard_winner_fails_reconciler_settles_loser_bails(
     ambiguous, so leave the row at ``resuming`` for the reconciler). The
     reconciler later observes provider ``Failed`` and marks the row
     ``failed``. The loser's wait helper observes ``failed`` and returns
-    None; no second ``connect_or_resume`` happens.
+    None; no second ``provider.resume`` happens.
     """
     mgr, _poll_session = _make_manager()
     session = MagicMock(spec=AsyncSession)
     record = _paused_record(scope)
-    conn_config = ConnectionConfig(domain="example.invalid")
+    provider = mgr._registry.get("opensandbox")
 
     # Sequence ``repo.get`` returns: the row sits at ``resuming`` while the
     # reconciler is still working, then becomes ``failed`` once the reconciler
@@ -289,21 +285,22 @@ async def test_double_resume_guard_winner_fails_reconciler_settles_loser_bails(
         raise RuntimeError("provider resume blew up")
 
     with (
-        patch(
-            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
+        patch.object(
+            provider,
+            "resume",
             new=AsyncMock(side_effect=_raise),
-        ) as cor,
-        patch(
-            "cubeplex.sandbox.manager.opensandbox.Sandbox.connect",
+        ) as resume_fn,
+        patch.object(
+            provider,
+            "connect",
             new=AsyncMock(),
-        ) as raw_connect,
+        ) as connect_fn,
         patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=repo),
     ):
         winner = await mgr._resume_record(
             session,
             repo,
             record,
-            conn_config,
             org_id=scope["org_id"],
             workspace_id=scope["workspace_id"],
             user_id=scope["user_id"],
@@ -312,7 +309,6 @@ async def test_double_resume_guard_winner_fails_reconciler_settles_loser_bails(
             session,
             repo,
             record,
-            conn_config,
             org_id=scope["org_id"],
             workspace_id=scope["workspace_id"],
             user_id=scope["user_id"],
@@ -321,9 +317,9 @@ async def test_double_resume_guard_winner_fails_reconciler_settles_loser_bails(
     assert winner is None
     assert loser is None
     # Provider was attempted exactly once (winner only).
-    assert cor.await_count == 1
+    assert resume_fn.await_count == 1
     # Loser observed terminal state via repo.get; no plain connect either.
-    assert raw_connect.await_count == 0
+    assert connect_fn.await_count == 0
     # Winner did NOT terminalize the row — reconciler owns that transition.
     repo.mark_failed_from_resuming.assert_not_called()
     repo.mark_failed.assert_not_called()
@@ -376,6 +372,7 @@ async def test_await_resumed_by_winner_takes_over_on_paused_revert(
     and completes the resume.
     """
     mgr, _poll_session = _make_manager()
+    provider = mgr._registry.get("opensandbox")
 
     paused_view = _paused_record(scope)
     paused_view.status = "paused"
@@ -392,15 +389,15 @@ async def test_await_resumed_by_winner_takes_over_on_paused_revert(
     backend = MagicMock(name="takeover_backend")
 
     with (
-        patch(
-            "cubeplex.sandbox.manager.OpenSandbox.connect_or_resume",
+        patch.object(
+            provider,
+            "resume",
             new=AsyncMock(return_value=backend),
-        ) as cor,
+        ) as resume_fn,
         patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=repo),
     ):
         result = await mgr._await_resumed_by_winner(
             paused_view.id,
-            ConnectionConfig(domain="example.invalid"),
             org_id=scope["org_id"],
             workspace_id=scope["workspace_id"],
             user_id=scope["user_id"],
@@ -408,5 +405,59 @@ async def test_await_resumed_by_winner_takes_over_on_paused_revert(
 
     # Loser took over and got back a live backend — no fallthrough to create.
     assert result is backend
-    cor.assert_awaited_once()
+    resume_fn.assert_awaited_once()
     repo.mark_resuming.assert_awaited()
+
+
+async def test_await_resumed_by_winner_uses_scoped_workdir(
+    scope: dict[str, str],
+) -> None:
+    """Race loser connecting after winner finishes must pass scope-resolved workdir."""
+    mgr, _poll_session = _make_manager()
+    mgr._volume_enabled = True
+    provider = mgr._registry.get("opensandbox")
+
+    running_view = _paused_record(scope)
+    running_view.status = "running"
+    running_view.provider = "opensandbox"
+
+    repo = MagicMock(spec=UserSandboxRepository)
+    repo.get = AsyncMock(return_value=running_view)
+
+    loser_backend = MagicMock(name="loser_backend")
+    expected_volume = mgr.scope_volume_key(
+        provider=provider,
+        workspace_id=scope["workspace_id"],
+        scope_type=running_view.scope_type,
+        scope_id=running_view.scope_id,
+    )
+    assert expected_volume is not None
+    scoped_workdir = f"/scoped/{expected_volume}"
+
+    with (
+        patch.object(
+            provider,
+            "resolve_workdir",
+            side_effect=lambda *, volume_key=None: (
+                f"/scoped/{volume_key}" if volume_key else "/scoped/root"
+            ),
+        ),
+        patch.object(
+            provider,
+            "connect",
+            new=AsyncMock(return_value=loser_backend),
+        ) as connect_fn,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=repo),
+    ):
+        result = await mgr._await_resumed_by_winner(
+            running_view.id,
+            org_id=scope["org_id"],
+            workspace_id=scope["workspace_id"],
+            user_id=scope["user_id"],
+        )
+
+    assert result is loser_backend
+    connect_fn.assert_awaited_once()
+    assert connect_fn.call_args is not None
+    assert connect_fn.call_args.kwargs["workdir"] == scoped_workdir
+    assert scoped_workdir != provider.default_workdir

@@ -10,11 +10,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from cubeplex.api.routes.v1.ws_sandbox import build_sandbox_status_out
 from cubeplex.api.schemas.execution import AccessRemovalResponse
-from cubeplex.api.schemas.sandbox_policy import (
-    SandboxStatusOut,
-    SandboxStatusValue,
-)
+from cubeplex.api.schemas.sandbox_policy import SandboxStatusOut
 from cubeplex.api.schemas.ws_topics import (
     ArchiveTopicResponse,
     TopicConversationCreateRequest,
@@ -37,6 +35,7 @@ from cubeplex.repositories.conversation_participant import (
 )
 from cubeplex.repositories.topic import TopicRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.sandbox.manager import get_sandbox_manager
 from cubeplex.services.avatar_store import resolve_avatar_url
 from cubeplex.services.conversation_execution import ConversationExecutionService
 from cubeplex.services.execution_signals import signal_stopped_runs
@@ -567,18 +566,7 @@ async def get_topic_sandbox_status(
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
+    manager = get_sandbox_manager()
     sandbox_repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
     row = await sandbox_repo.get_active_by_scope(scope_type="topic", scope_id=topic_id)
-    if row is None:
-        return SandboxStatusOut(
-            status="absent",
-            default_image=None,
-            last_activity_at=None,
-            browser_url=None,
-        )
-    return SandboxStatusOut(
-        status=cast(SandboxStatusValue, row.status),
-        default_image=row.image,
-        last_activity_at=utc_isoformat(row.last_activity_at),
-        browser_url=None,
-    )
+    return build_sandbox_status_out(manager, row)

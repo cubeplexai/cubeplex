@@ -63,6 +63,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         scope_id: str,
         volumes_config: dict[str, Any] | None = None,
         ttl_seconds: int = 3600,
+        provider: str = "opensandbox",
     ) -> UserSandbox:
         """Insert a provisioning placeholder row BEFORE provider create.
 
@@ -83,6 +84,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             user_id=user_id,
             sandbox_id="",  # set below once the row id is minted
             status="provisioning",
+            provider=provider,
             image=image,
             volumes_config=volumes_config,
             ttl_seconds=ttl_seconds,
@@ -129,7 +131,12 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         raise ValueError(f"sandbox record {record_id} cannot accept a provider instance")
 
     async def promote_to_running(
-        self, record_id: str, *, sandbox_id: str, image: str | None = None
+        self,
+        record_id: str,
+        *,
+        sandbox_id: str,
+        image: str | None = None,
+        provider: str | None = None,
     ) -> None:
         values: dict[str, Any] = {
             "sandbox_id": sandbox_id,
@@ -138,6 +145,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         }
         if image is not None:
             values["image"] = image
+        if provider is not None:
+            values["provider"] = provider
         stmt = (
             update(UserSandbox)
             .where(

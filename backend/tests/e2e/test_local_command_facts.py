@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from cubeplex.sandbox.base import ProcessHandle, ProcessSnapshot, SandboxError
-from cubeplex.sandbox.local import LocalSandbox
+from cubeplex.sandbox.providers.local import LocalSandbox
 
 
 async def finished(sandbox: LocalSandbox, handle: ProcessHandle) -> ProcessSnapshot:

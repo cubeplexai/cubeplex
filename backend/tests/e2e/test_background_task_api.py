@@ -603,10 +603,17 @@ async def test_task_output_reads_original_instance_and_downloads_large_logs(
 
     import opensandbox
 
-    from cubeplex.sandbox.manager import get_sandbox_manager
+    from cubeplex.config import config
     from tests.e2e.conftest import _FakeRaw
 
-    monkeypatch.setattr(get_sandbox_manager(), "_workdir", workdir)
+    original_get = config.get
+    monkeypatch.setattr(
+        config,
+        "get",
+        lambda key, default=None, **kw: (
+            workdir if key == "sandbox.workdir" else original_get(key, default, **kw)
+        ),
+    )
     client, workspace_id = authenticated_client
     reserved = await api_task_context.reserve(db_session)
     reserved.command.provider = "opensandbox"
@@ -666,7 +673,8 @@ async def test_task_output_reads_original_instance_and_downloads_large_logs(
     assert response.content == b"full large log"
     assert "attachment" in response.headers["content-disposition"]
     files.read_bytes_stream.assert_awaited_once_with(reserved.command.log_path)
-    assert raw.close.await_count == 3
+    # 1 create probe close + 3 per-request ensure_running attachment closes
+    assert raw.close.await_count == 4
 
 
 async def test_task_output_unavailable_never_connects_to_a_sandbox(

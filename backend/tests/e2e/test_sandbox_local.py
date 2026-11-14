@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from cubeplex.middleware.sandbox import SandboxMiddleware
-from cubeplex.sandbox.local import LocalSandbox
+from cubeplex.sandbox.providers.local import LocalSandbox
 
 
 @pytest.mark.asyncio

@@ -22,7 +22,6 @@ from cubeplex.utils import log
 
 _MIN_AUTH_SECRET_LENGTH = 32
 _AUTH_SECRET_PLACEHOLDERS = {"replace_me", "use env"}
-_SANDBOX_CONFIG_PLACEHOLDERS = {"replace_me", "use env"}
 
 
 def validate_auth_secrets() -> None:
@@ -53,28 +52,14 @@ def validate_auth_secrets() -> None:
 
 
 def validate_sandbox_config() -> None:
-    """Require a complete OpenSandbox configuration before accepting requests."""
+    """Validate sandbox master toggle and the active default provider configuration."""
     from cubeplex.config import config, get_command_default_timeout_seconds
+    from cubeplex.sandbox.registry import get_provider_registry
 
     if config.get("sandbox.enabled") is not True:
         raise RuntimeError("CUBEPLEX_SANDBOX__ENABLED must be true")
 
-    for setting, env_var in (
-        ("sandbox.domain", "CUBEPLEX_SANDBOX__DOMAIN"),
-        ("sandbox.image", "CUBEPLEX_SANDBOX__IMAGE"),
-        ("sandbox.api_key", "CUBEPLEX_SANDBOX__API_KEY"),
-    ):
-        raw_value = config.get(setting)
-        value = str(raw_value).strip() if raw_value is not None else ""
-        normalized_value = value.lower()
-        if not value:
-            raise RuntimeError(f"{env_var} is required")
-        if (
-            normalized_value.startswith("change_me")
-            or normalized_value in _SANDBOX_CONFIG_PLACEHOLDERS
-        ):
-            raise RuntimeError(f"{env_var} must not use a placeholder value")
-
+    get_provider_registry().default().validate_config()
     get_command_default_timeout_seconds()
 
 
@@ -659,6 +644,12 @@ async def lifespan(_app: FastAPI):  # type: ignore
     mcp_oauth_http_client = getattr(_app.state, "_mcp_oauth_http_client", None)
     if mcp_oauth_http_client is not None:
         await mcp_oauth_http_client.aclose()
+    from cubeplex.sandbox.registry import get_provider_registry
+
+    try:
+        await get_provider_registry().aclose()
+    except Exception as exc:
+        logger.warning("Provider registry close failed: {}", exc)
     logger.info("Shutdown phase 5/5: application shutdown complete")
     log.shutdown()
 

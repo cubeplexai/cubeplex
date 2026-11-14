@@ -48,11 +48,10 @@ def test_planned_new_name_matches_what_sandbox_manager_actually_mounts(
     """The whole point of building the names off shared helpers is so an
     operator who reads the dry-run output can trust that the renamed PVC
     will be the exact claim the new SandboxManager mounts. Verify by going
-    through SandboxManager._build_user_volume directly."""
+    through SandboxManager._build_user_volume_key directly."""
     manager = SandboxManager(MagicMock(), mock_encryption_backend)
     proposed = build_user_pvc_name(manager._volume_pvc_prefix, "ws-A", "user-1")
-    volume = manager._build_user_volume("ws-A", "user", "user-1")
-    actual = volume.pvc.claim_name  # type: ignore[union-attr]
+    actual = manager._build_user_volume_key("ws-A", "user", "user-1")
     assert proposed == actual
 
 

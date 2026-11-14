@@ -79,10 +79,19 @@ def upstream_port():
 @pytest.fixture
 def client(upstream_port: int, monkeypatch: pytest.MonkeyPatch):
     from cubeplex.api.routes import sandbox_panel
+    from cubeplex.sandbox.providers.opensandbox import OpenSandboxProvider
+    from cubeplex.sandbox.registry import ProviderRegistry
 
-    # Inject the upstream + token secret without touching global config, so the
-    # test is immune to whatever `sandbox.domain` other suite tests have cached.
-    monkeypatch.setattr(sandbox_panel, "_server_host", lambda: f"127.0.0.1:{upstream_port}")
+    # Inject a test-local registry/OpenSandboxProvider configured with the mock
+    # upstream port without touching global dynaconf state.
+    monkeypatch.setattr(
+        "cubeplex.sandbox.providers.opensandbox._configured_text",
+        lambda key, default="": (
+            f"127.0.0.1:{upstream_port}" if key == "sandbox.domain" else default
+        ),
+    )
+    registry = ProviderRegistry({"opensandbox": OpenSandboxProvider()}, default_name="opensandbox")
+    monkeypatch.setattr(sandbox_panel, "get_provider_registry", lambda: registry)
     monkeypatch.setattr(sandbox_panel, "get_panel_secret", lambda: _SECRET)
 
     app = FastAPI()

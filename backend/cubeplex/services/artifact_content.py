@@ -306,6 +306,7 @@ async def _best_effort_sandbox_write(
     try:
         from cubeplex.api.routes.v1.ws_sandbox import _resolve_sandbox_scope
         from cubeplex.repositories.user_sandbox import UserSandboxRepository
+        from cubeplex.sandbox.base import closing_sandbox
         from cubeplex.sandbox.manager import get_sandbox_manager
     except Exception:
         logger.exception("Sandbox imports failed for artifact content sync")
@@ -346,7 +347,8 @@ async def _best_effort_sandbox_write(
             org_id=org_id,
             workspace_id=workspace_id,
         )
-        await attachment.sandbox.upload([(write_path, content_bytes)])
+        async with closing_sandbox(attachment.sandbox) as sandbox:
+            await sandbox.upload([(write_path, content_bytes)])
         return True, None
     except Exception:
         logger.warning(

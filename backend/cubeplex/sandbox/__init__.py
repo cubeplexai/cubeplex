@@ -1,9 +1,67 @@
-"""Sandbox execution module"""
+"""Sandbox module exports."""
 
-from cubeplex.sandbox.base import SandboxError
-from cubeplex.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox.base import (
+    BrowserEndpoint,
+    ExecuteResult,
+    FileEntry,
+    ProcessHandle,
+    ProcessHandleNotFoundError,
+    ProcessOutput,
+    ProcessSnapshot,
+    Sandbox,
+    SandboxCapabilities,
+    SandboxCapabilityUnsupportedError,
+    SandboxConflictError,
+    SandboxError,
+    SandboxFileTooLargeError,
+    SandboxInstanceGoneError,
+    close_sandbox_handle,
+    closing_sandbox,
+)
+from cubeplex.sandbox.posix import PosixSandboxMixin
+from cubeplex.sandbox.provider import (
+    FALLBACK_SANDBOX_IMAGE,
+    PanelUpstream,
+    ProviderInstanceState,
+    RunIdentity,
+    SandboxCreateSpec,
+    SandboxProvider,
+    resolve_default_image,
+)
+from cubeplex.sandbox.registry import (
+    ProviderRegistry,
+    UnknownSandboxProviderError,
+    get_provider_registry,
+    reset_provider_registry,
+)
 
-__all__ = ["OpenSandbox", "SandboxError"]
-
-# SandboxManager is imported lazily to avoid circular imports.
-# Use cubeplex.sandbox.manager.get_sandbox_manager() to access.
+__all__ = [
+    "BrowserEndpoint",
+    "ExecuteResult",
+    "FALLBACK_SANDBOX_IMAGE",
+    "FileEntry",
+    "PanelUpstream",
+    "PosixSandboxMixin",
+    "ProcessHandle",
+    "ProcessHandleNotFoundError",
+    "ProcessOutput",
+    "ProcessSnapshot",
+    "ProviderInstanceState",
+    "ProviderRegistry",
+    "RunIdentity",
+    "Sandbox",
+    "SandboxCapabilities",
+    "SandboxCapabilityUnsupportedError",
+    "SandboxConflictError",
+    "SandboxCreateSpec",
+    "SandboxError",
+    "SandboxFileTooLargeError",
+    "SandboxInstanceGoneError",
+    "SandboxProvider",
+    "UnknownSandboxProviderError",
+    "close_sandbox_handle",
+    "closing_sandbox",
+    "get_provider_registry",
+    "reset_provider_registry",
+    "resolve_default_image",
+]

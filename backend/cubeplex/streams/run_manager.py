@@ -69,7 +69,9 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from cubeplex.models.conversation_execution import ConversationExecutionAdmission
+    from cubeplex.sandbox.lazy import LazySandbox
     from cubeplex.services.conversation_execution import RunExecutionBinding
+    from cubeplex.skills.service import SkillCatalogService
     from cubeplex.streams.steering_delivery import SteeringRunScope
 
 
@@ -4866,15 +4868,31 @@ class RunManager:
                     ]
 
                 from cubeplex.config import config as _sb_cfg
+                from cubeplex.sandbox.provider import resolve_default_image
+                from cubeplex.sandbox.registry import (
+                    UnknownSandboxProviderError,
+                    get_provider_registry,
+                )
                 from cubeplex.tools.builtin.sandbox_config import make_session_loader
 
-                _sb_default_image = str(_sb_cfg.get("sandbox.image", "ubuntu:22.04"))
+                try:
+                    _sb_provider = get_provider_registry().get(
+                        getattr(sandbox, "provider_name", None)
+                    )
+                except UnknownSandboxProviderError:
+                    _sb_provider = get_provider_registry().default()
+                _sb_default_image = resolve_default_image(_sb_provider)
+                _sb_egress_ok = (
+                    bool(str(_sb_cfg.get("sandbox.egress_exchange_host", "") or "").strip())
+                    and _sb_provider.capabilities.egress_proxy
+                )
                 _sb_config_loader = make_session_loader(
                     session_factory=async_session_maker,
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user_id,
                     default_image=_sb_default_image,
+                    egress_proxy_supported=_sb_egress_ok,
                 )
 
                 sandbox_mw = SandboxMiddleware(
@@ -5290,6 +5308,72 @@ class RunManager:
         # creator-mode (and the implicit default): topic creator's user scope.
         return "user", topic_owner, topic_owner
 
+    @classmethod
+    async def _build_lazy_sandbox(
+        cls,
+        ctx: RunContext,
+        *,
+        skill_catalog: SkillCatalogService | None,
+    ) -> LazySandbox:
+        """Create a ``LazySandbox`` with provider-resolved workdir and capabilities."""
+        from cubeplex.db.engine import async_session_maker as _sb_session_maker
+        from cubeplex.sandbox.lazy import LazySandbox
+        from cubeplex.sandbox.manager import get_sandbox_manager
+        from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
+
+        sandbox_manager = get_sandbox_manager()
+        scope_type, scope_id, owner_user_id = cls._resolve_sandbox_target(ctx)
+        provider, workdir = await sandbox_manager.resolve_scope_runtime(
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        return LazySandbox(
+            manager=sandbox_manager,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=owner_user_id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            workdir=workdir,
+            provider=provider,
+            catalog=skill_catalog,
+            event_service=UserSandboxSyncEventService(_sb_session_maker),
+        )
+
+    @staticmethod
+    async def _release_run_sandbox(
+        sandbox: Any,
+        *,
+        sandbox_manager: Any,
+        org_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Release the run's sandbox lease (if active) and close its client transport."""
+        if not sandbox:
+            return
+        from cubeplex.sandbox.base import close_sandbox_handle
+        from cubeplex.sandbox.lazy import LazySandbox
+
+        if isinstance(sandbox, LazySandbox):
+            if sandbox.initialized:
+                with suppress(Exception):
+                    await sandbox._manager.release(
+                        sandbox.id,
+                        org_id=org_id,
+                        workspace_id=workspace_id,
+                    )
+        elif sandbox_manager is not None:
+            with suppress(Exception):
+                await sandbox_manager.release(
+                    sandbox.id,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                )
+        with suppress(Exception):
+            await close_sandbox_handle(sandbox)
+
     async def _execute_run(
         self,
         *,
@@ -5504,28 +5588,7 @@ class RunManager:
                 sandbox_enabled = config.get("sandbox.enabled", False)
                 if sandbox_enabled:
                     try:
-                        from cubeplex.db.engine import async_session_maker as _sb_session_maker
-                        from cubeplex.sandbox.lazy import LazySandbox
-                        from cubeplex.sandbox.manager import get_sandbox_manager
-                        from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
-
-                        sandbox_manager = get_sandbox_manager()
-                        (
-                            sandbox_scope_type,
-                            sandbox_scope_id,
-                            sandbox_owner_user_id,
-                        ) = self._resolve_sandbox_target(ctx)
-                        sandbox = LazySandbox(
-                            manager=sandbox_manager,
-                            scope_type=sandbox_scope_type,
-                            scope_id=sandbox_scope_id,
-                            user_id=sandbox_owner_user_id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                            workdir=config.get("sandbox.workdir", "/workspace"),
-                            catalog=skill_catalog,
-                            event_service=UserSandboxSyncEventService(_sb_session_maker),
-                        )
+                        sandbox = await self._build_lazy_sandbox(ctx, skill_catalog=skill_catalog)
                     except Exception as exc:
                         logger.warning("Sandbox unavailable, continuing without: {}", exc)
                         await emit_status("sandbox_failed", detail=str(exc))
@@ -6005,23 +6068,12 @@ class RunManager:
                                         )
                                     await _notice_session.commit()
 
-            if sandbox:
-                from cubeplex.sandbox.lazy import LazySandbox
-
-                if isinstance(sandbox, LazySandbox) and sandbox.initialized:
-                    with suppress(Exception):
-                        await sandbox._manager.release(
-                            sandbox.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
-                elif sandbox_manager and not isinstance(sandbox, LazySandbox):
-                    with suppress(Exception):
-                        await sandbox_manager.release(
-                            sandbox.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
+            await self._release_run_sandbox(
+                sandbox,
+                sandbox_manager=sandbox_manager,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
 
             if catalog_session_ctx is not None:
                 with suppress(Exception):
@@ -6229,28 +6281,7 @@ class RunManager:
                 sandbox_enabled = config.get("sandbox.enabled", False)
                 if sandbox_enabled:
                     try:
-                        from cubeplex.db.engine import async_session_maker as _sb_session_maker
-                        from cubeplex.sandbox.lazy import LazySandbox
-                        from cubeplex.sandbox.manager import get_sandbox_manager
-                        from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
-
-                        sandbox_manager = get_sandbox_manager()
-                        (
-                            sandbox_scope_type,
-                            sandbox_scope_id,
-                            sandbox_owner_user_id,
-                        ) = self._resolve_sandbox_target(ctx)
-                        sandbox = LazySandbox(
-                            manager=sandbox_manager,
-                            scope_type=sandbox_scope_type,
-                            scope_id=sandbox_scope_id,
-                            user_id=sandbox_owner_user_id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                            workdir=config.get("sandbox.workdir", "/workspace"),
-                            catalog=skill_catalog,
-                            event_service=UserSandboxSyncEventService(_sb_session_maker),
-                        )
+                        sandbox = await self._build_lazy_sandbox(ctx, skill_catalog=skill_catalog)
                     except Exception as exc:
                         logger.warning("Sandbox unavailable, continuing without: {}", exc)
                         await emit_status("sandbox_failed", detail=str(exc))
@@ -6579,23 +6610,12 @@ class RunManager:
             except ValueError:
                 citation_event_queue.set(None)
 
-            if sandbox:
-                from cubeplex.sandbox.lazy import LazySandbox
-
-                if isinstance(sandbox, LazySandbox) and sandbox.initialized:
-                    with suppress(Exception):
-                        await sandbox._manager.release(
-                            sandbox.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
-                elif sandbox_manager and not isinstance(sandbox, LazySandbox):
-                    with suppress(Exception):
-                        await sandbox_manager.release(
-                            sandbox.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
+            await self._release_run_sandbox(
+                sandbox,
+                sandbox_manager=sandbox_manager,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
 
             if catalog_session_ctx is not None:
                 with suppress(Exception):

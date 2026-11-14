@@ -1,12 +1,12 @@
 """Internal egress secret-exchange endpoint (sidecar-authenticated)."""
 
+from contextlib import suppress
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.config import config as app_config
 from cubeplex.credentials.dependencies import get_encryption_backend
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.db import get_session
@@ -15,6 +15,8 @@ from cubeplex.repositories.credential import CredentialRepository
 from cubeplex.repositories.egress_ref import EgressRefRepository
 from cubeplex.repositories.sandbox_env import SandboxEnvRepository
 from cubeplex.repositories.sandbox_policy import SandboxPolicyRepository
+from cubeplex.sandbox.provider import SandboxProvider, resolve_default_image
+from cubeplex.sandbox.registry import UnknownSandboxProviderError, get_provider_registry
 from cubeplex.sandbox_env.exchange_auth import SidecarAuthenticator
 from cubeplex.sandbox_env.placeholder import PLACEHOLDER_RE
 from cubeplex.services.credential import CredentialService
@@ -50,8 +52,10 @@ def get_sidecar_authenticator(request: Request) -> SidecarAuthenticator:
     return request.app.state.sidecar_authenticator  # type: ignore[no-any-return]
 
 
-async def _lookup_org_id_by_sandbox(session: AsyncSession, sandbox_id: str) -> str | None:
-    """Unscoped sandbox_id → org_id (the sidecar cert only proves sandbox_id)."""
+async def _lookup_org_and_provider_by_sandbox(
+    session: AsyncSession, sandbox_id: str
+) -> tuple[str, str | None] | None:
+    """Unscoped sandbox_id → (org_id, provider) (sidecar cert only proves sandbox_id)."""
     from sqlalchemy import select
 
     stmt = select(UserSandbox).where(
@@ -59,21 +63,33 @@ async def _lookup_org_id_by_sandbox(session: AsyncSession, sandbox_id: str) -> s
     )
     result = await session.execute(stmt)
     row = result.scalar_one_or_none()
-    return row.org_id if row is not None else None
+    if row is None:
+        return None
+    return row.org_id, row.provider
 
 
-async def _resolve_egress_proxy_for_org(session: AsyncSession, org_id: str) -> str | None:
+async def _resolve_egress_proxy_for_org(
+    session: AsyncSession, org_id: str, *, provider: SandboxProvider | None = None
+) -> str | None:
     repo = SandboxPolicyRepository(session, org_id=org_id)
-    default_image = str(app_config.get("sandbox.image", "ubuntu:22.04"))
+    if provider is None:
+        with suppress(Exception):
+            provider = get_provider_registry().default()
+    default_image = resolve_default_image(provider)
     eff = await SandboxPolicyResolver(repo, default_image=default_image).resolve()
     return eff.egress_proxy
 
 
 async def _resolve_proxy_for_sandbox(session: AsyncSession, *, sandbox_id: str) -> str | None:
-    org_id = await _lookup_org_id_by_sandbox(session, sandbox_id)
-    if org_id is None:
+    found = await _lookup_org_and_provider_by_sandbox(session, sandbox_id)
+    if found is None:
         return None
-    return await _resolve_egress_proxy_for_org(session, org_id)
+    org_id, provider_name = found
+    provider: SandboxProvider | None = None
+    with suppress(UnknownSandboxProviderError, Exception):
+        registry = get_provider_registry()
+        provider = registry.get(provider_name) if provider_name else registry.default()
+    return await _resolve_egress_proxy_for_org(session, org_id, provider=provider)
 
 
 @router.get("/proxy-config", response_model=ProxyConfigOut)

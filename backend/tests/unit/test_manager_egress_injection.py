@@ -209,7 +209,7 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
     assert policy.default_action == "deny"
 
     # --- run env was set on the returned backend ---
-    from cubeplex.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
     assert isinstance(attachment, SandboxAttachment)
     sandbox = attachment.sandbox
@@ -310,7 +310,7 @@ async def test_reuse_path_sets_run_env_and_keeps_prior_refs_valid(
         )
 
     # run env must have been set on the returned backend
-    from cubeplex.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
     assert isinstance(attachment, SandboxAttachment)
     backend = attachment.sandbox
@@ -521,7 +521,7 @@ async def test_create_without_exchange_host_skips_injection(
     )
 
     # Backend has an empty run env (no egress injection)
-    from cubeplex.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
     assert isinstance(attachment, SandboxAttachment)
     backend = attachment.sandbox
@@ -777,8 +777,8 @@ async def test_cleanup_expired_revokes_refs(
             "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
             new=AsyncMock(return_value=None),
         ),
-        # Stub sandbox connect+kill so no real network call is made
-        patch("opensandbox.Sandbox.connect", return_value=AsyncMock()),
+        # Stub provider control-plane terminate so no real network call is made
+        patch("opensandbox.SandboxManager.create", new=AsyncMock(return_value=AsyncMock())),
     ):
         await manager.cleanup_expired()
 

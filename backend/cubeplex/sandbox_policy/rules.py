@@ -14,12 +14,28 @@ from __future__ import annotations
 
 import re
 import shlex
+from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from typing import Any, Literal, cast
 
-from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
-
 from cubeplex.sandbox_env.host_rules import canon_host
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxNetworkRule:
+    """CubePlex-owned network egress rule translated by capable providers."""
+
+    action: Literal["allow", "deny"]
+    target: str
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxNetworkPolicy:
+    """CubePlex-owned network egress policy translated by capable providers."""
+
+    default_action: Literal["allow", "deny"]
+    egress: tuple[SandboxNetworkRule, ...] = ()
+
 
 CommandAction = Literal["deny", "confirm", "allow"]
 _ACTION_RANK: dict[str, int] = {"deny": 0, "confirm": 1, "allow": 2}
@@ -205,7 +221,7 @@ def build_network_policy(
     admin_rules: list[dict[str, Any]] | None,
     default_action: str,
     force_allow_hosts: list[str],
-) -> NetworkPolicy:
+) -> SandboxNetworkPolicy:
     """Assemble the egress policy from admin rules + default action.
 
     ``force_allow_hosts`` (the credential-exchange host) are prepended as
@@ -221,13 +237,14 @@ def build_network_policy(
         key=lambda r: _host_specificity(str(r["target"])),
         reverse=True,
     )
-    egress = [
-        NetworkRule(
+    egress = tuple(
+        SandboxNetworkRule(
             action=cast(Literal["allow", "deny"], str(r["action"])),
             target=canon_host(str(r["target"])),
         )
         for r in ordered
-    ]
-    return NetworkPolicy(
-        defaultAction=cast(Literal["allow", "deny"], default_action), egress=egress
+    )
+    return SandboxNetworkPolicy(
+        default_action=cast(Literal["allow", "deny"], default_action),
+        egress=egress,
     )

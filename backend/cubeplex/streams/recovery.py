@@ -125,16 +125,22 @@ async def _kill_stranded_commands(run_ids: list[str]) -> None:
         return
     await _stop_managed_stranded_runs(run_ids)
     try:
+        from contextlib import AsyncExitStack
+
         from cubeplex.db.engine import async_session_maker
+        from cubeplex.sandbox.base import close_sandbox_handle
         from cubeplex.sandbox.command_coordinator import kill_run_commands, sandbox_from_row
     except Exception as exc:
         logger.warning("Could not import command killer for recovery: {}", exc)
         return
     try:
-        async with async_session_maker() as session:
+        async with async_session_maker() as session, AsyncExitStack() as stack:
 
             async def _get(row):  # type: ignore[no-untyped-def]
-                return await sandbox_from_row(row, session)
+                attached = await sandbox_from_row(row, session)
+                if attached is not None:
+                    stack.push_async_callback(close_sandbox_handle, attached)
+                return attached
 
             for run_id in run_ids:
                 try:

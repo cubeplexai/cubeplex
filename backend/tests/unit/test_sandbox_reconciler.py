@@ -18,9 +18,22 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from opensandbox.exceptions import SandboxApiException
 
 from cubeplex.sandbox.manager import SandboxManager
+from cubeplex.sandbox.provider import ProviderInstanceState
+from cubeplex.sandbox.registry import ProviderRegistry
+
+
+def _make_registry(
+    *,
+    state: ProviderInstanceState | None = ProviderInstanceState.PAUSED,
+    inspect_side_effect: Exception | None = None,
+) -> tuple[ProviderRegistry, MagicMock]:
+    provider = MagicMock(name="FakeProvider")
+    provider.name = "opensandbox"
+    provider.inspect_state = AsyncMock(return_value=state, side_effect=inspect_side_effect)
+    provider.terminate = AsyncMock()
+    return ProviderRegistry({"opensandbox": provider}, default_name="opensandbox"), provider
 
 
 def _make_session_factory() -> tuple[MagicMock, MagicMock]:
@@ -49,19 +62,13 @@ def _make_record(
     record.sandbox_id = sandbox_id
     record.org_id = org_id
     record.workspace_id = workspace_id
+    record.provider = "opensandbox"
     record.status = status
     # Default: fresh activity so the reconciler's G11 stuck-pausing-grace check
     # doesn't fire. Tests that exercise the grace-elapsed branch pass an old
     # value explicitly.
     record.last_activity_at = last_activity_at or datetime.now(UTC)
     return record
-
-
-def _info(state: str) -> MagicMock:
-    info = MagicMock(name="SandboxInfo")
-    info.status = MagicMock()
-    info.status.state = state
-    return info
 
 
 def _scoped_repo() -> MagicMock:
@@ -86,23 +93,16 @@ async def test_reconcile_pausing_with_provider_paused_marks_paused(
     mock_encryption_backend: Any,
 ) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(state=ProviderInstanceState.PAUSED)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record(status="pausing")
     scoped = _scoped_repo()
 
-    raw = MagicMock(name="raw_sandbox")
-    raw.get_info = AsyncMock(return_value=_info("Paused"))
-    raw.close = AsyncMock()
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -114,10 +114,6 @@ async def test_reconcile_pausing_with_provider_paused_marks_paused(
     scoped.mark_failed.assert_not_called()
     scoped.mark_terminated.assert_not_called()
     scoped.touch_provider_check.assert_awaited_once_with(record.id)
-    # G8 leak fix: the reconciler must close the probe handle after
-    # ``get_info``, otherwise the long-running cleanup loop accumulates
-    # httpx transports for every stuck transient row per tick.
-    raw.close.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -130,22 +126,16 @@ async def test_reconcile_pausing_with_provider_running_reverts_to_running(
     mock_encryption_backend: Any,
 ) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(state=ProviderInstanceState.RUNNING)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record(status="pausing")
     scoped = _scoped_repo()
 
-    raw = MagicMock()
-    raw.get_info = AsyncMock(return_value=_info("Running"))
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -175,7 +165,8 @@ async def test_reconcile_pausing_stuck_past_grace_kills_instead_of_reverting(
     ``_pause_attempt_grace_seconds``, the reconciler must kill it.
     """
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(state=ProviderInstanceState.RUNNING)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
     mgr._pause_attempt_grace_seconds = 60
 
@@ -186,17 +177,12 @@ async def test_reconcile_pausing_stuck_past_grace_kills_instead_of_reverting(
     )
     scoped = _scoped_repo()
 
-    raw = MagicMock()
-    raw.get_info = AsyncMock(return_value=_info("Running"))
-
     with (
         patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
         patch.object(mgr, "_kill_record", new=AsyncMock()) as kill_record,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -217,22 +203,16 @@ async def test_reconcile_resuming_with_provider_running_stamps_last_resumed_at(
     mock_encryption_backend: Any,
 ) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(state=ProviderInstanceState.RUNNING)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record(status="resuming")
     scoped = _scoped_repo()
 
-    raw = MagicMock()
-    raw.get_info = AsyncMock(return_value=_info("Running"))
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -250,22 +230,16 @@ async def test_reconcile_resuming_with_provider_running_stamps_last_resumed_at(
 @pytest.mark.asyncio
 async def test_reconcile_provider_failed_marks_failed(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(state=ProviderInstanceState.FAILED)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record(status="resuming")
     scoped = _scoped_repo()
 
-    raw = MagicMock()
-    raw.get_info = AsyncMock(return_value=_info("Failed"))
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -284,36 +258,25 @@ async def test_reconcile_provider_failed_marks_failed(mock_encryption_backend: A
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("provider_state", ["Terminated", "Succeed"])
+@pytest.mark.parametrize("provider_state", [ProviderInstanceState.TERMINATED])
 @pytest.mark.asyncio
 async def test_reconcile_provider_terminal_kills_record(
-    provider_state: str, mock_encryption_backend: Any
+    provider_state: ProviderInstanceState, mock_encryption_backend: Any
 ) -> None:
-    """``Terminated`` and the empirically-observed ``Succeed`` (internals
-    G3/G11) both indicate the provider sandbox is gone for good — the
-    reconciler kills the stuck transient row so a fresh sandbox replaces it
-    on the next request, rather than leaving it pinned forever.
-    """
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(state=provider_state)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record(status="pausing")
     scoped = _scoped_repo()
 
-    raw = MagicMock()
-    raw.get_info = AsyncMock(return_value=_info(provider_state))
-    raw.kill = AsyncMock()
-    raw.close = AsyncMock()
-
     with (
         patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
         patch.object(mgr, "_kill_record", new=AsyncMock()) as kill_record,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -325,32 +288,26 @@ async def test_reconcile_provider_terminal_kills_record(
 
 
 # ---------------------------------------------------------------------------
-# Pausing / Resuming / unknown -> no-op + touch only
+# Pausing / Resuming / unknown -> TRANSITIONAL -> no-op + touch only
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("state", ["Pausing", "Resuming", "", "Whatever"])
+@pytest.mark.parametrize("state", [ProviderInstanceState.TRANSITIONAL])
 @pytest.mark.asyncio
 async def test_reconcile_transient_or_unknown_is_noop_except_touch(
-    state: str, mock_encryption_backend: Any
+    state: ProviderInstanceState, mock_encryption_backend: Any
 ) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(state=state)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record(status="pausing")
     scoped = _scoped_repo()
 
-    raw = MagicMock()
-    raw.get_info = AsyncMock(return_value=_info(state))
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -362,29 +319,23 @@ async def test_reconcile_transient_or_unknown_is_noop_except_touch(
 
 
 # ---------------------------------------------------------------------------
-# get_info raises -> touch only, no transition
+# inspect_state raises -> touch only, no transition
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_reconcile_get_info_failure_just_bumps_touch(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(inspect_side_effect=RuntimeError("nope"))
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record(status="resuming")
     scoped = _scoped_repo()
 
-    raw = MagicMock()
-    raw.get_info = AsyncMock(side_effect=RuntimeError("nope"))
-
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -396,7 +347,7 @@ async def test_reconcile_get_info_failure_just_bumps_touch(mock_encryption_backe
 
 
 # ---------------------------------------------------------------------------
-# 404 / NOT_FOUND from provider -> kill the row (codex P1 round 14)
+# 404 / None -> kill the row (codex P1 round 14)
 # ---------------------------------------------------------------------------
 
 
@@ -404,28 +355,22 @@ async def test_reconcile_get_info_failure_just_bumps_touch(mock_encryption_backe
 async def test_reconcile_provider_404_kills_record(
     mock_encryption_backend: Any,
 ) -> None:
-    """When the provider returns 404 (pod GC'd out-of-band), the reconciler
+    """When the provider returns None (pod GC'd out-of-band), the reconciler
     must kill the row instead of leaving it transient forever."""
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry(state=None)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
     record = _make_record(status="resuming")
     scoped = _scoped_repo()
 
-    raw = MagicMock()
-    raw.get_info = AsyncMock(
-        side_effect=SandboxApiException("Not Found", status_code=404),
-    )
-
     with (
         patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox") as op,
         patch.object(mgr, "_kill_record", new=AsyncMock()) as kill_record,
     ):
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[record])
         repo_cls.return_value = scoped
-        op.Sandbox.connect = AsyncMock(return_value=raw)
 
         await mgr.reconcile_transients(claim_timeout=60)
 
@@ -444,13 +389,11 @@ async def test_reconcile_provider_404_kills_record(
 @pytest.mark.asyncio
 async def test_reconcile_forwards_claim_timeout_to_repo_query(mock_encryption_backend: Any) -> None:
     factory, _session = _make_session_factory()
-    mgr = SandboxManager(factory, mock_encryption_backend)
+    registry, _provider = _make_registry()
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
     mgr._exchange_host = ""
 
-    with (
-        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
-        patch("cubeplex.sandbox.manager.opensandbox"),
-    ):
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
         repo_cls.list_transient_for_reconcile_system = AsyncMock(return_value=[])
 
         await mgr.reconcile_transients(claim_timeout=15)
