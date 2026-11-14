@@ -97,6 +97,11 @@ class SandboxProvider(ABC):
         """Default runtime image/template name, or ``None`` when unconfigured."""
         ...
 
+    def resolve_workdir(self, *, volume_key: str | None = None) -> str:
+        """Return the deterministic sandbox workdir for *volume_key*."""
+        del volume_key
+        return self.default_workdir
+
     def validate_config(self) -> None:
         """Validate deployment-time settings required when this provider is default."""
         return
@@ -130,6 +135,8 @@ class SandboxProvider(ABC):
         timeout_seconds: int = 30,
     ) -> Sandbox:
         """Attach a short-timeout observer handle for background command recovery."""
+        if not self.capabilities.reconnect:
+            raise SandboxCapabilityUnsupportedError("reconnect", self.name)
         del timeout_seconds
         return await self.connect(sandbox_id)
 
@@ -185,3 +192,18 @@ class SandboxProvider(ABC):
     async def aclose(self) -> None:
         """Release any provider-owned pooled clients during shutdown."""
         return
+
+
+FALLBACK_SANDBOX_IMAGE = "ubuntu:22.04"
+
+
+def resolve_default_image(provider: SandboxProvider | None) -> str:
+    """Return *provider*'s default image, falling back to config or ``ubuntu:22.04``."""
+    if provider is not None:
+        provider_image = (provider.default_image or "").strip()
+        if provider_image:
+            return provider_image
+    from cubeplex.config import config
+
+    configured = str(config.get("sandbox.image", "") or "").strip()
+    return configured or FALLBACK_SANDBOX_IMAGE

@@ -15,16 +15,19 @@ from cubeplex.sandbox.base import (
     SandboxError,
     SandboxFileTooLargeError,
     SandboxInstanceGoneError,
+    close_sandbox_handle,
+    closing_sandbox,
 )
 from cubeplex.sandbox.posix import PosixSandboxMixin
 from cubeplex.sandbox.provider import (
+    FALLBACK_SANDBOX_IMAGE,
     PanelUpstream,
     ProviderInstanceState,
     RunIdentity,
     SandboxCreateSpec,
     SandboxProvider,
+    resolve_default_image,
 )
-from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 from cubeplex.sandbox.registry import (
     ProviderRegistry,
     UnknownSandboxProviderError,
@@ -35,8 +38,8 @@ from cubeplex.sandbox.registry import (
 __all__ = [
     "BrowserEndpoint",
     "ExecuteResult",
+    "FALLBACK_SANDBOX_IMAGE",
     "FileEntry",
-    "OpenSandbox",
     "PanelUpstream",
     "PosixSandboxMixin",
     "ProcessHandle",
@@ -56,6 +59,9 @@ __all__ = [
     "SandboxInstanceGoneError",
     "SandboxProvider",
     "UnknownSandboxProviderError",
+    "close_sandbox_handle",
+    "closing_sandbox",
     "get_provider_registry",
     "reset_provider_registry",
+    "resolve_default_image",
 ]

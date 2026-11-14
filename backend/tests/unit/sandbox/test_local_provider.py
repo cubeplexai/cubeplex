@@ -126,3 +126,26 @@ async def test_local_provider_lifecycle_and_unsupported_ops(tmp_path: Path) -> N
 
     with pytest.raises(SandboxInstanceGoneError):
         await provider.connect(sb.id)
+
+
+@pytest.mark.asyncio
+async def test_local_provider_connect_observer_raises_unsupported(
+    tmp_path: Path,
+) -> None:
+    provider = LocalSandboxProvider(base_workdir=str(tmp_path))
+    with pytest.raises(SandboxCapabilityUnsupportedError) as exc_info:
+        await provider.connect_observer("sbx-local-1")
+    assert exc_info.value.capability == "reconnect"
+    assert exc_info.value.provider == "local"
+
+
+@pytest.mark.asyncio
+async def test_local_provider_resolve_workdir_does_not_double_nest(
+    tmp_path: Path,
+) -> None:
+    provider = LocalSandboxProvider(base_workdir=str(tmp_path))
+    resolved = provider.resolve_workdir(volume_key="vol-1")
+    assert resolved == str(tmp_path / "vol-1")
+    sb = await provider.create(_spec(resolved, volume_key="vol-1"))
+    assert sb.workdir == resolved
+    assert provider.resolve_workdir(volume_key=None) == str(tmp_path)

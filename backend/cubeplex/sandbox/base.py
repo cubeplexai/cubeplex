@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from cubeplex.skills.sync_tar import SKILLS_DELTA_TGZ_PATH, build_extract_and_remove_cmd
 
@@ -394,3 +395,21 @@ class Sandbox(ABC):
             options=options or _ParseOptions(),
             conversation_id=conversation_id,
         )
+
+
+async def close_sandbox_handle(sandbox: Any) -> None:
+    """Close a request-scoped sandbox handle when it defines ``close()``."""
+    close_fn = getattr(sandbox, "close", None)
+    if callable(close_fn):
+        res = close_fn()
+        if inspect.isawaitable(res):
+            await res
+
+
+@asynccontextmanager
+async def closing_sandbox[T_Sandbox](sandbox: T_Sandbox) -> AsyncIterator[T_Sandbox]:
+    """Yield *sandbox* and always close it when exiting the context."""
+    try:
+        yield sandbox
+    finally:
+        await close_sandbox_handle(sandbox)

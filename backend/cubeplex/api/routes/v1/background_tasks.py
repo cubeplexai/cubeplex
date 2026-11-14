@@ -32,6 +32,7 @@ from cubeplex.sandbox import (
     SandboxCapabilityUnsupportedError,
     SandboxError,
     SandboxFileTooLargeError,
+    close_sandbox_handle,
 )
 from cubeplex.sandbox.manager import get_sandbox_manager
 from cubeplex.services.background_task_query import (
@@ -301,10 +302,10 @@ async def get_background_task_output(
             if record is None or record.deleted_at is not None:
                 raise SandboxError("Original output storage unavailable")
             attachment = await manager.ensure_running(record.id)
+            sandbox = attachment.sandbox
+            stack.push_async_callback(close_sandbox_handle, sandbox)
             if attachment.user_sandbox_id != record.id:
                 raise SandboxError("Original output storage changed")
-            sandbox = attachment.sandbox
-            stack.push_async_callback(sandbox.close)
         else:
             sandbox = await stack.enter_async_context(
                 manager.connect_command_instance(

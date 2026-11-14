@@ -7,11 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.api.schemas.sandbox_policy import SandboxPolicyOut, UpdateSandboxPolicyIn
 from cubeplex.auth.context import RequestContext
-from cubeplex.config import config
 from cubeplex.db.session import get_session
 from cubeplex.mcp.dependencies import get_admin_request_context
 from cubeplex.repositories.sandbox_policy import SandboxPolicyRepository
-from cubeplex.sandbox.provider import SandboxProvider
+from cubeplex.sandbox.provider import SandboxProvider, resolve_default_image
 from cubeplex.sandbox.registry import get_provider_registry
 from cubeplex.services.sandbox_policy import (
     SandboxPolicyResolver,
@@ -31,7 +30,7 @@ def _default_provider() -> SandboxProvider:
 
 
 def _default_image() -> str:
-    return _default_provider().default_image or str(config.get("sandbox.image", "ubuntu:22.04"))
+    return resolve_default_image(_default_provider())
 
 
 def _network_policy_capability_warnings(

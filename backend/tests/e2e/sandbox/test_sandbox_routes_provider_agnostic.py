@@ -16,8 +16,10 @@ from sqlalchemy.pool import NullPool
 
 from cubeplex.db.engine import _build_database_url
 from cubeplex.models.user_sandbox import UserSandbox
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox.manager import build_sandbox_pvc_name, get_sandbox_manager
 from cubeplex.sandbox.providers.local import LocalSandboxProvider
+from cubeplex.sandbox.providers.opensandbox import OpenSandboxProvider
 from cubeplex.sandbox.registry import ProviderRegistry
 
 
@@ -42,7 +44,9 @@ async def _sandbox_rows(ws_id: str) -> list[UserSandbox]:
     try:
         maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with maker() as session:
-            stmt = select(UserSandbox).where(UserSandbox.workspace_id == ws_id)  # type: ignore[arg-type]
+            stmt = select(UserSandbox).where(
+                UserSandbox.workspace_id == ws_id  # type: ignore[arg-type]
+            )
             return list((await session.execute(stmt)).scalars().all())
     finally:
         await engine.dispose()
@@ -199,3 +203,129 @@ async def test_local_provider_status_capability_gating_files_and_share(
     )
     assert policy_put.status_code == 200, policy_put.text
     assert any("does not enforce" in w for w in policy_put.json()["warnings"])
+
+
+async def _get_org_id(ws_id: str) -> str:
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            from sqlalchemy import text
+
+            val = (
+                await session.execute(
+                    text("SELECT org_id FROM workspaces WHERE id = :w"), {"w": ws_id}
+                )
+            ).scalar_one()
+            return str(val)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("stale_status", ["terminated", "failed"])
+async def test_terminated_and_failed_rows_resolve_default_provider_not_stale_provider(
+    admin_client_with_user_id: tuple[httpx.AsyncClient, str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stale_status: str,
+) -> None:
+    """Terminated/failed rows revive on default_provider, so status/pre-gates follow it."""
+    client, ws_id, user_id = admin_client_with_user_id
+    local_provider = LocalSandboxProvider(base_workdir=str(tmp_path))
+    opensandbox_provider = OpenSandboxProvider()
+    registry = ProviderRegistry(
+        {"local": local_provider, "opensandbox": opensandbox_provider},
+        default_name="local",
+    )
+    manager = get_sandbox_manager()
+    monkeypatch.setattr(manager, "_registry", registry)
+    monkeypatch.setattr(
+        "cubeplex.api.routes.v1.admin_sandbox_policy.get_provider_registry",
+        lambda: registry,
+    )
+
+    org_id = await _get_org_id(ws_id)
+    topic_resp = await client.post(
+        f"/api/v1/ws/{ws_id}/topics",
+        json={"title": f"Revivable {stale_status} topic"},
+    )
+    assert topic_resp.status_code in (200, 201), topic_resp.text
+    topic_id = topic_resp.json()["topic"]["id"]
+
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=ws_id)
+            for sc_type, sc_id in [("user", user_id), ("topic", topic_id)]:
+                row = await repo.reserve(
+                    user_id=user_id,
+                    image="legacy:1",
+                    scope_type=sc_type,
+                    scope_id=sc_id,
+                    provider="opensandbox",
+                )
+                await repo.promote_to_running(
+                    row.id,
+                    sandbox_id=f"sbx-stale-{stale_status}-{sc_type}-{user_id[-4:]}",
+                    image="legacy:1",
+                    provider="opensandbox",
+                )
+                if stale_status == "terminated":
+                    await repo.mark_terminated(row.id, clear_sandbox_id=True)
+                else:
+                    await repo.mark_failed(row.id)
+    finally:
+        await engine.dispose()
+
+    expected_caps = {
+        "background": True,
+        "reconnect": False,
+        "persistent_volume": True,
+        "pause": False,
+        "reset_rootfs": False,
+        "terminal": False,
+        "browser": False,
+        "egress_proxy": False,
+        "network_policy": False,
+    }
+
+    # Both ws and topic status routes surface current status with default_provider.
+    ws_status = await client.get(f"/api/v1/ws/{ws_id}/sandbox/status")
+    assert ws_status.status_code == 200, ws_status.text
+    assert ws_status.json()["status"] == stale_status
+    assert ws_status.json()["provider"] == "local"
+    assert ws_status.json()["capabilities"] == expected_caps
+
+    topic_status = await client.get(f"/api/v1/ws/{ws_id}/topics/{topic_id}/sandbox")
+    assert topic_status.status_code == 200, topic_status.text
+    assert topic_status.json()["status"] == stale_status
+    assert topic_status.json()["provider"] == "local"
+    assert topic_status.json()["capabilities"] == expected_caps
+
+    # Capability pre-gates reject terminal/browser with 501 for 'local' without reviving.
+    term_resp = await client.get(f"/api/v1/ws/{ws_id}/sandbox/terminal")
+    assert term_resp.status_code == 501
+    browser_resp = await client.get(f"/api/v1/ws/{ws_id}/browser/live-view")
+    assert browser_resp.status_code == 501
+    rows_before = await _sandbox_rows(ws_id)
+    assert all(r.status == stale_status for r in rows_before)
+
+    # Local workdir passes pre-validation (no stale /workspace block) and revives on local.
+    volume_key = build_sandbox_pvc_name(
+        manager._volume_pvc_prefix,
+        ws_id,
+        "user",
+        user_id,
+    )
+    revived_path = Path(local_provider.default_workdir) / volume_key / "revived.txt"
+    up_resp = await client.post(
+        f"/api/v1/ws/{ws_id}/sandbox/files/upload",
+        params={"path": str(revived_path)},
+        files={"file": ("revived.txt", b"revived on local", "text/plain")},
+    )
+    assert up_resp.status_code == 200, up_resp.text
+    user_rows = [r for r in await _sandbox_rows(ws_id) if r.scope_type == "user"]
+    assert len(user_rows) == 1
+    assert user_rows[0].status == "running"
+    assert user_rows[0].provider == "local"

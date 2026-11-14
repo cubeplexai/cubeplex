@@ -1,4 +1,4 @@
-"""Unit tests for Unit 2: OpenSandboxProvider, OpenSandbox data-plane extensions, and ProviderRegistry."""
+"""Unit tests for Unit 2: OpenSandboxProvider, data-plane extensions, and ProviderRegistry."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.filesystem import EntryInfo
 
 from cubeplex.sandbox.base import (
+    SandboxCapabilities,
     SandboxCapabilityUnsupportedError,
     SandboxError,
     SandboxFileTooLargeError,
@@ -22,6 +23,7 @@ from cubeplex.sandbox.provider import (
     RunIdentity,
     SandboxCreateSpec,
     SandboxProvider,
+    resolve_default_image,
 )
 from cubeplex.sandbox.providers.opensandbox import OpenSandbox, OpenSandboxProvider
 from cubeplex.sandbox.registry import (
@@ -259,11 +261,13 @@ async def test_opensandbox_provider_create_orders_on_created_closes_raw_and_rebi
     net_pol = ckwargs["network_policy"]  # type: ignore[index]
     assert net_pol.default_action == "deny"
     assert [(r.action, r.target) for r in net_pol.egress] == [("allow", "api.github.com")]
-    assert ckwargs["connection_config"].request_timeout.total_seconds() == 300  # type: ignore[index]
+    c_conn = ckwargs["connection_config"]  # type: ignore[index]
+    assert c_conn.request_timeout.total_seconds() == 300
 
     rebind_kwargs = captured["connect_kwargs"]
     assert rebind_kwargs["skip_health_check"] is True  # type: ignore[index]
-    assert rebind_kwargs["connection_config"].request_timeout.total_seconds() == 1860  # type: ignore[index]
+    r_conn = rebind_kwargs["connection_config"]  # type: ignore[index]
+    assert r_conn.request_timeout.total_seconds() == 1860
 
 
 @pytest.mark.asyncio
@@ -399,3 +403,98 @@ async def test_opensandbox_observer_404_and_inspect_503_are_not_instance_gone() 
     sb = OpenSandbox(sandbox=raw)
     assert await sb.read_text("/workspace/log.txt", max_bytes=1024) == "body"
     raw.files.read_file.assert_awaited_once_with("/workspace/log.txt")
+
+
+@pytest.mark.asyncio
+async def test_base_provider_connect_observer_requires_reconnect_capability() -> None:
+    class _NoReconnectProvider(SandboxProvider):
+        @property
+        def name(self) -> str:
+            return "noreconnect"
+
+        @property
+        def capabilities(self) -> SandboxCapabilities:
+            return SandboxCapabilities(reconnect=False)
+
+        @property
+        def default_workdir(self) -> str:
+            return "/work"
+
+        @property
+        def default_image(self) -> str | None:
+            return None
+
+        async def create(  # type: ignore[override]
+            self, spec: SandboxCreateSpec, *, on_created=None
+        ):
+            raise NotImplementedError
+
+        async def connect(  # type: ignore[override]
+            self, sandbox_id: str, **_kwargs: object
+        ):
+            raise AssertionError("connect must not be called when reconnect=False")
+
+        async def inspect_state(self, sandbox_id: str) -> ProviderInstanceState | None:
+            return None
+
+        async def terminate(self, sandbox_id: str) -> None:
+            return None
+
+    provider = _NoReconnectProvider()
+    with pytest.raises(SandboxCapabilityUnsupportedError) as exc_info:
+        await provider.connect_observer("sbx-1")
+    assert exc_info.value.capability == "reconnect"
+    assert exc_info.value.provider == "noreconnect"
+
+
+def test_sandbox_package_does_not_reexport_opensandbox_and_default_image_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import cubeplex.sandbox as sandbox_pkg
+    from cubeplex.config import config
+
+    assert "OpenSandbox" not in sandbox_pkg.__all__
+    assert not hasattr(sandbox_pkg, "OpenSandbox")
+
+    monkeypatch.setattr(config, "get", lambda k, d=None: "cfg-img:1" if k == "sandbox.image" else d)
+    assert resolve_default_image(None) == "cfg-img:1"
+    monkeypatch.setattr(config, "get", lambda k, d=None: "" if k == "sandbox.image" else d)
+    assert resolve_default_image(None) == "ubuntu:22.04"
+    monkeypatch.setattr(config, "get", lambda k, d=None: "img:x" if k == "sandbox.image" else d)
+    assert resolve_default_image(OpenSandboxProvider()) == "img:x"
+
+
+@pytest.mark.asyncio
+async def test_internal_egress_policy_resolution_uses_provider_default_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.api.routes import internal_egress
+    from cubeplex.config import config
+
+    monkeypatch.setattr(
+        config,
+        "get",
+        lambda k, d=None: "local" if k == "sandbox.provider" else d,
+    )
+    reset_provider_registry()
+    seen: list[str] = []
+
+    class _Resolver:
+        def __init__(self, repo: object, *, default_image: str) -> None:
+            del repo
+            seen.append(default_image)
+
+        async def resolve(self) -> SimpleNamespace:
+            return SimpleNamespace(egress_proxy="http://proxy.internal:3128")
+
+    monkeypatch.setattr(internal_egress, "SandboxPolicyRepository", lambda *_a, **_k: object())
+    monkeypatch.setattr(internal_egress, "SandboxPolicyResolver", _Resolver)
+    try:
+        proxy = await internal_egress._resolve_egress_proxy_for_org(
+            object(),  # type: ignore[arg-type]
+            "org-1",
+        )
+        assert proxy == "http://proxy.internal:3128"
+        assert seen == ["local"]
+    finally:
+        reset_provider_registry()

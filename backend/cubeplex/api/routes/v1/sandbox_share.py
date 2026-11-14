@@ -23,7 +23,11 @@ from loguru import logger
 from starlette.background import BackgroundTask
 
 from cubeplex.cache import RedisHandle, redis_dep
-from cubeplex.sandbox import SandboxCapabilityUnsupportedError, SandboxError
+from cubeplex.sandbox import (
+    SandboxCapabilityUnsupportedError,
+    SandboxError,
+    close_sandbox_handle,
+)
 from cubeplex.sandbox.manager import get_sandbox_manager
 
 router = APIRouter(prefix="/public/sandbox", tags=["sandbox-share"])
@@ -56,6 +60,7 @@ async def sandbox_file_download(
     try:
         attachment = await manager.ensure_running(user_sandbox_id)
         sandbox = attachment.sandbox
+        stack.push_async_callback(close_sandbox_handle, sandbox)
         stream = await stack.enter_async_context(sandbox.stream_file(file_path))
 
         async def chunks() -> AsyncIterator[bytes]:

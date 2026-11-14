@@ -37,12 +37,15 @@ from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
 from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.db.session import get_session
+from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox import (
     SandboxCapabilities,
     SandboxCapabilityUnsupportedError,
     SandboxError,
     SandboxFileTooLargeError,
+    close_sandbox_handle,
+    closing_sandbox,
 )
 from cubeplex.sandbox.manager import SandboxManager, get_sandbox_manager
 from cubeplex.sandbox.provider import SandboxProvider
@@ -70,6 +73,38 @@ def resolve_provider_and_caps(
     return (provider_name or "unknown", SandboxCapabilities())
 
 
+def resolve_row_provider_and_caps(
+    manager: SandboxManager, row: UserSandbox | None
+) -> tuple[str, SandboxCapabilities]:
+    """Return ``(provider_name, capabilities)`` for *row* or default for revivable rows."""
+    if row is None or row.status in ("terminated", "failed"):
+        provider = manager.default_provider
+        return provider.name, provider.capabilities
+    return resolve_provider_and_caps(manager, row.provider)
+
+
+def build_sandbox_status_out(manager: SandboxManager, row: UserSandbox | None) -> SandboxStatusOut:
+    """Serialize *row* (or absent state) into ``SandboxStatusOut``."""
+    provider_name, caps = resolve_row_provider_and_caps(manager, row)
+    if row is None:
+        return SandboxStatusOut(
+            status="absent",
+            provider=provider_name,
+            capabilities=SandboxCapabilitiesOut.from_capabilities(caps),
+            default_image=None,
+            last_activity_at=None,
+            browser_url=None,
+        )
+    return SandboxStatusOut(
+        status=cast(SandboxStatusValue, row.status),
+        provider=provider_name,
+        capabilities=SandboxCapabilitiesOut.from_capabilities(caps),
+        default_image=row.image,
+        last_activity_at=utc_isoformat(row.last_activity_at),
+        browser_url=None,
+    )
+
+
 async def resolve_scope_provider(
     session: AsyncSession | None,
     manager: SandboxManager,
@@ -79,12 +114,12 @@ async def resolve_scope_provider(
     scope_type: str,
     scope_id: str,
 ) -> SandboxProvider | None:
-    """Resolve the provider that owns an active scope row, or the default provider."""
+    """Resolve the active provider for a scope, defaulting for absent/revivable rows."""
     registry = getattr(manager, "registry", None)
     if session is not None and registry is not None:
         repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
         row = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
-        if row is not None:
+        if row is not None and row.status not in ("terminated", "failed"):
             try:
                 return cast(SandboxProvider, registry.get(row.provider))
             except UnknownSandboxProviderError:
@@ -237,25 +272,7 @@ async def get_sandbox_status(
         session, ctx, conversation_id
     )
     row = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
-    if row is None:
-        provider = manager.default_provider
-        return SandboxStatusOut(
-            status="absent",
-            provider=provider.name,
-            capabilities=SandboxCapabilitiesOut.from_capabilities(provider.capabilities),
-            default_image=None,
-            last_activity_at=None,
-            browser_url=None,
-        )
-    provider_name, caps = resolve_provider_and_caps(manager, row.provider)
-    return SandboxStatusOut(
-        status=cast(SandboxStatusValue, row.status),
-        provider=provider_name,
-        capabilities=SandboxCapabilitiesOut.from_capabilities(caps),
-        default_image=row.image,
-        last_activity_at=utc_isoformat(row.last_activity_at),
-        browser_url=None,
-    )
+    return build_sandbox_status_out(manager, row)
 
 
 # ── File listing ────────────────────────────────────────────────────
@@ -299,18 +316,18 @@ async def list_sandbox_files(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        sandbox = attachment.sandbox
-        normalized = (
-            posixpath.normpath(sandbox.workdir)
-            if path is None
-            else _validate_path_within(path, sandbox.workdir)
-        )
-        await manager.touch(
-            sandbox.id,
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
-        )
-        entries = await sandbox.list_dir(normalized)
+        async with closing_sandbox(attachment.sandbox) as sandbox:
+            normalized = (
+                posixpath.normpath(sandbox.workdir)
+                if path is None
+                else _validate_path_within(path, sandbox.workdir)
+            )
+            await manager.touch(
+                sandbox.id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
+            entries = await sandbox.list_dir(normalized)
     except HTTPException:
         raise
     except SandboxCapabilityUnsupportedError as exc:
@@ -391,9 +408,9 @@ async def get_sandbox_file_content(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        sandbox = attachment.sandbox
-        normalized = _validate_path_within(path, sandbox.workdir)
-        content = await sandbox.read_text(normalized, max_bytes=MAX_PREVIEW_BYTES)
+        async with closing_sandbox(attachment.sandbox) as sandbox:
+            normalized = _validate_path_within(path, sandbox.workdir)
+            content = await sandbox.read_text(normalized, max_bytes=MAX_PREVIEW_BYTES)
     except HTTPException:
         raise
     except SandboxFileTooLargeError:
@@ -454,6 +471,7 @@ async def download_sandbox_file(
             workspace_id=ctx.workspace_id,
         )
         sandbox = attachment.sandbox
+        stack.push_async_callback(close_sandbox_handle, sandbox)
         normalized = _validate_path_within(path, sandbox.workdir)
         stream = await stack.enter_async_context(sandbox.stream_file(normalized))
 
@@ -538,11 +556,11 @@ async def exec_in_sandbox(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        sandbox = attachment.sandbox
-        result = await sandbox.execute(body.command, timeout=body.timeout, envs=body.envs)
-        await manager.touch(
-            sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True
-        )
+        async with closing_sandbox(attachment.sandbox) as sandbox:
+            result = await sandbox.execute(body.command, timeout=body.timeout, envs=body.envs)
+            await manager.touch(
+                sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True
+            )
     except SandboxError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -583,12 +601,12 @@ async def upload_sandbox_file(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        sandbox = attachment.sandbox
-        normalized = _validate_path_within(path, sandbox.workdir)
-        await sandbox.upload([(normalized, content)])
-        await manager.touch(
-            sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True
-        )
+        async with closing_sandbox(attachment.sandbox) as sandbox:
+            normalized = _validate_path_within(path, sandbox.workdir)
+            await sandbox.upload([(normalized, content)])
+            await manager.touch(
+                sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True
+            )
     except HTTPException:
         raise
     except SandboxError as exc:
@@ -707,19 +725,19 @@ async def get_terminal(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        sandbox = attachment.sandbox
-        await sandbox.start_terminal()
-        await manager.touch(
-            sandbox.id,
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
-        )
-        await manager.renew_lease(
-            sandbox.id,
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
-        )
-        endpoint = await sandbox.get_terminal_endpoint()
+        async with closing_sandbox(attachment.sandbox) as sandbox:
+            await sandbox.start_terminal()
+            await manager.touch(
+                sandbox.id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
+            await manager.renew_lease(
+                sandbox.id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
+            endpoint = await sandbox.get_terminal_endpoint()
     except SandboxCapabilityUnsupportedError as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,

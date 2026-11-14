@@ -391,14 +391,30 @@ class LocalSandboxProvider(SandboxProvider):
     def default_image(self) -> str | None:
         return "local"
 
+    def resolve_workdir(self, *, volume_key: str | None = None) -> str:
+        base = Path(self.default_workdir)
+        return str(base / volume_key) if volume_key else str(base)
+
+    def _target_workdir(self, spec: SandboxCreateSpec) -> Path:
+        if spec.workdir:
+            base = Path(spec.workdir)
+            # Callers passing resolve_workdir(volume_key=...) include volume_key already.
+            if (
+                spec.volume_key
+                and str(base) != self.resolve_workdir(volume_key=spec.volume_key)
+                and base.name != spec.volume_key
+            ):
+                return base / spec.volume_key
+            return base
+        return Path(self.resolve_workdir(volume_key=spec.volume_key))
+
     async def create(
         self,
         spec: SandboxCreateSpec,
         *,
         on_created: Callable[[str], Awaitable[None]] | None = None,
     ) -> LocalSandbox:
-        base = Path(spec.workdir or self.default_workdir)
-        target_dir = (base / spec.volume_key) if spec.volume_key else base
+        target_dir = self._target_workdir(spec)
         target_dir.mkdir(parents=True, exist_ok=True)
         sandbox = LocalSandbox(
             workdir=str(target_dir),

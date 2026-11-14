@@ -34,6 +34,7 @@ from cubeplex.sandbox.base import (
     SandboxError,
     SandboxInstanceGoneError,
 )
+from cubeplex.sandbox.provider import SandboxProvider
 from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
 from cubeplex.sandbox.sync_result import SyncResult
 from cubeplex.skills.sandbox_paths import SKILLS_ROOT, safe_skill_name
@@ -205,7 +206,8 @@ class LazySandbox(Sandbox):
         user_id: str,
         org_id: str,
         workspace_id: str,
-        workdir: str = "/workspace",
+        workdir: str | None = None,
+        provider: SandboxProvider | None = None,
         catalog: SkillCatalogService | None = None,
         op_timeout_seconds: int | None = None,
         event_service: UserSandboxSyncEventService | None = None,
@@ -216,7 +218,31 @@ class LazySandbox(Sandbox):
         self._user_id = user_id
         self._org_id = org_id
         self._workspace_id = workspace_id
-        self._workdir = workdir
+        if isinstance(provider, SandboxProvider):
+            self._initial_provider: SandboxProvider | None = provider
+        else:
+            default_prov = getattr(manager, "default_provider", None)
+            self._initial_provider = (
+                default_prov if isinstance(default_prov, SandboxProvider) else None
+            )
+        if workdir is not None:
+            self._workdir = workdir
+        elif self._initial_provider is not None and callable(
+            getattr(manager, "resolve_scope_workdir", None)
+        ):
+            resolved = manager.resolve_scope_workdir(
+                provider=self._initial_provider,
+                workspace_id=workspace_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+            )
+            self._workdir = (
+                resolved if isinstance(resolved, str) else self._initial_provider.default_workdir
+            )
+        elif self._initial_provider is not None:
+            self._workdir = self._initial_provider.default_workdir
+        else:
+            self._workdir = "/workspace"
         self._catalog = catalog
         # Sizes the in-use lease window passed to ``manager.renew_lease``. None
         # falls back to the manager's default (``sandbox.lease_seconds``).
@@ -247,6 +273,8 @@ class LazySandbox(Sandbox):
     def provider_name(self) -> str:
         if self._sandbox is not None:
             return self._sandbox.provider_name
+        if self._initial_provider is not None:
+            return self._initial_provider.name
         default_provider = getattr(self._manager, "default_provider", None)
         name = getattr(default_provider, "name", None)
         return name if isinstance(name, str) and name else "opensandbox"
@@ -255,6 +283,8 @@ class LazySandbox(Sandbox):
     def capabilities(self) -> SandboxCapabilities:
         if self._sandbox is not None:
             return self._sandbox.capabilities
+        if self._initial_provider is not None:
+            return self._initial_provider.capabilities
         default_caps = getattr(self._manager, "default_capabilities", None)
         if isinstance(default_caps, SandboxCapabilities):
             return default_caps

@@ -33,6 +33,7 @@ from cubeplex.sandbox.base import (
     ProcessOutput,
     ProcessSnapshot,
     SandboxCapabilities,
+    SandboxCapabilityUnsupportedError,
     SandboxConflictError,
     SandboxError,
     SandboxFileTooLargeError,
@@ -780,6 +781,8 @@ class OpenSandboxProvider(SandboxProvider):
         *,
         timeout_seconds: int = 30,
     ) -> OpenSandbox:
+        if not self.capabilities.reconnect:
+            raise SandboxCapabilityUnsupportedError("reconnect", self.name)
         ident = self._default_run_identity()
         conn = self._build_connection_config(request_timeout_seconds=float(timeout_seconds))
         try:

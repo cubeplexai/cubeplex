@@ -20,7 +20,7 @@ from cubeplex.api.routes.v1.ws_sandbox import _resolve_sandbox_scope, resolve_sc
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
 from cubeplex.db.session import get_session
-from cubeplex.sandbox import SandboxCapabilityUnsupportedError, SandboxError
+from cubeplex.sandbox import SandboxCapabilityUnsupportedError, SandboxError, closing_sandbox
 from cubeplex.sandbox.manager import get_sandbox_manager
 
 router = APIRouter(prefix="/ws/{workspace_id}/browser", tags=["ws-browser"])
@@ -88,23 +88,23 @@ async def get_live_view(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        sandbox = attachment.sandbox
-        await sandbox.start_browser()
-        # Live-view / takeover traffic goes straight to Neko and bypasses the normal
-        # per-tool activity updates, so mark the sandbox active here too (the
-        # frontend also pings /keepalive while the view is open).
-        await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
-        # Lease the sandbox for this bounded request so the idle-pause reaper
-        # can't snipe it between start_browser and the endpoint resolve. The
-        # lease expires naturally after ``lease_seconds`` — we deliberately
-        # do NOT call ``release_lease`` because an overlapping caller (e.g.
-        # the keepalive request) may have renewed the lease for a longer
-        # window in the meantime, and a blind unconditional null would erase
-        # that holder's protection (codex review P2 round 13). The keepalive
-        # path renews while the panel stays open, so natural expiry is the
-        # right safety net.
-        await manager.renew_lease(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
-        endpoint = await sandbox.get_browser_endpoint()
+        async with closing_sandbox(attachment.sandbox) as sandbox:
+            await sandbox.start_browser()
+            # Live-view / takeover traffic goes straight to Neko and bypasses the normal
+            # per-tool activity updates, so mark the sandbox active here too (the
+            # frontend also pings /keepalive while the view is open).
+            await manager.touch(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+            # Lease the sandbox for this bounded request so the idle-pause reaper
+            # can't snipe it between start_browser and the endpoint resolve. The
+            # lease expires naturally after ``lease_seconds`` — we deliberately
+            # do NOT call ``release_lease`` because an overlapping caller (e.g.
+            # the keepalive request) may have renewed the lease for a longer
+            # window in the meantime, and a blind unconditional null would erase
+            # that holder's protection (codex review P2 round 13). The keepalive
+            # path renews while the panel stays open, so natural expiry is the
+            # right safety net.
+            await manager.renew_lease(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+            endpoint = await sandbox.get_browser_endpoint()
     except SandboxCapabilityUnsupportedError as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,

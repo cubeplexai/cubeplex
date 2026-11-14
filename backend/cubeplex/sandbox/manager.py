@@ -56,6 +56,7 @@ from cubeplex.sandbox.provider import (
     RunIdentity,
     SandboxCreateSpec,
     SandboxProvider,
+    resolve_default_image,
 )
 from cubeplex.sandbox.registry import (
     ProviderRegistry,
@@ -247,6 +248,60 @@ class SandboxManager:
         raw_name = getattr(record, "provider", None) if record is not None else None
         name = raw_name if isinstance(raw_name, str) and raw_name else None
         return self._registry.get(name)
+
+    def scope_volume_key(
+        self,
+        *,
+        provider: SandboxProvider,
+        workspace_id: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> str | None:
+        """Return the persistent volume key for *scope*, or ``None`` if disabled."""
+        if self._volume_enabled and provider.capabilities.persistent_volume:
+            return self._build_user_volume_key(workspace_id, scope_type, scope_id)
+        return None
+
+    def resolve_scope_workdir(
+        self,
+        *,
+        provider: SandboxProvider,
+        workspace_id: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> str:
+        """Return the deterministic working directory for *scope* on *provider*."""
+        volume_key = self.scope_volume_key(
+            provider=provider,
+            workspace_id=workspace_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        return provider.resolve_workdir(volume_key=volume_key)
+
+    async def resolve_scope_runtime(
+        self,
+        *,
+        org_id: str,
+        workspace_id: str,
+        scope_type: str,
+        scope_id: str,
+    ) -> tuple[SandboxProvider, str]:
+        """Resolve effective ``(provider, workdir)`` for a scope before first execution."""
+        provider = self.default_provider
+        async with self._session_factory() as session:
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+            row = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
+            if row is not None and row.status not in ("terminated", "failed"):
+                with suppress(UnknownSandboxProviderError):
+                    provider = self._provider_for_record(row)
+        workdir = self.resolve_scope_workdir(
+            provider=provider,
+            workspace_id=workspace_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+        )
+        return provider, workdir
 
     def _run_identity(self) -> RunIdentity:
         return RunIdentity(user=self._run_user, uid=self._run_uid, gid=self._run_gid)
@@ -485,7 +540,7 @@ class SandboxManager:
         async with self._session_factory() as session:
             policy = await SandboxPolicyResolver(
                 SandboxPolicyRepository(session, org_id=org_id),
-                default_image=self.default_provider.default_image or "",
+                default_image=resolve_default_image(self.default_provider),
             ).resolve()
         return list(policy.command_rules)
 
@@ -498,7 +553,7 @@ class SandboxManager:
     ) -> EffectivePolicy:
         return await SandboxPolicyResolver(
             SandboxPolicyRepository(session, org_id=org_id),
-            default_image=provider.default_image or "",
+            default_image=resolve_default_image(provider),
         ).resolve()
 
     async def get_or_create(
@@ -703,13 +758,13 @@ class SandboxManager:
         injection: InjectionResult | None = None
         signature: EgressSignature | None = None
         try:
-            volume_key: str | None = None
-            if self._volume_enabled and provider.capabilities.persistent_volume:
-                volume_key = self._build_user_volume_key(
-                    record.workspace_id,
-                    record.scope_type,
-                    record.scope_id,
-                )
+            volume_key = self.scope_volume_key(
+                provider=provider,
+                workspace_id=record.workspace_id,
+                scope_type=record.scope_type,
+                scope_id=record.scope_id,
+            )
+            if volume_key is not None:
                 logger.info(
                     "Creating new {} sandbox for user {} with volume {}",
                     provider.name,
@@ -751,8 +806,8 @@ class SandboxManager:
                 volume_key=volume_key,
                 volume_mount_path=self._volume_mount_path,
                 storage=policy.storage,
-                image=policy.default_image or provider.default_image or "",
-                workdir=provider.default_workdir,
+                image=policy.default_image or resolve_default_image(provider),
+                workdir=provider.resolve_workdir(volume_key=volume_key),
                 ttl_seconds=self._ttl,
                 create_timeout_seconds=self._create_timeout,
                 ready_timeout_seconds=self._ready_timeout,
@@ -868,7 +923,12 @@ class SandboxManager:
         try:
             backend = await provider.connect(
                 sandbox_id,
-                workdir=provider.default_workdir,
+                workdir=self.resolve_scope_workdir(
+                    provider=provider,
+                    workspace_id=record.workspace_id,
+                    scope_type=record.scope_type,
+                    scope_id=record.scope_id,
+                ),
                 user_sandbox_id=record.id,
                 run_identity=self._run_identity(),
             )
@@ -1286,7 +1346,12 @@ class SandboxManager:
         try:
             backend = await provider.resume(
                 record.sandbox_id,
-                workdir=provider.default_workdir,
+                workdir=self.resolve_scope_workdir(
+                    provider=provider,
+                    workspace_id=workspace_id,
+                    scope_type=record.scope_type,
+                    scope_id=record.scope_id,
+                ),
                 user_sandbox_id=record.id,
                 run_identity=self._run_identity(),
             )

@@ -14,7 +14,8 @@ from it) when reading, writing, or referencing files. Do NOT guess paths like `/
 `/tmp`, or `~` — use the working directory above unless you have explicitly confirmed \
 another path exists."""
 
-_PERSISTENT_VOLUME_SECTION = """**Persistence:** `{workdir}` is a persistent volume that survives sandbox restarts. \
+_PERSISTENT_VOLUME_SECTION = """**Persistence:** `{workdir}` is a persistent volume that \
+survives sandbox restarts. \
 Files and packages saved here remain available across conversations. Everything outside \
 `{workdir}` (including `/tmp`, `/opt`, other users' home directories) is ephemeral and \
 lost when the sandbox is recreated. `pip install` and `npm install -g` already default \
@@ -55,14 +56,16 @@ file into a project directory if it becomes project material), `.skills/`, \
 `.python-packages/`, `.npm-global/`.
 - **Never reorganize or delete the user's existing files** unless explicitly asked."""
 
-_EPHEMERAL_VOLUME_SECTION = """**Persistence:** `{workdir}` and all other directories in this sandbox are ephemeral \
+_EPHEMERAL_VOLUME_SECTION = """**Persistence:** `{workdir}` and all other directories in this \
+sandbox are ephemeral \
 and will be lost when the sandbox is recreated. Do not rely on files or installed packages \
 remaining available after a restart or across separate sandboxes.
 
 **Isolated Python environments:** when a project or skill needs its own environment \
 (conflicting versions, a different Python), create one under `{workdir}` (e.g. \
-`python -m venv .venv` or `uv`). Each `execute` call is a fresh shell: `source .venv/bin/activate`, \
-`cd`, and exported variables do NOT carry over to the next call. Either chain within one \
+`python -m venv .venv` or `uv`). Each `execute` call is a fresh shell: \
+`source .venv/bin/activate`, `cd`, and exported variables do NOT carry over to the next call. \
+Either chain within one \
 command (`source .venv/bin/activate && ...`) or invoke the env's interpreter by absolute path \
 (`.venv/bin/python`, `.venv/bin/pip`).
 

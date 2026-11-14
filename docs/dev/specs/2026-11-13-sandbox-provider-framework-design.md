@@ -444,12 +444,15 @@ class SandboxProvider(ABC):
         returns ``None`` if unreachable or unhealthy so ``SandboxManager`` can
         terminate and revive the row."""
 
-    @abstractmethod
-    def connect_observer(self, sandbox_id: str) -> AbstractAsyncContextManager[Sandbox]:
+    async def connect_observer(
+        self, sandbox_id: str, *, timeout_seconds: int = 30
+    ) -> Sandbox:
         """Short-timeout read/poll attachment to a specific ``sandbox_id`` for
         background-task observation. Raises ``SandboxCapabilityUnsupportedError``
-        when ``capabilities.reconnect`` is False, ``SandboxInstanceGoneError``
-        if 404/terminated/failed, or ``SandboxError`` if not running."""
+        when ``capabilities.reconnect`` is False. Callers (such as
+        ``SandboxManager.connect_command_instance``) inspect control-plane state
+        first so only control-plane 404/terminated/failed proves instance gone;
+        data-plane connect errors raise ``SandboxError``."""
 
     @abstractmethod
     async def resume(self, sandbox_id: str, *, timeout_seconds: int) -> Sandbox:

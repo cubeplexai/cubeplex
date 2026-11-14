@@ -10,13 +10,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from cubeplex.api.routes.v1.ws_sandbox import resolve_provider_and_caps
+from cubeplex.api.routes.v1.ws_sandbox import build_sandbox_status_out
 from cubeplex.api.schemas.execution import AccessRemovalResponse
-from cubeplex.api.schemas.sandbox_policy import (
-    SandboxCapabilitiesOut,
-    SandboxStatusOut,
-    SandboxStatusValue,
-)
+from cubeplex.api.schemas.sandbox_policy import SandboxStatusOut
 from cubeplex.api.schemas.ws_topics import (
     ArchiveTopicResponse,
     TopicConversationCreateRequest,
@@ -573,22 +569,4 @@ async def get_topic_sandbox_status(
     manager = get_sandbox_manager()
     sandbox_repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
     row = await sandbox_repo.get_active_by_scope(scope_type="topic", scope_id=topic_id)
-    if row is None:
-        provider = manager.default_provider
-        return SandboxStatusOut(
-            status="absent",
-            provider=provider.name,
-            capabilities=SandboxCapabilitiesOut.from_capabilities(provider.capabilities),
-            default_image=None,
-            last_activity_at=None,
-            browser_url=None,
-        )
-    provider_name, caps = resolve_provider_and_caps(manager, row.provider)
-    return SandboxStatusOut(
-        status=cast(SandboxStatusValue, row.status),
-        provider=provider_name,
-        capabilities=SandboxCapabilitiesOut.from_capabilities(caps),
-        default_image=row.image,
-        last_activity_at=utc_isoformat(row.last_activity_at),
-        browser_url=None,
-    )
+    return build_sandbox_status_out(manager, row)
