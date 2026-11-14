@@ -970,6 +970,7 @@ dependencies = [
     { name = "croniter" },
     { name = "cryptography" },
     { name = "cubeloop", extra = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"] },
+    { name = "cubepod" },
     { name = "dingtalk-stream" },
     { name = "discord-py" },
     { name = "dynaconf" },
@@ -1044,6 +1045,7 @@ requires-dist = [
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
     { name = "cubeloop", extras = ["mcp", "postgres", "trace-cli", "tracing", "tracing-otlp"], git = "https://github.com/cubeplexai/cubeloop.git?rev=bb2d6336e537f286ccac3dec072218bbec13405b" },
+    { name = "cubepod", specifier = ">=0.4.1" },
     { name = "dingtalk-stream", specifier = ">=0.24.3" },
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "dynaconf", specifier = ">=3.2.11" },
@@ -1104,6 +1106,18 @@ licensed = [{ name = "cubeplex-ee", editable = "ee" }]
 name = "cubeplex-ee"
 version = "0.3.0"
 source = { editable = "ee" }
+
+[[package]]
+name = "cubepod"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fa/2b/fce732dc0e7c39a7e2824eda15f1306ee98aa91ae5d406f39d4659b6b21f/cubepod-0.4.1.tar.gz", hash = "sha256:eca9a5d5435a4459b82c3f28e81c99e760d694d6e8d1ea68e1fd6aeb632ef90d", size = 26686, upload-time = "2026-11-14T05:55:36.122Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/50/a62f3947d57a74f0ee12da1aee23b38a3fee9763d96d8998aea234e4542d/cubepod-0.4.1-py3-none-any.whl", hash = "sha256:c97a7738d9b276bcff2ece5e838eeaa4b7078e3ae061f0eb91ce265b93cd9f16", size = 18255, upload-time = "2026-11-14T05:55:34.554Z" },
+]
 
 [[package]]
 name = "dependency-injector"

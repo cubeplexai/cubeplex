@@ -87,11 +87,15 @@ class PosixSandboxMixin(Sandbox):
             return f"runuser -u {user} -- bash -lc {shlex.quote(f'cd {wd} && exec bash -i')}"
         return f"bash -lc {shlex.quote(f'cd {wd} && exec bash -i')}"
 
+    async def write_terminal_env(self) -> None:
+        """Publish current run env for interactive shells."""
+        await self._write_terminal_env()
+
     async def start_terminal(self) -> None:
         """Write terminal env and start ``ttyd`` on ``TERMINAL_PORT`` if needed."""
         if not self.capabilities.terminal:
             raise SandboxCapabilityUnsupportedError("terminal", self.provider_name)
-        await self._write_terminal_env()
+        await self.write_terminal_env()
         wd = shlex.quote(self.workdir)
         cmd = (
             "start-stop-daemon --start --oknodo --background"

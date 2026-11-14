@@ -94,6 +94,7 @@ _NOISY_THIRD_PARTY_LOGGERS = (
     "anthropic",
     "openai",
     "opensandbox",
+    "cubepod",
     "mcp.client.streamable_http",
     # lark_oapi's WebSocket transport (long-connection mode) and the
     # underlying `websockets` library log every PING/PONG frame at DEBUG,

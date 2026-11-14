@@ -80,8 +80,16 @@ production:
 | `objectstore.access_key` / `access_secret` | S3 / rustfs 凭证。 |
 | `llm.providers.*` | 至少一个可用 provider——见 [LLM Provider 配置](./overview.md#llm-provider-配置)。 |
 
-若你启用了 sandbox（agent 工具执行），还需额外设置
-`sandbox.{domain,image,api_key}`。
+`sandbox.enabled` 必须为 `true`（agent 工具执行），且需根据 `sandbox.provider`
+额外设置对应配置：
+
+- **`opensandbox`（默认）：** 必须设置 `sandbox.domain`、`sandbox.image` 和
+  `sandbox.api_key`（拒绝占位符）。
+- **`cubepod`：** 必须设置 `sandbox.cubepod.base_url` 和
+  `sandbox.cubepod.default_template`（默认为 `cubeplex-ubuntu24-desktop`）。
+  `sandbox.cubepod.api_key` 可选（若填写则拒绝占位符）。
+- **`local`：** 仅用于本地开发与测试（直接在后端进程所在目录中执行命令，
+  无容器隔离）；不需要外部地址或 API key。
 
 ---
 
@@ -192,25 +200,63 @@ objectstore:
 ```yaml
 sandbox:
   enabled: true
-  domain: "…"             # OpenSandbox API 地址（不带 schema）
+  provider: "opensandbox" # "opensandbox" | "cubepod" | "local"
+  domain: "…"             # OpenSandbox API 地址（不带 scheme）
   image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.9.5"
   api_key: "…"
+  command_default_timeout_seconds: 3600 # 新托管任务预留层的默认超时
   use_server_proxy: false # 后端无法直连 sandbox pod/端口时设为 true
   secure_access: false    # docker-runtime OpenSandbox 下必须为 false
   ttl: 1800               # 空闲多少秒后清理
   ready_timeout: 300      # 等待 sandbox 就绪（覆盖冷拉镜像）
+  run_user: "cubeplex"    # 容器内 agent shell 的身份
+  run_uid: 1000           # 容器内命令执行 UID（null = root）
+  run_gid: 1000
   resource:
     cpu: "2"
     memory: "4Gi"
 ```
 
+使用 CubePod 提供商（`sandbox.provider: "cubepod"`）时，配置 `sandbox.cubepod`
+即可，无需设置 OpenSandbox 专属字段（`domain`、`image`、`api_key`、
+`use_server_proxy`、`secure_access`）；通用配置（`ttl`、`ready_timeout`、
+`command_default_timeout_seconds`、`run_user` / `run_uid` / `run_gid`、
+`resource`）同样生效：
+
+```yaml
+sandbox:
+  enabled: true
+  provider: "cubepod"
+  cubepod:
+    base_url: "http://cubepod-gateway:8080"
+    api_key: ""                                 # 可选 Bearer token
+    default_template: "cubeplex-ubuntu24-desktop"
+    warm_pool: ""                               # 可选 PodWarmPool 名称
+```
+
 | Key | 默认 | 说明 |
 |---|---|---|
 | `sandbox.enabled` | `true` | 必填。不是 `true` 时 backend 会拒绝启动。 |
-| `sandbox.use_server_proxy` | `true` | 直连 pod 设 `false`；Docker 桥接 / 隔离网络设 `true`。 |
-| `sandbox.secure_access` | `false` | 设为 `true` 时启用 Kubernetes ingress 网关签名 URL。docker-runtime OpenSandbox 下**必须 `false`**。 |
+| `sandbox.provider` | `opensandbox` | 沙箱运行时提供商：`opensandbox`、`cubepod` 或 `local`（`local` 仅用于本地开发与测试，无容器隔离）。环境变量覆盖：`CUBEPLEX_SANDBOX__PROVIDER`。 |
+| `sandbox.domain` / `image` / `api_key` | — | 仅 OpenSandbox 使用。当 `sandbox.provider` 为 `opensandbox` 时三项均必填（拒绝占位符）。环境变量覆盖：`CUBEPLEX_SANDBOX__DOMAIN`、`CUBEPLEX_SANDBOX__IMAGE`、`CUBEPLEX_SANDBOX__API_KEY`。 |
+| `sandbox.use_server_proxy` | `true` | 仅 OpenSandbox 使用。直连 pod 设 `false`；Docker 桥接 / 隔离网络设 `true`。 |
+| `sandbox.secure_access` | `false` | 仅 OpenSandbox 使用。设为 `true` 时启用 Kubernetes ingress 网关签名 URL。docker-runtime OpenSandbox 下**必须 `false`**。 |
+| `sandbox.cubepod.base_url` | `""` | CubePod 网关基础 URL（例如 `http://cubepod-gateway:8080`）。当 `sandbox.provider` 为 `cubepod` 时必填。环境变量覆盖：`CUBEPLEX_SANDBOX__CUBEPOD__BASE_URL`。 |
+| `sandbox.cubepod.api_key` | `""` | CubePod 网关的可选 Bearer token（若填写则拒绝占位符）。环境变量覆盖：`CUBEPLEX_SANDBOX__CUBEPOD__API_KEY`。 |
+| `sandbox.cubepod.default_template` | `cubeplex-ubuntu24-desktop` | 默认 CubePod 模板名称。当 `sandbox.provider` 为 `cubepod` 时必填。环境变量覆盖：`CUBEPLEX_SANDBOX__CUBEPOD__DEFAULT_TEMPLATE`。 |
+| `sandbox.cubepod.warm_pool` | `""` | 创建沙箱时可选使用的 CubePod `PodWarmPool` 名称。环境变量覆盖：`CUBEPLEX_SANDBOX__CUBEPOD__WARM_POOL`。 |
 | `sandbox.ttl` | `1800` | 空闲 30 分钟后回收。 |
+| `sandbox.ready_timeout` | `300` | 等待新建沙箱就绪的秒数（覆盖冷拉镜像耗时）。 |
+| `sandbox.command_default_timeout_seconds` | `3600` | 正整数秒数，上限 `2147483647`（32 位秒数技术上限）。启动时若为超范围值、非整数、布尔值或 `null`，后端会直接拒绝启动。环境变量覆盖：`CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS`。 |
+| `sandbox.run_user` / `run_uid` / `run_gid` | `cubeplex` / `1000` / `1000` | agent 命令和上传文件以此用户身份运行，需与沙箱镜像匹配。将 `run_uid` 设为 `null` 可保留原先的 root 默认身份。浏览器组件仍以 root 启动。 |
 | `sandbox.resource.cpu` / `memory` | `2` / `4Gi` | 单个 sandbox 的限额。 |
+
+当执行任务未提供 `timeout_seconds` 时，后台任务预留层使用 `command_default_timeout_seconds`。
+显式传入的正数超时优先，且可超过一小时，但同样不能超过该技术上限。超大值会被直接拒绝，
+不会被截断，也不会视为无限制。绝对截止时间只在创建时保存一次；修改配置不会延长已有预留。
+关闭完成通知不会移除该期限。monitor 期限、持久 monitor、HTTP 超时、沙箱 TTL 以及前台等待预算各自独立配置。
+
+这是生命周期演进的存储与预留基础。现有 agent 执行路径和协调器尚未切换到该层；仅仅添加此配置本身不会改变它们的行为，也不会启用归属于对话的后台执行。已有命令记录不会被补填猜测的期限。
 
 ## 流式（Streaming）
 

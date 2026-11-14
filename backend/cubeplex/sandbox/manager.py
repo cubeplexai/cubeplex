@@ -19,6 +19,7 @@ import asyncio
 import hashlib
 import re
 import time
+import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -47,9 +48,12 @@ from cubeplex.repositories.user_sandbox import (
 from cubeplex.sandbox.base import (
     Sandbox,
     SandboxCapabilities,
+    SandboxCapabilityUnsupportedError,
     SandboxConflictError,
     SandboxError,
     SandboxInstanceGoneError,
+    SandboxNotFoundError,
+    closing_sandbox,
 )
 from cubeplex.sandbox.provider import (
     ProviderInstanceState,
@@ -138,6 +142,17 @@ class SandboxAttachment:
 
     sandbox: Sandbox
     user_sandbox_id: str
+
+
+_RESET_ROOTFS_CONFLICT_STATES = frozenset({"provisioning", "pausing", "resuming", "kill_pending"})
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxResetRootfsResult:
+    """Outcome of a capability-gated RootFS reset."""
+
+    user_sandbox_id: str
+    sandbox_id: str
 
 
 # (env_var_id, env_name, is_secret, value-if-plain) per entry — see _egress_signature.
@@ -231,6 +246,9 @@ class SandboxManager:
 
         self._touch_cache: dict[str, datetime] = {}
         self._egress_generations: dict[str, _EgressGeneration] = {}
+        self._lifecycle_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     @property
     def registry(self) -> ProviderRegistry:
@@ -1192,6 +1210,135 @@ class SandboxManager:
                 row,
                 delete_on_success=True,
             )
+
+    def _get_lifecycle_lock(self, user_sandbox_id: str) -> asyncio.Lock:
+        lock = self._lifecycle_locks.get(user_sandbox_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._lifecycle_locks[user_sandbox_id] = lock
+        return lock
+
+    def _validate_reset_rootfs_row(
+        self,
+        row: UserSandbox | None,
+        user_sandbox_id: str,
+    ) -> tuple[UserSandbox, SandboxProvider, str]:
+        if row is None or row.deleted_at is not None or row.status in ("terminated", "failed"):
+            raise SandboxNotFoundError(f"Sandbox {user_sandbox_id} not found")
+        provider = self._provider_for_record(row)
+        if not provider.capabilities.reset_rootfs:
+            raise SandboxCapabilityUnsupportedError("reset_rootfs", provider.name)
+        if row.status in _RESET_ROOTFS_CONFLICT_STATES or row.cleanup_action is not None:
+            raise SandboxConflictError(f"Sandbox {row.id} cannot reset rootfs while {row.status}")
+        if row.status not in ("running", "paused") or not row.sandbox_id:
+            raise SandboxConflictError(
+                f"Sandbox {row.id} is in state {row.status!r} and cannot reset rootfs"
+            )
+        return row, provider, row.sandbox_id
+
+    async def reset_sandbox_rootfs(self, user_sandbox_id: str) -> SandboxResetRootfsResult:
+        """Reset an active or paused sandbox RootFS and re-bootstrap guest state."""
+        async with self._session_factory() as session:
+            pre_row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+        self._validate_reset_rootfs_row(pre_row, user_sandbox_id)
+
+        async with self._get_lifecycle_lock(user_sandbox_id):
+            async with self._session_factory() as session:
+                current = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+                row, provider, sandbox_id = self._validate_reset_rootfs_row(
+                    current, user_sandbox_id
+                )
+                repo = UserSandboxRepository(
+                    session, org_id=row.org_id, workspace_id=row.workspace_id
+                )
+                org_id = row.org_id
+                workspace_id = row.workspace_id
+                user_id = row.user_id
+                scope_type = row.scope_type
+                scope_id = row.scope_id
+                was_paused = row.status == "paused"
+                paused_at = row.paused_at
+                if was_paused:
+                    claimed = await repo.mark_resuming(row.id)
+                    if not claimed:
+                        raise SandboxConflictError(
+                            f"Sandbox {row.id} state changed concurrently; retry"
+                        )
+                await repo.acquire_in_use(row.id, max(self._lease_seconds, 120))
+
+            marked_running = False
+            try:
+                now = datetime.now(UTC)
+                await self._request_managed_task_stop(
+                    row,
+                    sandbox_instance_id=sandbox_id,
+                    now=now,
+                )
+                await provider.reset_rootfs(sandbox_id)
+
+                async with self._session_factory() as session:
+                    repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+                    if was_paused:
+                        run_ok = await repo.mark_running(
+                            user_sandbox_id, last_resumed_at=datetime.now(UTC)
+                        )
+                        if not run_ok:
+                            raise SandboxConflictError(
+                                f"Sandbox {user_sandbox_id} changed state before running transition"
+                            )
+                    marked_running = True
+                    await repo.update_activity(user_sandbox_id)
+
+                self._touch_cache[user_sandbox_id] = datetime.now(UTC)
+                workdir = self.resolve_scope_workdir(
+                    provider=provider,
+                    workspace_id=workspace_id,
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                )
+                backend = await provider.connect(
+                    sandbox_id,
+                    workdir=workdir,
+                    user_sandbox_id=user_sandbox_id,
+                    run_identity=self._run_identity(),
+                )
+                async with closing_sandbox(backend):
+                    await backend.ensure_workspace_owner()
+                    async with self._session_factory() as guest_session:
+                        await self._apply_egress(
+                            guest_session,
+                            backend,
+                            provider=provider,
+                            org_id=org_id,
+                            workspace_id=workspace_id,
+                            user_id=user_id,
+                            sandbox_id=sandbox_id,
+                        )
+                        await guest_session.commit()
+                    await backend.write_terminal_env()
+
+                return SandboxResetRootfsResult(
+                    user_sandbox_id=user_sandbox_id,
+                    sandbox_id=sandbox_id,
+                )
+            except Exception:
+                if was_paused and not marked_running:
+                    with suppress(Exception):
+                        state = await provider.inspect_state(sandbox_id)
+                        if state == ProviderInstanceState.PAUSED:
+                            async with self._session_factory() as revert_session:
+                                revert_repo = UserSandboxRepository(
+                                    revert_session, org_id=org_id, workspace_id=workspace_id
+                                )
+                                await revert_repo.mark_paused(user_sandbox_id, paused_at=paused_at)
+                raise
+            finally:
+                with suppress(Exception):
+                    async with self._session_factory() as cleanup_session:
+                        cleanup_repo = UserSandboxRepository(
+                            cleanup_session, org_id=org_id, workspace_id=workspace_id
+                        )
+                        await cleanup_repo.release_in_use(user_sandbox_id)
 
     @staticmethod
     def _cleanup_instance_id(sandbox_id: str | None) -> str | None:

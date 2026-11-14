@@ -36,10 +36,17 @@ backend:
     activeDeadlineSeconds: 3600
   service:
     port: 8000
-  # Sandbox execution is required. Use an external OpenSandbox endpoint by
-  # setting opensandbox.enabled=false and backend.secrets.sandbox.domain.
+  # Sandbox execution is required. Defaults to the bundled OpenSandbox
+  # provider; set opensandbox.enabled=false and backend.secrets.sandbox.domain
+  # for an external OpenSandbox endpoint, or set sandbox.provider="cubepod"
+  # (with opensandbox.enabled=false and sandbox.cubepod.base_url) for CubePod.
   sandbox:
+    provider: "opensandbox" # "opensandbox" | "cubepod" | "local"
     use_server_proxy: false
+    cubepod:
+      base_url: ""
+      default_template: "cubeplex-ubuntu24-desktop"
+      warm_pool: ""
   resources:
     requests:
       cpu: "200m"
@@ -75,6 +82,8 @@ backend:
       providers: {}
     sandbox:
       api_key: ""
+      cubepod:
+        api_key: ""
 
 frontend:
   replicaCount: 1
