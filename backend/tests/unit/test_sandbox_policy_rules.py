@@ -211,3 +211,20 @@ def test_network_policy_types_are_neutral_frozen_dataclasses() -> None:
     assert isinstance(p.egress, tuple)
     with pytest.raises(FrozenInstanceError):
         p.default_action = "deny"  # type: ignore[misc]
+
+
+def test_build_network_policy_upstream_proxy() -> None:
+    p_default = build_network_policy(
+        admin_rules=None,
+        default_action="allow",
+        force_allow_hosts=[],
+    )
+    assert p_default.upstream_proxy is None
+
+    p_proxy = build_network_policy(
+        admin_rules=[{"action": "allow", "target": "api.github.com"}],
+        default_action="deny",
+        force_allow_hosts=[],
+        upstream_proxy="http://proxy.corp:3128",
+    )
+    assert p_proxy.upstream_proxy == "http://proxy.corp:3128"

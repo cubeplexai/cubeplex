@@ -115,7 +115,10 @@ def _to_cubepod_network_policy(policy: SandboxNetworkPolicy | None) -> NetworkPo
     egress: list[NetworkEgressRule] = [
         {"action": rule.action, "target": rule.target} for rule in policy.egress
     ]
-    return NetworkPolicySpec(defaultAction=policy.default_action, egress=egress)
+    spec = NetworkPolicySpec(defaultAction=policy.default_action, egress=egress)
+    if policy.upstream_proxy:
+        spec["upstreamProxy"] = policy.upstream_proxy
+    return spec
 
 
 def _parse_modified_at(raw: str | None) -> datetime:
