@@ -1,23 +1,49 @@
-"""Local sandbox using asyncio subprocesses — for dev/debug only."""
+"""Local sandbox and LocalSandboxProvider using asyncio subprocesses — for dev/debug only."""
+
+from __future__ import annotations
 
 import asyncio
 import inspect
 import os
 import signal
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
 
+from cubeplex.config import config
 from cubeplex.sandbox.base import (
-    BrowserEndpoint,
     ExecuteResult,
+    FileEntry,
     ProcessHandle,
     ProcessOutput,
     ProcessSnapshot,
     Sandbox,
+    SandboxCapabilities,
     SandboxError,
+    SandboxFileTooLargeError,
+    SandboxInstanceGoneError,
+)
+from cubeplex.sandbox.provider import (
+    ProviderInstanceState,
+    RunIdentity,
+    SandboxCreateSpec,
+    SandboxProvider,
+)
+
+_LOCAL_CAPABILITIES = SandboxCapabilities(
+    background=True,
+    reconnect=False,
+    persistent_volume=True,
+    pause=False,
+    reset_rootfs=False,
+    terminal=False,
+    browser=False,
+    egress_proxy=False,
+    network_policy=False,
 )
 
 
@@ -77,9 +103,16 @@ class LocalSandbox(Sandbox):
     Not suitable for production. Use for development and testing.
     """
 
-    def __init__(self, *, workdir: str | None = None) -> None:
-        self._id = str(uuid.uuid4())
+    def __init__(
+        self,
+        *,
+        workdir: str | None = None,
+        sandbox_id: str | None = None,
+        user_sandbox_id: str | None = None,
+    ) -> None:
+        self._id = sandbox_id or str(uuid.uuid4())
         self._workdir = workdir or os.getcwd()
+        self._user_sandbox_id = user_sandbox_id
         self._bg: dict[str, _LocalBgProc] = {}
 
     @property
@@ -89,6 +122,18 @@ class LocalSandbox(Sandbox):
     @property
     def workdir(self) -> str:
         return self._workdir
+
+    @property
+    def provider_name(self) -> str:
+        return "local"
+
+    @property
+    def capabilities(self) -> SandboxCapabilities:
+        return _LOCAL_CAPABILITIES
+
+    @property
+    def user_sandbox_id(self) -> str | None:
+        return self._user_sandbox_id
 
     async def execute(
         self,
@@ -252,14 +297,148 @@ class LocalSandbox(Sandbox):
             result.append((path, Path(path).read_bytes()))
         return result
 
-    async def start_browser(self) -> None:
-        # Dev only: the in-image launch script isn't present on the host, so the
-        # base implementation would raise. Assume a locally-running Neko (if any).
-        return None
+    def _resolve_path(self, path: str) -> Path:
+        candidate = Path(path)
+        if candidate.is_absolute():
+            return candidate
+        return Path(self._workdir) / candidate
 
-    async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
-        # Dev only: the local Neko stack (if running) is reachable on localhost.
-        return BrowserEndpoint(url=f"http://localhost:{self.BROWSER_PORT}/")
+    @staticmethod
+    def _to_file_entry(target: Path) -> FileEntry:
+        st = target.stat()
+        is_dir = target.is_dir()
+        return FileEntry(
+            path=str(target),
+            name=target.name or str(target),
+            is_dir=is_dir,
+            size=0 if is_dir else int(st.st_size),
+            modified_at=datetime.fromtimestamp(st.st_mtime, tz=UTC),
+        )
+
+    async def list_dir(self, path: str) -> list[FileEntry]:
+        target = self._resolve_path(path)
+        if not target.exists():
+            raise FileNotFoundError(path)
+        if not target.is_dir():
+            raise SandboxError(f"path is not a directory: {path}")
+        children = sorted(target.iterdir(), key=lambda p: p.name)
+        return [self._to_file_entry(child) for child in children]
+
+    async def stat_file(self, path: str) -> FileEntry:
+        target = self._resolve_path(path)
+        if not target.exists():
+            raise FileNotFoundError(path)
+        return self._to_file_entry(target)
+
+    async def read_text(self, path: str, *, max_bytes: int | None = None) -> str:
+        target = self._resolve_path(path)
+        if not target.exists():
+            raise FileNotFoundError(path)
+        if target.is_dir():
+            raise SandboxError(f"path is a directory: {path}")
+        if max_bytes is not None and target.stat().st_size > max_bytes:
+            raise SandboxFileTooLargeError(f"{path} exceeds max_bytes={max_bytes}")
+        data = await asyncio.to_thread(target.read_bytes)
+        if max_bytes is not None and len(data) > max_bytes:
+            raise SandboxFileTooLargeError(f"{path} exceeds max_bytes={max_bytes}")
+        return data.decode("utf-8", errors="replace")
+
+    @asynccontextmanager
+    async def stream_file(self, path: str) -> AsyncIterator[AsyncIterator[bytes]]:
+        target = self._resolve_path(path)
+        if not target.exists():
+            raise FileNotFoundError(path)
+        if target.is_dir():
+            raise SandboxError(f"path is a directory: {path}")
+
+        async def _iter_chunks() -> AsyncIterator[bytes]:
+            with target.open("rb") as handle:
+                while True:
+                    chunk = await asyncio.to_thread(handle.read, 65536)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        yield _iter_chunks()
 
     async def close(self) -> None:
-        pass
+        return None
+
+
+class LocalSandboxProvider(SandboxProvider):
+    """In-process ``SandboxProvider`` for local development and tests."""
+
+    def __init__(self, *, base_workdir: str | None = None) -> None:
+        self._base_workdir = base_workdir
+        self._instances: dict[str, LocalSandbox] = {}
+
+    @property
+    def name(self) -> str:
+        return "local"
+
+    @property
+    def capabilities(self) -> SandboxCapabilities:
+        return _LOCAL_CAPABILITIES
+
+    @property
+    def default_workdir(self) -> str:
+        if self._base_workdir:
+            return self._base_workdir
+        configured = str(config.get("sandbox.local.workdir", "") or "").strip()
+        return configured or "/tmp/cubeplex_sandbox"
+
+    @property
+    def default_image(self) -> str | None:
+        return "local"
+
+    async def create(
+        self,
+        spec: SandboxCreateSpec,
+        *,
+        on_created: Callable[[str], Awaitable[None]] | None = None,
+    ) -> LocalSandbox:
+        base = Path(spec.workdir or self.default_workdir)
+        target_dir = (base / spec.volume_key) if spec.volume_key else base
+        target_dir.mkdir(parents=True, exist_ok=True)
+        sandbox = LocalSandbox(
+            workdir=str(target_dir),
+            user_sandbox_id=spec.user_sandbox_id,
+        )
+        self._instances[sandbox.id] = sandbox
+        if on_created is not None:
+            await on_created(sandbox.id)
+        return sandbox
+
+    async def connect(
+        self,
+        sandbox_id: str,
+        *,
+        workdir: str | None = None,
+        user_sandbox_id: str | None = None,
+        run_identity: RunIdentity | None = None,
+    ) -> LocalSandbox:
+        del run_identity
+        existing = self._instances.get(sandbox_id)
+        if existing is None:
+            raise SandboxInstanceGoneError(sandbox_id)
+        effective_workdir = (
+            existing.workdir if workdir is None or workdir == self.default_workdir else workdir
+        )
+        return LocalSandbox(
+            workdir=effective_workdir,
+            sandbox_id=existing.id,
+            user_sandbox_id=(
+                user_sandbox_id if user_sandbox_id is not None else existing.user_sandbox_id
+            ),
+        )
+
+    async def inspect_state(self, sandbox_id: str) -> ProviderInstanceState | None:
+        if sandbox_id in self._instances:
+            return ProviderInstanceState.RUNNING
+        return None
+
+    async def terminate(self, sandbox_id: str) -> None:
+        self._instances.pop(sandbox_id, None)
+
+    async def aclose(self) -> None:
+        self._instances.clear()

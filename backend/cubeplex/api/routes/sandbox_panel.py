@@ -16,6 +16,7 @@ must never be exposed publicly — this backend is the only public entry.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import httpx
 import websockets
@@ -29,7 +30,9 @@ from websockets.asyncio.client import ClientConnection
 from websockets.exceptions import ConnectionClosed
 from websockets.typing import Subprotocol
 
+from cubeplex.sandbox.base import SandboxError
 from cubeplex.sandbox.panel_token import get_panel_secret, verify_panel_token
+from cubeplex.sandbox.registry import UnknownSandboxProviderError, get_provider_registry
 
 router = APIRouter()
 
@@ -53,18 +56,6 @@ _WS_POLICY_VIOLATION = 1008
 _WS_INTERNAL_ERROR = 1011
 
 
-def _server_host() -> str:
-    """host:port of the internal opensandbox-server (no scheme)."""
-    from cubeplex.config import config
-
-    domain = str(config.get("sandbox.domain", "localhost:8090")).strip()
-    return domain.split("://", 1)[-1].rstrip("/")
-
-
-def _upstream_path(sandbox_id: str, port: int, full_path: str) -> str:
-    return f"/sandboxes/{sandbox_id}/proxy/{port}/{full_path.lstrip('/')}"
-
-
 @router.api_route(
     "/sandbox-panel/{token}/{full_path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
@@ -75,19 +66,25 @@ async def panel_http(token: str, request: Request, full_path: str = "") -> Respo
     except ValueError:
         return Response(status_code=HTTP_403_FORBIDDEN, content=b"invalid or expired panel token")
 
-    target = f"http://{_server_host()}{_upstream_path(claims.sandbox_id, claims.port, full_path)}"
-    if request.url.query:
-        target = f"{target}?{request.url.query}"
+    try:
+        provider = get_provider_registry().get(claims.provider)
+        upstream_spec = provider.build_panel_upstream(
+            sandbox_id=claims.sandbox_id,
+            port=claims.port,
+            path=full_path,
+            query=request.url.query,
+        )
+    except (UnknownSandboxProviderError, SandboxError) as exc:
+        logger.warning("panel http provider resolution failed: {}", exc)
+        return Response(status_code=502, content=b"sandbox panel upstream unavailable")
+
+    target = upstream_spec.http_url
     fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP}
-    # Force identity encoding to prevent opensandbox-server double-compression:
-    # ttyd (libwebsockets) compresses when gzip is accepted, then opensandbox's nginx
-    # compresses again, producing a corrupt/truncated response. httpx also adds its own
-    # accept-encoding by default, so we must override explicitly here.
-    fwd_headers["accept-encoding"] = "identity"
+    fwd_headers.update(upstream_spec.http_headers)
     body = await request.body()
 
-    # trust_env=False: opensandbox-server is an internal service — forwarding must
-    # never be routed through an ambient HTTP_PROXY/ALL_PROXY.
+    # trust_env=False: internal sandbox proxy — forwarding must never route through
+    # an ambient HTTP_PROXY/ALL_PROXY.
     client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=None), trust_env=False)
     try:
         upstream = await client.send(
@@ -130,18 +127,37 @@ async def panel_ws(websocket: WebSocket, token: str, full_path: str = "") -> Non
         await websocket.close(code=_WS_POLICY_VIOLATION)
         return
 
-    target = f"ws://{_server_host()}{_upstream_path(claims.sandbox_id, claims.port, full_path)}"
-    if websocket.url.query:
-        target = f"{target}?{websocket.url.query}"
+    try:
+        provider = get_provider_registry().get(claims.provider)
+        upstream_spec = provider.build_panel_upstream(
+            sandbox_id=claims.sandbox_id,
+            port=claims.port,
+            path=full_path,
+            query=websocket.url.query,
+        )
+    except (UnknownSandboxProviderError, SandboxError) as exc:
+        logger.warning("panel ws provider resolution failed: {}", exc)
+        await websocket.close(code=_WS_INTERNAL_ERROR)
+        return
+
+    target = upstream_spec.ws_url
     subprotocols = [Subprotocol(s) for s in (websocket.scope.get("subprotocols") or [])]
+    connect_kwargs: dict[str, Any] = {
+        "subprotocols": subprotocols or None,
+        "open_timeout": 15,
+        "max_size": None,
+    }
+    if upstream_spec.ws_headers:
+        connect_kwargs["additional_headers"] = upstream_spec.ws_headers
+    if upstream_spec.ws_connect_host is not None:
+        connect_kwargs["host"] = upstream_spec.ws_connect_host
+    if upstream_spec.ws_connect_port is not None:
+        connect_kwargs["port"] = upstream_spec.ws_connect_port
+    if upstream_spec.ws_server_hostname is not None:
+        connect_kwargs["server_hostname"] = upstream_spec.ws_server_hostname
 
     try:
-        upstream = await websockets.connect(
-            target,
-            subprotocols=subprotocols or None,
-            open_timeout=15,
-            max_size=None,
-        )
+        upstream = await websockets.connect(target, **connect_kwargs)
     except Exception as exc:  # connect/handshake failure
         logger.warning("panel ws upstream connect failed ({}): {}", target, exc)
         await websocket.close(code=_WS_INTERNAL_ERROR)

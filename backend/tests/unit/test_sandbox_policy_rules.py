@@ -1,4 +1,11 @@
+from dataclasses import FrozenInstanceError, is_dataclass
+
+import pytest
+
+from cubeplex.sandbox_policy import rules as policy_rules
 from cubeplex.sandbox_policy.rules import (
+    SandboxNetworkPolicy,
+    SandboxNetworkRule,
     build_network_policy,
     evaluate_command,
     split_shell_command,
@@ -189,3 +196,18 @@ def test_blank_targets_are_dropped() -> None:
         force_allow_hosts=[],
     )
     assert _egress(p) == []
+
+
+def test_network_policy_types_are_neutral_frozen_dataclasses() -> None:
+    assert "opensandbox" not in (policy_rules.__doc__ or "")
+    p = build_network_policy(
+        admin_rules=[{"action": "deny", "target": "evil.com"}],
+        default_action="allow",
+        force_allow_hosts=["exchange.internal"],
+    )
+    assert isinstance(p, SandboxNetworkPolicy)
+    assert is_dataclass(p)
+    assert all(isinstance(r, SandboxNetworkRule) for r in p.egress)
+    assert isinstance(p.egress, tuple)
+    with pytest.raises(FrozenInstanceError):
+        p.default_action = "deny"  # type: ignore[misc]

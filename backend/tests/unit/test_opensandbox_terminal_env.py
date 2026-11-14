@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from opensandbox.models.execd import RunCommandOpts
 
-from cubeplex.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
 
 def _make_backend() -> tuple[OpenSandbox, list[str]]:

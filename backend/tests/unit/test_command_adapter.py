@@ -8,7 +8,7 @@ from opensandbox.exceptions import SandboxApiException
 
 from cubeplex.sandbox.base import ProcessHandle, SandboxError
 from cubeplex.sandbox.command_adapter import CommandAdapter
-from cubeplex.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
 
 def provider() -> MagicMock:

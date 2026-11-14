@@ -7,23 +7,32 @@ import pytest
 from opensandbox.exceptions import SandboxApiException
 
 from cubeplex.sandbox.manager import SandboxManager
+from cubeplex.sandbox.providers.opensandbox import OpenSandboxProvider
+from cubeplex.sandbox.registry import ProviderRegistry
 
 
-def _make_manager() -> SandboxManager:
+def _make_provider() -> MagicMock:
+    provider = MagicMock()
+    provider.name = "opensandbox"
+    provider.terminate = AsyncMock()
+    return provider
+
+
+def _make_manager(provider: object | None = None) -> SandboxManager:
     factory = MagicMock()
     encryption = MagicMock()
+    target_provider = provider if provider is not None else _make_provider()
+    registry = ProviderRegistry(
+        {"opensandbox": target_provider},
+        default_name="opensandbox",  # type: ignore[dict-item]
+    )
     with patch("cubeplex.sandbox.manager.config") as mock_config:
         mock_config.get.side_effect = lambda key, default=None: {
-            "sandbox.domain": "localhost:8090",
-            "sandbox.image": "ubuntu:22.04",
-            "sandbox.api_key": None,
             "sandbox.request_timeout": 60,
             "sandbox.create_timeout": 300,
             "sandbox.ttl": 600,
             "sandbox.touch_interval": 60,
             "sandbox.ready_timeout": 60,
-            "sandbox.use_server_proxy": False,
-            "sandbox.secure_access": True,
             "sandbox.workdir": "/workspace",
             "sandbox.resource.cpu": "100m",
             "sandbox.resource.memory": "100Mi",
@@ -40,7 +49,7 @@ def _make_manager() -> SandboxManager:
             "sandbox.reserve_wait_timeout": 30.0,
             "sandbox.reserve_poll_interval": 0.5,
         }.get(key, default)
-        mgr = SandboxManager(factory, encryption)
+        mgr = SandboxManager(factory, encryption, registry=registry)
     return mgr
 
 
@@ -59,6 +68,7 @@ def _make_record(
     record.sandbox_id = sandbox_id
     record.org_id = org_id
     record.workspace_id = workspace_id
+    record.provider = "opensandbox"
     record.status = status
     record.scope_type = "user"
     record.scope_id = "user-1"
@@ -69,41 +79,31 @@ def _make_record(
 
 @pytest.mark.asyncio
 async def test_kill_success_marks_terminated() -> None:
-    """When raw.kill() succeeds, the row should end up as terminated."""
-    mgr = _make_manager()
+    """When provider.terminate() succeeds, the row should end up as terminated."""
+    provider = _make_provider()
+    mgr = _make_manager(provider)
     session = MagicMock()
     repo = AsyncMock()
     record = _make_record()
 
-    raw = AsyncMock()
-    raw.kill = AsyncMock()
-    raw.close = AsyncMock()
+    await mgr._kill_record(session, repo, record)
 
-    conn_config = mgr._build_connection_config()
-
-    with patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
-        await mgr._kill_record(session, repo, record, conn_config)
-
+    provider.terminate.assert_awaited_once_with(record.sandbox_id)
     repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
     repo.mark_kill_pending.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_kill_failure_marks_kill_pending() -> None:
-    """When raw.kill() raises, the row should be marked kill_pending (not terminated)."""
-    mgr = _make_manager()
+    """When provider.terminate() raises, the row should be marked kill_pending."""
+    provider = _make_provider()
+    provider.terminate = AsyncMock(side_effect=Exception("connection refused"))
+    mgr = _make_manager(provider)
     session = MagicMock()
     repo = AsyncMock()
     record = _make_record()
 
-    raw = AsyncMock()
-    raw.kill = AsyncMock(side_effect=Exception("connection refused"))
-    raw.close = AsyncMock()
-
-    conn_config = mgr._build_connection_config()
-
-    with patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
-        await mgr._kill_record(session, repo, record, conn_config)
+    await mgr._kill_record(session, repo, record)
 
     repo.mark_kill_pending.assert_called_once_with(record.id)
     repo.mark_terminated.assert_not_called()
@@ -111,19 +111,15 @@ async def test_kill_failure_marks_kill_pending() -> None:
 
 @pytest.mark.asyncio
 async def test_kill_connect_failure_marks_kill_pending() -> None:
-    """When even connect fails, mark kill_pending."""
-    mgr = _make_manager()
+    """When provider.terminate fails at transport, mark kill_pending."""
+    provider = _make_provider()
+    provider.terminate = AsyncMock(side_effect=Exception("DNS resolution failed"))
+    mgr = _make_manager(provider)
     session = MagicMock()
     repo = AsyncMock()
     record = _make_record()
 
-    conn_config = mgr._build_connection_config()
-
-    with patch(
-        "cubeplex.sandbox.manager.opensandbox.Sandbox.connect",
-        side_effect=Exception("DNS resolution failed"),
-    ):
-        await mgr._kill_record(session, repo, record, conn_config)
+    await mgr._kill_record(session, repo, record)
 
     repo.mark_kill_pending.assert_called_once_with(record.id)
     repo.mark_terminated.assert_not_called()
@@ -131,16 +127,13 @@ async def test_kill_connect_failure_marks_kill_pending() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_is_finalized_only_after_provider_kill_succeeds() -> None:
-    mgr = _make_manager()
+    provider = _make_provider()
+    mgr = _make_manager(provider)
     session = MagicMock()
     repo = AsyncMock()
     record = _make_record(cleanup_action="delete")
-    raw = AsyncMock()
-    raw.kill = AsyncMock()
-    raw.close = AsyncMock()
 
-    with patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
-        await mgr._kill_record(session, repo, record, mgr._build_connection_config())
+    await mgr._kill_record(session, repo, record)
 
     repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
     repo.soft_delete.assert_awaited_once_with(record.id)
@@ -148,16 +141,14 @@ async def test_delete_is_finalized_only_after_provider_kill_succeeds() -> None:
 
 @pytest.mark.asyncio
 async def test_delete_stays_visible_when_provider_kill_is_unconfirmed() -> None:
-    mgr = _make_manager()
+    provider = _make_provider()
+    provider.terminate = AsyncMock(side_effect=RuntimeError("provider unavailable"))
+    mgr = _make_manager(provider)
     session = MagicMock()
     repo = AsyncMock()
     record = _make_record(cleanup_action="delete")
 
-    with patch(
-        "cubeplex.sandbox.manager.opensandbox.Sandbox.connect",
-        side_effect=RuntimeError("provider unavailable"),
-    ):
-        await mgr._kill_record(session, repo, record, mgr._build_connection_config())
+    await mgr._kill_record(session, repo, record)
 
     repo.mark_kill_pending.assert_awaited_once_with(record.id)
     repo.soft_delete.assert_not_awaited()
@@ -165,22 +156,20 @@ async def test_delete_stays_visible_when_provider_kill_is_unconfirmed() -> None:
 
 @pytest.mark.asyncio
 async def test_kill_404_marks_terminated() -> None:
-    """When kill() returns 404 (sandbox already gone), treat as successful kill."""
-    mgr = _make_manager()
+    """When OpenSandbox returns 404 (sandbox already gone), treat as successful kill."""
+    mgr = _make_manager(OpenSandboxProvider())
     session = MagicMock()
     repo = AsyncMock()
     record = _make_record()
 
-    raw = AsyncMock()
-    raw.kill = AsyncMock(
+    control = MagicMock()
+    control.kill_sandbox = AsyncMock(
         side_effect=SandboxApiException("Not Found", status_code=404),
     )
-    raw.close = AsyncMock()
+    control.close = AsyncMock()
 
-    conn_config = mgr._build_connection_config()
-
-    with patch("cubeplex.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
-        await mgr._kill_record(session, repo, record, conn_config)
+    with patch("opensandbox.SandboxManager.create", new=AsyncMock(return_value=control)):
+        await mgr._kill_record(session, repo, record)
 
     repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
     repo.mark_kill_pending.assert_not_called()

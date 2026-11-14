@@ -75,7 +75,7 @@ async def sandbox(shared_sandbox_id):
     import opensandbox
     from opensandbox.config import ConnectionConfig
 
-    from cubeplex.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
     # Connect to existing sandbox (creates new httpx client for current event loop)
     raw_sandbox = await opensandbox.Sandbox.connect(

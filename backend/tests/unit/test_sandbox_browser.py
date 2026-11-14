@@ -6,8 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from cubeplex.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
-from cubeplex.sandbox.local import LocalSandbox
+from cubeplex.sandbox.base import (
+    ExecuteResult,
+    Sandbox,
+    SandboxCapabilities,
+    SandboxCapabilityUnsupportedError,
+)
+from cubeplex.sandbox.posix import PosixSandboxMixin
+from cubeplex.sandbox.providers.local import LocalSandbox
 
 # backend/tests/unit → repo root
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -97,8 +103,8 @@ def test_launch_chrome_bounds_certutil_so_restart_cannot_wedge() -> None:
     assert "cubeplex-egress-ca" in script
 
 
-class _RecordingSandbox(Sandbox):
-    """Minimal sandbox that records executed commands."""
+class _RecordingSandbox(PosixSandboxMixin):
+    """Minimal POSIX sandbox that records executed commands."""
 
     def __init__(self, exit_code: int = 0) -> None:
         self.commands: list[str] = []
@@ -111,6 +117,14 @@ class _RecordingSandbox(Sandbox):
     @property
     def workdir(self) -> str:
         return "/workspace"
+
+    @property
+    def provider_name(self) -> str:
+        return "rec"
+
+    @property
+    def capabilities(self) -> SandboxCapabilities:
+        return SandboxCapabilities(browser=True)
 
     async def execute(
         self,
@@ -153,27 +167,42 @@ async def test_start_browser_raises_on_failure() -> None:
         await sb.start_browser()
 
 
+class _BareSandbox(Sandbox):
+    @property
+    def id(self) -> str:
+        return "bare"
+
+    @property
+    def workdir(self) -> str:
+        return "/workspace"
+
+    async def execute(self, command: str, *, timeout=None, envs=None, as_root=False, on_chunk=None):
+        del command, timeout, envs, as_root, on_chunk
+        return ExecuteResult(output="", exit_code=0)
+
+    async def upload(self, files: list[tuple[str, bytes]]) -> None: ...
+
+    async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
+        return []
+
+    async def close(self) -> None: ...
+
+
 @pytest.mark.asyncio
 async def test_base_get_browser_endpoint_not_supported() -> None:
-    sb = _RecordingSandbox()
-    with pytest.raises(NotImplementedError):
+    sb = _BareSandbox()
+    with pytest.raises(SandboxCapabilityUnsupportedError):
         await sb.get_browser_endpoint()
 
 
 @pytest.mark.asyncio
-async def test_local_sandbox_browser_endpoint_is_localhost() -> None:
+async def test_local_sandbox_browser_capabilities_unsupported() -> None:
     sb = LocalSandbox()
-    ep = await sb.get_browser_endpoint()
-    assert isinstance(ep, BrowserEndpoint)
-    assert ep.url == "http://localhost:8080/"
-    assert ep.headers == {}
-
-
-@pytest.mark.asyncio
-async def test_local_sandbox_start_browser_is_noop() -> None:
-    # The in-image launch script is absent on a dev host; start must not raise.
-    sb = LocalSandbox()
-    await sb.start_browser()
+    assert sb.capabilities.browser is False
+    with pytest.raises(SandboxCapabilityUnsupportedError):
+        await sb.start_browser()
+    with pytest.raises(SandboxCapabilityUnsupportedError):
+        await sb.get_browser_endpoint()
 
 
 @pytest.mark.asyncio
@@ -182,7 +211,7 @@ async def test_opensandbox_translates_provider_error_to_sandbox_error() -> None:
     from opensandbox.exceptions.sandbox import SandboxInternalException
 
     from cubeplex.sandbox.base import SandboxError
-    from cubeplex.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
     class _FailingInner:
         id = "sb-1"

@@ -22,6 +22,7 @@ _ISS = "cubeplex:sandbox-panel"
 class PanelClaims:
     sandbox_id: str
     port: int
+    provider: str | None = None
 
 
 def sign_panel_token(
@@ -30,15 +31,18 @@ def sign_panel_token(
     port: int,
     secret: str,
     ttl: timedelta,
+    provider: str | None = None,
 ) -> str:
     now = datetime.now(UTC)
-    claims = {
+    claims: dict[str, object] = {
         "sid": sandbox_id,
         "port": int(port),
         "exp": int((now + ttl).timestamp()),
         "iat": int(now.timestamp()),
         "iss": _ISS,
     }
+    if provider is not None:
+        claims["prv"] = provider
     return jwt.encode(claims, secret, algorithm="HS256")
 
 
@@ -52,7 +56,13 @@ def verify_panel_token(token: str, *, secret: str) -> PanelClaims:
         )
     except jwt.PyJWTError as exc:
         raise ValueError("Invalid or expired panel token") from exc
-    return PanelClaims(sandbox_id=str(payload["sid"]), port=int(payload["port"]))
+    raw_provider = payload.get("prv")
+    provider = str(raw_provider) if raw_provider is not None else None
+    return PanelClaims(
+        sandbox_id=str(payload["sid"]),
+        port=int(payload["port"]),
+        provider=provider,
+    )
 
 
 def get_panel_secret() -> str:

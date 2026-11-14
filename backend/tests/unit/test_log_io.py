@@ -9,9 +9,9 @@ import pytest
 from opensandbox.models.execd import RunCommandOpts
 
 from cubeplex.sandbox.base import ExecuteResult
-from cubeplex.sandbox.local import LocalSandbox
 from cubeplex.sandbox.log_io import append_output
-from cubeplex.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox.providers.local import LocalSandbox
+from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
 
 async def test_internal_logs_remain_writable_when_agent_cannot_write_root_owned_directory() -> None:

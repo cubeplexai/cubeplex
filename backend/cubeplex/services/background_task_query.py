@@ -63,11 +63,21 @@ class TaskProjection:
             return True
         return self.has_pending_event and self.task.notifications_cancelled_at is None
 
+    def _provider_supports_reconnect(self) -> bool:
+        if self.command is None or not self.command.provider:
+            return False
+        from cubeplex.sandbox.registry import UnknownSandboxProviderError, get_provider_registry
+
+        try:
+            return get_provider_registry().get(self.command.provider).capabilities.reconnect
+        except UnknownSandboxProviderError:
+            return False
+
     @property
     def remote_cancel_supported(self) -> bool:
         return (
             self.command is not None
-            and self.command.provider != "local"
+            and self._provider_supports_reconnect()
             and self.command.provider_ref is not None
             and self.task.state in INFLIGHT_TASK_STATES
         )
@@ -76,7 +86,7 @@ class TaskProjection:
     def reconnect_supported(self) -> bool:
         return (
             self.command is not None
-            and self.command.provider != "local"
+            and self._provider_supports_reconnect()
             and self.command.provider_ref is not None
             and self.command.sandbox_instance_id is not None
         )

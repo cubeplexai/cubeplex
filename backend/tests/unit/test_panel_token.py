@@ -37,6 +37,20 @@ class TestPanelToken:
         assert claims.sandbox_id == "sbx_abc"
         assert claims.port == 8080
         assert isinstance(claims.port, int)
+        assert claims.provider is None
+
+    def test_roundtrip_with_provider(self) -> None:
+        token = sign_panel_token(
+            sandbox_id="sbx_abc",
+            port=7681,
+            secret=_SECRET,
+            ttl=timedelta(hours=1),
+            provider="opensandbox",
+        )
+        claims = verify_panel_token(token, secret=_SECRET)
+        assert claims.sandbox_id == "sbx_abc"
+        assert claims.port == 7681
+        assert claims.provider == "opensandbox"
 
     def test_bad_signature_rejected(self) -> None:
         token = sign_panel_token(

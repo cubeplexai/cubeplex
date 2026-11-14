@@ -46,6 +46,7 @@ def _make_sandbox() -> MagicMock:
     sandbox = MagicMock()
     sandbox.download = AsyncMock(return_value=[])  # no manifest file
     sandbox.upload = AsyncMock()
+    sandbox.sync_archive = AsyncMock()
     sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
     return sandbox
 
@@ -338,6 +339,7 @@ async def test_event_service_called_on_success() -> None:
     sandbox = MagicMock()
     sandbox.download = AsyncMock(side_effect=FileNotFoundError)  # cold
     sandbox.upload = AsyncMock()
+    sandbox.sync_archive = AsyncMock()
     sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
     event_service = MagicMock()
     event_service.record = AsyncMock()
@@ -358,6 +360,7 @@ async def test_event_service_not_called_on_noop() -> None:
     sandbox = MagicMock()
     sandbox.download = AsyncMock(side_effect=FileNotFoundError)  # empty manifest
     sandbox.upload = AsyncMock()
+    sandbox.sync_archive = AsyncMock()
     sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
     event_service = MagicMock()
     event_service.record = AsyncMock()
@@ -376,6 +379,7 @@ async def test_event_service_called_on_failed_but_flag_not_set() -> None:
     sandbox = MagicMock()
     sandbox.download = AsyncMock(side_effect=FileNotFoundError)
     sandbox.upload = AsyncMock()
+    sandbox.sync_archive = AsyncMock()
     sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
     event_service = MagicMock()
     event_service.record = AsyncMock()
@@ -405,6 +409,7 @@ async def test_event_service_swallow_exception() -> None:
     sandbox = MagicMock()
     sandbox.download = AsyncMock(side_effect=FileNotFoundError)
     sandbox.upload = AsyncMock()
+    sandbox.sync_archive = AsyncMock()
     sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
     event_service = MagicMock()
     event_service.record = AsyncMock(side_effect=RuntimeError("db down"))

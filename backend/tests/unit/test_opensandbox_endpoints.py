@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from cubeplex.sandbox.base import SandboxError
-from cubeplex.sandbox.opensandbox import OpenSandbox
 from cubeplex.sandbox.panel_token import verify_panel_token
+from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
 
 class _FakeSandbox:

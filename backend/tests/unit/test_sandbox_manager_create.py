@@ -178,8 +178,8 @@ async def test_reconnect_failure_after_create_keeps_running_row(
             workspace_id="ws-A",
         )
 
-    # Row must remain `running` — not deleted — so the reaper / next reuse
-    # owns its lifecycle.
+    # Row must remain with the created sandbox_id — not deleted — so the reaper
+    # owns cleanup of the live remote instance.
     async with factory() as s:
         rows = (
             await s.execute(
@@ -190,8 +190,9 @@ async def test_reconnect_failure_after_create_keeps_running_row(
                 {"u": "user-1", "w": "ws-A"},
             )
         ).all()
-    assert len(rows) == 1, f"Expected the running row to remain, got: {rows}"
-    assert rows[0][0] == "running"
+    assert len(rows) == 1, f"Expected the provisioning row to remain, got: {rows}"
+    assert rows[0][0] == "provisioning"
+    assert rows[0][1] is not None
     assert not rows[0][1].startswith("pending-"), (
         f"Row still has a placeholder sandbox_id — promote_to_running didn't "
         f"commit before the reconnect failure: {rows[0]}"

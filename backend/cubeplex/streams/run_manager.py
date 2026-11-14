@@ -4866,15 +4866,32 @@ class RunManager:
                     ]
 
                 from cubeplex.config import config as _sb_cfg
+                from cubeplex.sandbox.registry import (
+                    UnknownSandboxProviderError,
+                    get_provider_registry,
+                )
                 from cubeplex.tools.builtin.sandbox_config import make_session_loader
 
-                _sb_default_image = str(_sb_cfg.get("sandbox.image", "ubuntu:22.04"))
+                try:
+                    _sb_provider = get_provider_registry().get(
+                        getattr(sandbox, "provider_name", None)
+                    )
+                except UnknownSandboxProviderError:
+                    _sb_provider = get_provider_registry().default()
+                _sb_default_image = _sb_provider.default_image or str(
+                    _sb_cfg.get("sandbox.image", "ubuntu:22.04")
+                )
+                _sb_egress_ok = (
+                    bool(str(_sb_cfg.get("sandbox.egress_exchange_host", "") or "").strip())
+                    and _sb_provider.capabilities.egress_proxy
+                )
                 _sb_config_loader = make_session_loader(
                     session_factory=async_session_maker,
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user_id,
                     default_image=_sb_default_image,
+                    egress_proxy_supported=_sb_egress_ok,
                 )
 
                 sandbox_mw = SandboxMiddleware(

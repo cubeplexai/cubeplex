@@ -1370,7 +1370,7 @@ async def test_auto_background_promotes_long_command(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.15)
     sandbox = LocalSandbox(workdir=str(tmp_path))
@@ -1397,7 +1397,7 @@ async def test_auto_background_preserves_deadline_when_notifications_are_disable
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.05)
     sandbox = LocalSandbox(workdir=str(tmp_path))
@@ -1443,7 +1443,7 @@ async def test_auto_background_hands_off_instead_of_waiting_at_run_end(
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
     from cubeplex.middleware.sandbox import _ReservedCommand
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.05)
     sandbox = LocalSandbox(workdir=str(tmp_path))
@@ -1573,7 +1573,7 @@ async def test_auto_background_honors_short_explicit_timeout(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 2)
     sandbox = LocalSandbox(workdir=str(tmp_path))
@@ -1593,7 +1593,7 @@ async def test_auto_background_preserves_timeout_after_handoff(
 ) -> None:
     from cubeplex.middleware import sandbox as sandbox_mod
     from cubeplex.sandbox.base import ProcessHandle
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     monkeypatch.setattr(sandbox_mod, "AUTO_BACKGROUND_SECONDS", 0.05)
     sandbox = LocalSandbox(workdir=str(tmp_path))
@@ -1907,7 +1907,7 @@ async def test_background_deadline_preserves_completion_notice_opt_out(
 
 @pytest.mark.asyncio
 async def test_auto_started_fast_command_spills_oversized_output(tmp_path: Any) -> None:
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     sandbox = LocalSandbox(workdir=str(tmp_path))
     tool = _make_execute_tool(sandbox)
@@ -2007,7 +2007,7 @@ async def test_monitor_hands_off_to_durable_coordinator_immediately() -> None:
 
 @pytest.mark.asyncio
 async def test_auto_background_skips_when_command_exits_quickly(tmp_path: Any) -> None:
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     sandbox = LocalSandbox(workdir=str(tmp_path))
     discarded: list[str] = []
@@ -2053,7 +2053,7 @@ async def test_bare_sleep_does_not_auto_background() -> None:
 
 @pytest.mark.asyncio
 async def test_background_log_path_is_written(tmp_path: Any) -> None:
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     sandbox = LocalSandbox(workdir=str(tmp_path))
     mw = SandboxMiddleware(sandbox=sandbox)
@@ -2072,7 +2072,7 @@ async def test_background_log_path_is_written(tmp_path: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_log_append_does_not_put_large_output_in_shell_command(tmp_path: Any) -> None:
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     sandbox = LocalSandbox(workdir=str(tmp_path))
     path = tmp_path / ".cubeplex" / "execute-large.log"
@@ -2108,7 +2108,7 @@ async def test_on_run_end_does_not_poll_or_kill_unhanded_command() -> None:
 @pytest.mark.asyncio
 async def test_finalize_kills_unreserved_command_without_durable_repository(tmp_path: Any) -> None:
     from cubeplex.sandbox.base import ProcessHandle
-    from cubeplex.sandbox.local import LocalSandbox
+    from cubeplex.sandbox.providers.local import LocalSandbox
 
     sandbox = LocalSandbox(workdir=str(tmp_path))
     mw = SandboxMiddleware(sandbox=sandbox)

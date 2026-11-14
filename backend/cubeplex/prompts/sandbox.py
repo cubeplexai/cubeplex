@@ -1,6 +1,10 @@
 """Sandbox execution prompt — injected when a sandbox is available."""
 
-SANDBOX_PROMPT_TEMPLATE = """## Shell Execution
+from __future__ import annotations
+
+from cubeplex.sandbox.base import SandboxCapabilities
+
+_HEADER = """## Shell Execution
 
 You have access to the `execute` tool to run shell commands in a sandbox environment.
 
@@ -8,9 +12,9 @@ You have access to the `execute` tool to run shell commands in a sandbox environ
 All commands execute in this directory by default. Always use this path (or relative paths \
 from it) when reading, writing, or referencing files. Do NOT guess paths like `/home/user`, \
 `/tmp`, or `~` — use the working directory above unless you have explicitly confirmed \
-another path exists.
+another path exists."""
 
-**Persistence:** `{workdir}` is a persistent volume that survives sandbox restarts. \
+_PERSISTENT_VOLUME_SECTION = """**Persistence:** `{workdir}` is a persistent volume that survives sandbox restarts. \
 Files and packages saved here remain available across conversations. Everything outside \
 `{workdir}` (including `/tmp`, `/opt`, other users' home directories) is ephemeral and \
 lost when the sandbox is recreated. `pip install` and `npm install -g` already default \
@@ -49,9 +53,31 @@ or the root.
 directories are off-limits: `uploads/` (chat attachments — treat as read-only; copy a \
 file into a project directory if it becomes project material), `.skills/`, \
 `.python-packages/`, `.npm-global/`.
-- **Never reorganize or delete the user's existing files** unless explicitly asked.
+- **Never reorganize or delete the user's existing files** unless explicitly asked."""
 
-## File Tools
+_EPHEMERAL_VOLUME_SECTION = """**Persistence:** `{workdir}` and all other directories in this sandbox are ephemeral \
+and will be lost when the sandbox is recreated. Do not rely on files or installed packages \
+remaining available after a restart or across separate sandboxes.
+
+**Isolated Python environments:** when a project or skill needs its own environment \
+(conflicting versions, a different Python), create one under `{workdir}` (e.g. \
+`python -m venv .venv` or `uv`). Each `execute` call is a fresh shell: `source .venv/bin/activate`, \
+`cd`, and exported variables do NOT carry over to the next call. Either chain within one \
+command (`source .venv/bin/activate && ...`) or invoke the env's interpreter by absolute path \
+(`.venv/bin/python`, `.venv/bin/pip`).
+
+## Workspace Organization
+
+Keep `{workdir}` tidy during this sandbox session:
+
+- **Task outputs go under `{workdir}/projects/<name>/`** — name directories after the \
+deliverable in kebab-case rather than generic IDs.
+- **Scratch goes to `{workdir}/tmp/`** — keep intermediate files and one-off scripts separate \
+from deliverable files.
+- **Keep the root clean.** Never clutter the `{workdir}` root; treat `uploads/` as read-only \
+and do not modify `.skills/`, `.python-packages/`, or `.npm-global/`."""
+
+_FILE_TOOLS_SECTION = """## File Tools
 
 You have dedicated tools for file operations:
 
@@ -68,9 +94,9 @@ call. Prefer this over `sed`/`awk`.
 **When to use which:**
 - Creating new files → `write`
 - Modifying existing files → `edit`
-- Running code, installing packages, listing files → `execute`
+- Running code, installing packages, listing files → `execute`"""
 
-## Shell Commands (`execute` tool)
+_SHELL_COMMANDS_BACKGROUND_SECTION = """## Shell Commands (`execute` tool)
 
 **Shell features available:**
 - Pipes: `cat file.txt | grep pattern | wc -l`
@@ -96,11 +122,47 @@ deadline. Use `monitor` for separate predicates: its script must perform its own
 repeated checks and exit 0 once the condition is met, or nonzero on failure. A \
 monitor sends one final notice only; stdout is a log and never wakes the agent \
 repeatedly. Use `kill_execute` to stop a background command. The sandbox panel \
-lists running jobs and can Kill them.
+lists running jobs and can Kill them."""
 
-**Error handling:**
+_SHELL_COMMANDS_FOREGROUND_SECTION = """## Shell Commands (`execute` tool)
+
+**Shell features available:**
+- Pipes: `cat file.txt | grep pattern | wc -l`
+- Redirection: `command > output.txt 2>&1`
+- Command chaining: `cmd1 && cmd2` (stop on error), `cmd1 ; cmd2` (always continue)
+- Commands execute synchronously in the foreground (`background` execution is not supported \
+in this sandbox). Do not detach processes with `&`, `nohup`, or `disown`."""
+
+_ERROR_HANDLING_SECTION = """**Error handling:**
 - Non-zero exit codes are appended to output as `[exit code: N]`
 - Check exit codes for command success/failure
 - Commands are killed after the configured execution deadline (one hour by default) and \
 return `[timeout]`. If you still time out, split the work or raise `timeout_seconds` and retry.
 - Commands run in an isolated sandbox — safe to experiment"""
+
+
+def build_sandbox_prompt(workdir: str, capabilities: SandboxCapabilities) -> str:
+    """Build deterministic, cache-stable sandbox instructions matching ``capabilities``."""
+    volume_section = (
+        _PERSISTENT_VOLUME_SECTION if capabilities.persistent_volume else _EPHEMERAL_VOLUME_SECTION
+    )
+    shell_section = (
+        _SHELL_COMMANDS_BACKGROUND_SECTION
+        if capabilities.background
+        else _SHELL_COMMANDS_FOREGROUND_SECTION
+    )
+    return "\n\n".join(
+        [
+            _HEADER,
+            volume_section,
+            _FILE_TOOLS_SECTION,
+            shell_section,
+            _ERROR_HANDLING_SECTION,
+        ]
+    ).format(workdir=workdir)
+
+
+SANDBOX_PROMPT_TEMPLATE = build_sandbox_prompt(
+    "{workdir}",
+    SandboxCapabilities(background=True, persistent_volume=True),
+)

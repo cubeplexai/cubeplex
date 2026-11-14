@@ -12,8 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable, Sequence
-from contextlib import suppress
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Sequence,
+)
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -21,9 +26,11 @@ from loguru import logger
 
 from cubeplex.sandbox.base import (
     ExecuteResult,
+    FileEntry,
     ProcessHandle,
     ProcessSnapshot,
     Sandbox,
+    SandboxCapabilities,
     SandboxError,
     SandboxInstanceGoneError,
 )
@@ -37,11 +44,7 @@ from cubeplex.skills.sync_manifest import (
     hash_manifest,
     parse_manifest,
 )
-from cubeplex.skills.sync_tar import (
-    SKILLS_DELTA_TGZ_PATH,
-    build_extract_and_remove_cmd,
-    build_tarball,
-)
+from cubeplex.skills.sync_tar import build_tarball
 
 if TYPE_CHECKING:
     from cubeplex.sandbox.manager import SandboxManager
@@ -116,26 +119,24 @@ async def _sync_skills(
                 skills_count=len(manifest.get("skills", {})),
             )
 
-        # 4) Push + remove
+        # 4) Push + remove via Sandbox.sync_archive
         files: list[tuple[str, bytes]] = []
         if diff.to_push:
             files = await _collect_files_for_push(catalog, diff.to_push)
         files_uploaded = bool(files)
+        tarball: bytes | None = None
         tarball_size: int | None = None
         if files_uploaded:
             tarball = await asyncio.to_thread(build_tarball, files)
             tarball_size = len(tarball)
-            await sandbox.upload([(SKILLS_DELTA_TGZ_PATH, tarball)])
 
         repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
-        cmd = build_extract_and_remove_cmd(
-            skills_root=SKILLS_ROOT,
-            has_push=files_uploaded,
-            to_repush_names=repush_names,
-            to_remove=diff.to_remove,
+        await sandbox.sync_archive(
+            tarball,
+            dest=SKILLS_ROOT,
+            repush_names=repush_names,
+            remove_paths=diff.to_remove,
         )
-        if cmd:
-            await sandbox.execute(cmd)
 
         # Spec §7: if diff said to push skills but catalog returned no files,
         # do NOT write the manifest (which would lie that the skills are synced).
@@ -243,7 +244,26 @@ class LazySandbox(Sandbox):
         return self._sandbox.id
 
     @property
+    def provider_name(self) -> str:
+        if self._sandbox is not None:
+            return self._sandbox.provider_name
+        default_provider = getattr(self._manager, "default_provider", None)
+        name = getattr(default_provider, "name", None)
+        return name if isinstance(name, str) and name else "opensandbox"
+
+    @property
+    def capabilities(self) -> SandboxCapabilities:
+        if self._sandbox is not None:
+            return self._sandbox.capabilities
+        default_caps = getattr(self._manager, "default_capabilities", None)
+        if isinstance(default_caps, SandboxCapabilities):
+            return default_caps
+        return SandboxCapabilities(background=True)
+
+    @property
     def workdir(self) -> str:
+        if self._sandbox is not None:
+            return self._sandbox.workdir
         return self._workdir
 
     @property
@@ -500,12 +520,7 @@ class LazySandbox(Sandbox):
             )
 
     def supports_background(self) -> bool:
-        # Concrete drivers used in production implement start/poll/kill.
-        # Do not return False before _ensure — the first background execute
-        # would be rejected on a fresh LazySandbox.
-        if self._sandbox is not None:
-            return self._sandbox.supports_background()
-        return True
+        return self.capabilities.background
 
     async def run_with_backend(self, operation: Callable[[Sandbox], Awaitable[T]]) -> T:
         sandbox = await self._ensure_with_retry()
@@ -582,6 +597,27 @@ class LazySandbox(Sandbox):
         # agent can act on. A genuinely dead sandbox is detected and recreated
         # by the next execute/upload call.
         return await sandbox.download(paths)
+
+    async def list_dir(self, path: str) -> list[FileEntry]:
+        sandbox = await self._ensure_with_retry()
+        return await sandbox.list_dir(path)
+
+    async def stat_file(self, path: str) -> FileEntry:
+        sandbox = await self._ensure_with_retry()
+        return await sandbox.stat_file(path)
+
+    async def read_text(self, path: str, *, max_bytes: int | None = None) -> str:
+        sandbox = await self._ensure_with_retry()
+        return await sandbox.read_text(path, max_bytes=max_bytes)
+
+    def stream_file(self, path: str) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+        @asynccontextmanager
+        async def _stream() -> AsyncIterator[AsyncIterator[bytes]]:
+            sandbox = await self._ensure_with_retry()
+            async with sandbox.stream_file(path) as chunks:
+                yield chunks
+
+        return _stream()
 
     async def close(self) -> None:
         if self._sandbox is not None:

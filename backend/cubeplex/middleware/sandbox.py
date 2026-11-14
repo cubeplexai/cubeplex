@@ -53,12 +53,13 @@ from cubeplex.config import MAX_COMMAND_TIMEOUT_SECONDS, get_command_default_tim
 from cubeplex.models.background_task import TaskStopReason
 from cubeplex.models.public_id import PREFIX_SANDBOX_COMMAND, generate_public_id
 from cubeplex.parsers import ParseOptions
-from cubeplex.prompts.sandbox import SANDBOX_PROMPT_TEMPLATE
+from cubeplex.prompts.sandbox import build_sandbox_prompt
 from cubeplex.sandbox.base import (
     ProcessHandle,
     ProcessHandleNotFoundError,
     ProcessSnapshot,
     Sandbox,
+    SandboxCapabilities,
     SandboxInstanceGoneError,
 )
 from cubeplex.sandbox.log_io import AppendOutputResult, append_output
@@ -1344,7 +1345,7 @@ def _make_foreground_execute_tool(
                     content=[TextContent(text="Do not background shell commands.")],
                     is_error=True,
                 )
-            if sandbox.supports_background() is True:
+            if _sandbox_capabilities(sandbox).background and sandbox.supports_background() is True:
                 return await sandbox.run_with_backend(
                     lambda driver: _run_polled(driver, args, on_update)
                 )
@@ -2202,6 +2203,15 @@ def _make_file_read_tool(
 # ---------------------------------------------------------------------------
 
 
+def _sandbox_capabilities(sandbox: Sandbox) -> SandboxCapabilities:
+    raw_caps = getattr(sandbox, "capabilities", None)
+    if isinstance(raw_caps, SandboxCapabilities):
+        return raw_caps
+    supports_bg = getattr(sandbox, "supports_background", None)
+    bg = True if not callable(supports_bg) else supports_bg() is not False
+    return SandboxCapabilities(background=bg, persistent_volume=True)
+
+
 class SandboxMiddleware(Middleware):
     """Registers sandbox tools and injects sandbox capability section into system prompt.
 
@@ -2255,58 +2265,72 @@ class SandboxMiddleware(Middleware):
         self._owner_id = f"run:{run_id}" if run_id else "run:local"
         self._lease_task: asyncio.Task[None] | None = None
 
-        self._tools: list[AgentTool[Any]] = [
-            _make_execute_tool(
-                sandbox,
-                workspace_id=workspace_id,
-                conversation_id=conversation_id,
-                live=self._live_commands,
-                live_lock=self._live_lock,
-                persist_reserve=self._persist_reserve,
-                persist_running=self._persist_running,
-                persist_cursor=self._persist_cursor,
-                persist_killed=self._persist_killed,
-                persist_start_failed=self._persist_start_failed,
-                persist_exited=self._persist_exited,
-                persist_discard=self._persist_discard,
-                persist_foreground=self._persist_foreground,
-                persist_background_terminal=self._persist_background_terminal,
-                persist_timed_out=self._persist_timed_out,
-                load_persisted_status=self._persisted_command_status,
-                deadline_tasks=self._command_deadline_tasks,
-                on_live=self._ensure_lease_task,
-                handoff=(
-                    self._handoff_conversation_command if session_factory is not None else None
-                ),
-            ),
-            _make_kill_execute_tool(
-                sandbox,
-                self._live_commands,
-                persist_killed=self._persist_killed,
-                kill_persisted=self._kill_persisted_command,
-                live_lock=self._live_lock,
-                deadline_tasks=self._command_deadline_tasks,
-            ),
-            _make_monitor_tool(
-                sandbox,
-                live=self._live_commands,
-                live_lock=self._live_lock,
-                persist_reserve=self._persist_reserve,
-                persist_running=self._persist_running,
-                persist_cursor=self._persist_cursor,
-                persist_killed=self._persist_killed,
-                persist_start_failed=self._persist_start_failed,
-                persist_monitor_timed_out=self._persist_monitor_timed_out,
-                persist_monitor_observation=self._persist_monitor_observation,
-                persist_monitor_timeout=self._persist_monitor_timeout,
-                deadline_tasks=self._command_deadline_tasks,
-                on_live=self._ensure_lease_task,
-                handoff=self._handoff_conversation_command,
-            ),
+        caps = _sandbox_capabilities(sandbox)
+        file_tools: list[AgentTool[Any]] = [
             _make_write_file_tool(sandbox),
             _make_edit_file_tool(sandbox),
             _make_file_read_tool(sandbox, conversation_id),
         ]
+        if caps.background:
+            self._tools: list[AgentTool[Any]] = [
+                _make_execute_tool(
+                    sandbox,
+                    workspace_id=workspace_id,
+                    conversation_id=conversation_id,
+                    live=self._live_commands,
+                    live_lock=self._live_lock,
+                    persist_reserve=self._persist_reserve,
+                    persist_running=self._persist_running,
+                    persist_cursor=self._persist_cursor,
+                    persist_killed=self._persist_killed,
+                    persist_start_failed=self._persist_start_failed,
+                    persist_exited=self._persist_exited,
+                    persist_discard=self._persist_discard,
+                    persist_foreground=self._persist_foreground,
+                    persist_background_terminal=self._persist_background_terminal,
+                    persist_timed_out=self._persist_timed_out,
+                    load_persisted_status=self._persisted_command_status,
+                    deadline_tasks=self._command_deadline_tasks,
+                    on_live=self._ensure_lease_task,
+                    handoff=(
+                        self._handoff_conversation_command if session_factory is not None else None
+                    ),
+                ),
+                _make_kill_execute_tool(
+                    sandbox,
+                    self._live_commands,
+                    persist_killed=self._persist_killed,
+                    kill_persisted=self._kill_persisted_command,
+                    live_lock=self._live_lock,
+                    deadline_tasks=self._command_deadline_tasks,
+                ),
+                _make_monitor_tool(
+                    sandbox,
+                    live=self._live_commands,
+                    live_lock=self._live_lock,
+                    persist_reserve=self._persist_reserve,
+                    persist_running=self._persist_running,
+                    persist_cursor=self._persist_cursor,
+                    persist_killed=self._persist_killed,
+                    persist_start_failed=self._persist_start_failed,
+                    persist_monitor_timed_out=self._persist_monitor_timed_out,
+                    persist_monitor_observation=self._persist_monitor_observation,
+                    persist_monitor_timeout=self._persist_monitor_timeout,
+                    deadline_tasks=self._command_deadline_tasks,
+                    on_live=self._ensure_lease_task,
+                    handoff=self._handoff_conversation_command,
+                ),
+                *file_tools,
+            ]
+        else:
+            self._tools = [
+                _make_foreground_execute_tool(
+                    sandbox,
+                    workspace_id=workspace_id,
+                    conversation_id=conversation_id,
+                ),
+                *file_tools,
+            ]
         if config_loader is not None:
             self._tools.append(create_sandbox_config_tool(config_loader))
         self._subagent_tools: list[AgentTool[Any]] = [
@@ -3085,6 +3109,8 @@ class SandboxMiddleware(Middleware):
         """
         del ctx, signal  # not used
 
-        sandbox_section = SANDBOX_PROMPT_TEMPLATE.format(workdir=self.sandbox.workdir)
+        sandbox_section = build_sandbox_prompt(
+            self.sandbox.workdir, _sandbox_capabilities(self.sandbox)
+        )
         separator = "\n\n" if system_prompt else ""
         return system_prompt + separator + sandbox_section

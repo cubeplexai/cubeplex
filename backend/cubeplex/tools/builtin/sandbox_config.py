@@ -75,6 +75,7 @@ def make_session_loader(
     workspace_id: str,
     user_id: str,
     default_image: str,
+    egress_proxy_supported: bool | None = None,
 ) -> SandboxConfigLoader:
     """Build a loader that opens a fresh session per call via ``session_factory``.
 
@@ -84,12 +85,21 @@ def make_session_loader(
 
     async def _load() -> dict[str, Any]:
         async with session_factory() as session:
+            if egress_proxy_supported is None:
+                return await load_agent_view(
+                    session,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    default_image=default_image,
+                )
             return await load_agent_view(
                 session,
                 org_id=org_id,
                 workspace_id=workspace_id,
                 user_id=user_id,
                 default_image=default_image,
+                egress_proxy_supported=egress_proxy_supported,
             )
 
     return _load

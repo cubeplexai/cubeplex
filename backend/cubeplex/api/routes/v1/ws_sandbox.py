@@ -14,6 +14,8 @@ different surface.
 import mimetypes
 import posixpath
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 from typing import Annotated, Any, cast
 from urllib.parse import quote
 
@@ -24,8 +26,10 @@ from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from cubeplex.api.schemas.sandbox_policy import (
+    SandboxCapabilitiesOut,
     SandboxStatusOut,
     SandboxStatusValue,
 )
@@ -34,13 +38,70 @@ from cubeplex.auth.dependencies import require_member
 from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.db.session import get_session
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
-from cubeplex.sandbox import SandboxError
-from cubeplex.sandbox.manager import get_sandbox_manager
-from cubeplex.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox import (
+    SandboxCapabilities,
+    SandboxCapabilityUnsupportedError,
+    SandboxError,
+    SandboxFileTooLargeError,
+)
+from cubeplex.sandbox.manager import SandboxManager, get_sandbox_manager
+from cubeplex.sandbox.provider import SandboxProvider
+from cubeplex.sandbox.registry import UnknownSandboxProviderError
 from cubeplex.utils.http import content_disposition
 from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/sandbox", tags=["ws-sandbox"])
+
+
+def resolve_provider_and_caps(
+    manager: SandboxManager, provider_name: str | None
+) -> tuple[str, SandboxCapabilities]:
+    """Return ``(provider_name, capabilities)`` for a row, falling back safely."""
+    registry = getattr(manager, "registry", None)
+    if registry is not None:
+        try:
+            provider = registry.get(provider_name)
+            return provider.name, provider.capabilities
+        except UnknownSandboxProviderError:
+            return (provider_name or "unknown", SandboxCapabilities())
+    default_provider = getattr(manager, "default_provider", None)
+    if default_provider is not None and provider_name in (None, default_provider.name):
+        return default_provider.name, default_provider.capabilities
+    return (provider_name or "unknown", SandboxCapabilities())
+
+
+async def resolve_scope_provider(
+    session: AsyncSession | None,
+    manager: SandboxManager,
+    *,
+    org_id: str,
+    workspace_id: str,
+    scope_type: str,
+    scope_id: str,
+) -> SandboxProvider | None:
+    """Resolve the provider that owns an active scope row, or the default provider."""
+    registry = getattr(manager, "registry", None)
+    if session is not None and registry is not None:
+        repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+        row = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
+        if row is not None:
+            try:
+                return cast(SandboxProvider, registry.get(row.provider))
+            except UnknownSandboxProviderError:
+                return None
+    return cast(SandboxProvider | None, getattr(manager, "default_provider", None))
+
+
+def _validate_path_within(raw_path: str, workdir: str) -> str:
+    root = posixpath.normpath(workdir)
+    normalized = posixpath.normpath(raw_path)
+    prefix = "/" if root == "/" else f"{root.rstrip('/')}/"
+    if normalized != root and not normalized.startswith(prefix):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="path outside workspace",
+        )
+    return normalized
 
 
 async def _assert_personal_or_conv_access(
@@ -170,20 +231,27 @@ async def get_sandbox_status(
     returns the topic-keyed sandbox row instead of the caller's personal
     one so the panel reflects what the agent is actually using.
     """
+    manager = get_sandbox_manager()
     repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
     scope_type, scope_id, _owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
     row = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
     if row is None:
+        provider = manager.default_provider
         return SandboxStatusOut(
             status="absent",
+            provider=provider.name,
+            capabilities=SandboxCapabilitiesOut.from_capabilities(provider.capabilities),
             default_image=None,
             last_activity_at=None,
             browser_url=None,
         )
+    provider_name, caps = resolve_provider_and_caps(manager, row.provider)
     return SandboxStatusOut(
         status=cast(SandboxStatusValue, row.status),
+        provider=provider_name,
+        capabilities=SandboxCapabilitiesOut.from_capabilities(caps),
         default_image=row.image,
         last_activity_at=utc_isoformat(row.last_activity_at),
         browser_url=None,
@@ -205,20 +273,24 @@ class SandboxFileEntry(BaseModel):
 async def list_sandbox_files(
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    path: str = Query(default="/workspace"),
+    path: str | None = Query(default=None),
     conversation_id: str | None = Query(default=None),
 ) -> list[SandboxFileEntry]:
     """List direct children of a directory in the sandbox."""
-    normalized = posixpath.normpath(path)
-    if not (normalized == "/workspace" or normalized.startswith("/workspace/")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="path outside workspace",
-        )
     manager = get_sandbox_manager()
     scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
+    provider = await resolve_scope_provider(
+        session,
+        manager,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    if path is not None and provider is not None:
+        _validate_path_within(path, provider.default_workdir)
     try:
         attachment = await manager.get_or_create(
             scope_type=scope_type,
@@ -228,17 +300,29 @@ async def list_sandbox_files(
             workspace_id=ctx.workspace_id,
         )
         sandbox = attachment.sandbox
+        normalized = (
+            posixpath.normpath(sandbox.workdir)
+            if path is None
+            else _validate_path_within(path, sandbox.workdir)
+        )
         await manager.touch(
             sandbox.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        if not isinstance(sandbox, OpenSandbox):
-            raise SandboxError("filesystem operations require OpenSandbox backend")
-        raw = sandbox._sandbox  # noqa: SLF001
-        from opensandbox.models.filesystem import DirectoryListEntry
-
-        entries = await raw.files.list_directory(DirectoryListEntry(path=normalized, depth=1))
+        entries = await sandbox.list_dir(normalized)
+    except HTTPException:
+        raise
+    except SandboxCapabilityUnsupportedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="directory not found",
+        ) from None
     except SandboxError as exc:
         logger.warning(
             "sandbox file listing failed for ws {}: {}",
@@ -252,16 +336,14 @@ async def list_sandbox_files(
 
     result: list[SandboxFileEntry] = []
     for e in entries:
-        name = posixpath.basename(posixpath.normpath(e.path))
-        if not name or name.startswith("."):
+        if not e.name or e.name.startswith("."):
             continue
-        is_dir = e.entry_type == "directory"
         result.append(
             SandboxFileEntry(
                 path=e.path,
-                name=name,
-                is_dir=is_dir,
-                size=0 if is_dir else e.size,
+                name=e.name,
+                is_dir=e.is_dir,
+                size=0 if e.is_dir else e.size,
                 modified_at=utc_isoformat(e.modified_at),
             )
         )
@@ -287,16 +369,20 @@ async def get_sandbox_file_content(
     conversation_id: str | None = Query(default=None),
 ) -> SandboxFileContent:
     """Read a text file from the sandbox for inline preview."""
-    normalized = posixpath.normpath(path)
-    if not (normalized == "/workspace" or normalized.startswith("/workspace/")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="path outside workspace",
-        )
     manager = get_sandbox_manager()
     scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
+    provider = await resolve_scope_provider(
+        session,
+        manager,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    if provider is not None:
+        _validate_path_within(path, provider.default_workdir)
     try:
         attachment = await manager.get_or_create(
             scope_type=scope_type,
@@ -306,19 +392,20 @@ async def get_sandbox_file_content(
             workspace_id=ctx.workspace_id,
         )
         sandbox = attachment.sandbox
-        if not isinstance(sandbox, OpenSandbox):
-            raise SandboxError("filesystem operations require OpenSandbox backend")
-        raw = sandbox._sandbox  # noqa: SLF001
-        info_map = await raw.files.get_file_info([normalized])
-        info = info_map.get(normalized)
-        if info and info.size > MAX_PREVIEW_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="file too large for preview; use download instead",
-            )
-        content = await raw.files.read_file(normalized)
+        normalized = _validate_path_within(path, sandbox.workdir)
+        content = await sandbox.read_text(normalized, max_bytes=MAX_PREVIEW_BYTES)
     except HTTPException:
         raise
+    except SandboxFileTooLargeError:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="file too large for preview; use download instead",
+        ) from None
+    except SandboxCapabilityUnsupportedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -342,16 +429,22 @@ async def download_sandbox_file(
     conversation_id: str | None = Query(default=None),
 ) -> StreamingResponse:
     """Stream a file from the sandbox as a download."""
-    normalized = posixpath.normpath(path)
-    if not (normalized == "/workspace" or normalized.startswith("/workspace/")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="path outside workspace",
-        )
     manager = get_sandbox_manager()
     scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
+    provider = await resolve_scope_provider(
+        session,
+        manager,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    if provider is not None:
+        _validate_path_within(path, provider.default_workdir)
+    stack = AsyncExitStack()
+    streaming = False
     try:
         attachment = await manager.get_or_create(
             scope_type=scope_type,
@@ -361,10 +454,33 @@ async def download_sandbox_file(
             workspace_id=ctx.workspace_id,
         )
         sandbox = attachment.sandbox
-        if not isinstance(sandbox, OpenSandbox):
-            raise SandboxError("filesystem operations require OpenSandbox backend")
-        raw = sandbox._sandbox  # noqa: SLF001
-        stream = await raw.files.read_bytes_stream(normalized)
+        normalized = _validate_path_within(path, sandbox.workdir)
+        stream = await stack.enter_async_context(sandbox.stream_file(normalized))
+
+        async def chunks() -> AsyncIterator[bytes]:
+            try:
+                async for chunk in stream:
+                    yield chunk
+            finally:
+                await stack.aclose()
+
+        filename = posixpath.basename(normalized)
+        mime, _ = mimetypes.guess_type(filename)
+        response = StreamingResponse(
+            chunks(),
+            media_type=mime or "application/octet-stream",
+            headers={"Content-Disposition": content_disposition(filename)},
+            background=BackgroundTask(stack.aclose),
+        )
+        streaming = True
+        return response
+    except HTTPException:
+        raise
+    except SandboxCapabilityUnsupportedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -375,14 +491,9 @@ async def download_sandbox_file(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="sandbox unavailable",
         ) from exc
-
-    filename = posixpath.basename(normalized)
-    mime, _ = mimetypes.guess_type(filename)
-    return StreamingResponse(
-        stream,
-        media_type=mime or "application/octet-stream",
-        headers={"Content-Disposition": content_disposition(filename)},
-    )
+    finally:
+        if not streaming:
+            await stack.aclose()
 
 
 # ── Programmatic exec + upload (for automation / benchmark harnesses) ──
@@ -448,17 +559,21 @@ async def upload_sandbox_file(
     path: str = Query(...),
     conversation_id: str | None = Query(default=None),
 ) -> dict[str, object]:
-    """Upload a file to an absolute path under /workspace in the sandbox."""
-    normalized = posixpath.normpath(path)
-    if not (normalized == "/workspace" or normalized.startswith("/workspace/")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="path outside workspace",
-        )
+    """Upload a file to an absolute path under the sandbox workdir."""
     manager = get_sandbox_manager()
     scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
+    provider = await resolve_scope_provider(
+        session,
+        manager,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    if provider is not None:
+        _validate_path_within(path, provider.default_workdir)
     content = await file.read()
     try:
         attachment = await manager.get_or_create(
@@ -469,10 +584,13 @@ async def upload_sandbox_file(
             workspace_id=ctx.workspace_id,
         )
         sandbox = attachment.sandbox
+        normalized = _validate_path_within(path, sandbox.workdir)
         await sandbox.upload([(normalized, content)])
         await manager.touch(
             sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True
         )
+    except HTTPException:
+        raise
     except SandboxError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -568,6 +686,19 @@ async def get_terminal(
     scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
+    provider = await resolve_scope_provider(
+        session,
+        manager,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    if provider is not None and not provider.capabilities.terminal:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=f"terminal is not supported by provider '{provider.name}'",
+        )
     try:
         attachment = await manager.get_or_create(
             scope_type=scope_type,
@@ -589,6 +720,11 @@ async def get_terminal(
             workspace_id=ctx.workspace_id,
         )
         endpoint = await sandbox.get_terminal_endpoint()
+    except SandboxCapabilityUnsupportedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
     except SandboxError as exc:
         logger.warning(
             "terminal unavailable for workspace {}: {}",

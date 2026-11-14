@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal, TypeVar
 
-from loguru import logger
+from cubeplex.skills.sync_tar import SKILLS_DELTA_TGZ_PATH, build_extract_and_remove_cmd
 
 if TYPE_CHECKING:
     from cubeplex.parsers import FileReadOutput, ParseOptions
@@ -44,6 +45,45 @@ class ProcessHandleNotFoundError(SandboxError):
 
     def __init__(self, provider_ref: str) -> None:
         super().__init__(f"provider process record {provider_ref} is unavailable")
+
+
+class SandboxCapabilityUnsupportedError(SandboxError):
+    """Requested operation is not supported by this sandbox provider."""
+
+    def __init__(self, capability: str, provider: str) -> None:
+        self.capability = capability
+        self.provider = provider
+        super().__init__(f"provider {provider!r} does not support capability {capability!r}")
+
+
+class SandboxFileTooLargeError(SandboxError):
+    """File exceeds caller-supplied max_bytes limit."""
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxCapabilities:
+    """Capabilities advertised by a sandbox provider or handle."""
+
+    background: bool = False
+    reconnect: bool = False
+    persistent_volume: bool = False
+    pause: bool = False
+    reset_rootfs: bool = False
+    terminal: bool = False
+    browser: bool = False
+    egress_proxy: bool = False
+    network_policy: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class FileEntry:
+    """Metadata for a file or directory entry inside a sandbox."""
+
+    path: str
+    name: str
+    is_dir: bool
+    size: int
+    modified_at: datetime
 
 
 @dataclass
@@ -118,6 +158,16 @@ class Sandbox(ABC):
         ...
 
     @property
+    def provider_name(self) -> str:
+        """Identifier of the provider backing this sandbox instance."""
+        return "unknown"
+
+    @property
+    def capabilities(self) -> SandboxCapabilities:
+        """Capabilities advertised by this sandbox instance."""
+        return SandboxCapabilities()
+
+    @property
     def user_sandbox_id(self) -> str | None:
         """CubePlex ``user_sandboxes.id`` once the instance is attached."""
         return None
@@ -162,7 +212,7 @@ class Sandbox(ABC):
 
     def supports_background(self) -> bool:
         """Whether ``start`` / ``poll`` / ``kill`` are implemented."""
-        return False
+        return self.capabilities.background
 
     async def run_with_backend(self, operation: Callable[[Sandbox], Awaitable[T]]) -> T:
         """Run an operation against a concrete backend for its entire lifetime."""
@@ -170,7 +220,7 @@ class Sandbox(ABC):
 
     def supports_background_reconnect(self) -> bool:
         """Whether another worker can recover a persisted process handle."""
-        return False
+        return self.capabilities.reconnect
 
     async def observe(self, handle: ProcessHandle) -> ProcessSnapshot:
         """Observe execution independently of fetching or acknowledging output."""
@@ -228,17 +278,22 @@ class Sandbox(ABC):
         """Release sandbox resources."""
         ...
 
+    async def is_healthy(self) -> bool:
+        """Check whether the sandbox handle is healthy and responsive."""
+        return True
+
     def supports_pause(self) -> bool:
         """Whether this driver can natively pause/resume. Default False so the
         manager picks kill-on-idle for non-capable drivers."""
-        return False
+        return self.capabilities.pause
 
     async def pause(self) -> None:
         """Suspend this sandbox, preserving state. Override in capable drivers."""
         raise NotImplementedError("pause is not supported by this sandbox backend")
 
-    async def renew(self, timeout_seconds: int) -> None:
+    async def renew(self, ttl_seconds: int) -> None:
         """Extend the provider-side expiration. No-op for backends without TTL."""
+        del ttl_seconds
         return  # no-op default; backends with TTL override
 
     @classmethod
@@ -249,6 +304,51 @@ class Sandbox(ABC):
         auto-resumes. Override in capable drivers."""
         raise NotImplementedError("connect_or_resume is not supported by this sandbox backend")
 
+    async def list_dir(self, path: str) -> list[FileEntry]:
+        """List direct children (*depth=1*) at *path*."""
+        del path
+        raise NotImplementedError("list_dir is not supported by this sandbox backend")
+
+    async def stat_file(self, path: str) -> FileEntry:
+        """Return metadata for *path*, raising ``FileNotFoundError`` if absent."""
+        del path
+        raise NotImplementedError("stat_file is not supported by this sandbox backend")
+
+    async def read_text(self, path: str, *, max_bytes: int | None = None) -> str:
+        """Read UTF-8 text from *path*, respecting optional *max_bytes*."""
+        del path, max_bytes
+        raise NotImplementedError("read_text is not supported by this sandbox backend")
+
+    def stream_file(self, path: str) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+        """Yield raw byte chunks from *path*, raising ``FileNotFoundError`` before yield."""
+        del path
+        raise NotImplementedError("stream_file is not supported by this sandbox backend")
+
+    async def sync_archive(
+        self,
+        tarball: bytes | None,
+        *,
+        dest: str,
+        repush_names: Sequence[str] = (),
+        remove_paths: Sequence[str] = (),
+    ) -> None:
+        """Upload *tarball* (when non-empty) and extract/prune entries inside *dest*."""
+        has_push = bool(tarball)
+        if tarball:
+            await self.upload([(SKILLS_DELTA_TGZ_PATH, tarball)])
+        cmd = build_extract_and_remove_cmd(
+            skills_root=dest,
+            has_push=has_push,
+            to_repush_names=list(repush_names),
+            to_remove=list(remove_paths),
+        )
+        if cmd:
+            await self.execute(cmd)
+
+    async def ensure_workspace_owner(self) -> None:
+        """Ensure the sandbox workdir exists and has appropriate ownership."""
+        return
+
     # Container port the Neko browser live view is served on.
     BROWSER_PORT = 8080
 
@@ -256,70 +356,22 @@ class Sandbox(ABC):
     TERMINAL_PORT = 7681
 
     async def start_browser(self) -> None:
-        """Start the on-demand Neko browser stack inside the sandbox (idempotent).
-
-        Baked into the sandbox image at ``/usr/local/bin/start-browser.sh``; safe
-        to call repeatedly. If supervisord is already up but Chromium died
-        (e.g. user closed the last tab), the script restarts Chromium and waits
-        for CDP on 9222 — not a blind no-op. Runs as root so supervisord can
-        chown runtime dirs and drop to the sandbox user.
-        """
-        # Install the wrapper before Chromium is ready so the agent's first
-        # ``agent-browser connect`` after start-browser.sh is already wrapped.
-        await self.install_browser_tab_follow()
-        result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120, as_root=True)
-        if result.exit_code not in (0, None):
-            # SandboxError (not RuntimeError) so live-view maps this to retryable 503.
-            raise SandboxError(f"failed to start sandbox browser: {result.output}")
-
-    async def install_browser_tab_follow(self) -> None:
-        """Wrap ``agent-browser`` so the live view follows the agent's tab.
-
-        Best-effort: a failure here must not fail live-view. Re-run on every
-        start so already-built images pick up the wrapper.
-        """
-        from cubeplex.sandbox.browser_tab_follow import tab_follow_install_command
-
-        try:
-            result = await self.execute(tab_follow_install_command(), timeout=15, as_root=True)
-        except Exception as exc:
-            logger.warning("browser tab-follow install failed: {}", exc)
-            return
-        if result.exit_code not in (0, None):
-            logger.warning(
-                "browser tab-follow install exited {}: {}",
-                result.exit_code,
-                result.output,
-            )
+        """Start the on-demand Neko browser stack inside the sandbox."""
+        raise SandboxCapabilityUnsupportedError("browser", self.provider_name)
 
     async def start_terminal(self) -> None:
-        """Start the on-demand ttyd terminal inside the sandbox (idempotent)."""
-        result = await self.execute(
-            "start-stop-daemon --start --oknodo --background"
-            " --make-pidfile --pidfile /tmp/ttyd.pid"
-            " --exec /usr/bin/ttyd -- -p 7681 -W -w /workspace bash"
-            " && sleep 1",
-            timeout=30,
-            as_root=True,
-        )
-        if result.exit_code not in (0, None):
-            raise SandboxError(f"failed to start sandbox terminal: {result.output}")
+        """Start the on-demand ttyd terminal inside the sandbox."""
+        raise SandboxCapabilityUnsupportedError("terminal", self.provider_name)
 
     async def get_terminal_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
-        """Return a reachable endpoint for the ttyd terminal.
-
-        Backends that can expose an in-sandbox port override this; the
-        default signals the capability is unavailable.
-        """
-        raise NotImplementedError("terminal is not supported by this sandbox backend")
+        """Return a reachable endpoint for the ttyd terminal."""
+        del expires_in
+        raise SandboxCapabilityUnsupportedError("terminal", self.provider_name)
 
     async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
-        """Return a reachable endpoint for the Neko browser live view.
-
-        Backends that can expose an in-sandbox port override this; the default
-        signals the capability is unavailable.
-        """
-        raise NotImplementedError("browser live view is not supported by this sandbox backend")
+        """Return a reachable endpoint for the Neko browser live view."""
+        del expires_in
+        raise SandboxCapabilityUnsupportedError("browser", self.provider_name)
 
     async def file_read(
         self,

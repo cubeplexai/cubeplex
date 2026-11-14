@@ -21,7 +21,7 @@ from cubeplex.sandbox.base import (
     ProcessHandleNotFoundError,
     SandboxInstanceGoneError,
 )
-from cubeplex.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox.providers.opensandbox import OpenSandbox
 
 
 def _make_backend(
@@ -336,9 +336,9 @@ async def test_ensure_workspace_owner_chowns_mount_point_only() -> None:
     calls = backend._test_run_calls  # type: ignore[attr-defined]
     assert len(calls) == 1
     cmd, opts = calls[0]
-    assert cmd.startswith("chown 1000:1000 ")
+    assert "mkdir -p /workspace" in cmd
+    assert "chown 1000:1000 /workspace" in cmd
     assert "-R" not in cmd
-    assert "/workspace" in cmd
     assert opts is not None
     assert opts.uid is None
 
@@ -386,7 +386,7 @@ async def test_execute_foreground_returns_output_and_exit_code() -> None:
 async def test_fast_aiter_sse_events_stops_on_execution_complete() -> None:
     import httpx
 
-    from cubeplex.sandbox.opensandbox import _fast_aiter_sse_events
+    from cubeplex.sandbox.providers.opensandbox import _fast_aiter_sse_events
 
     body = (
         b'data: {"type": "init", "text": "cmd-1", "timestamp": 1}\n\n'

@@ -16,11 +16,11 @@ from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubeplex.api.routes.v1.ws_sandbox import _resolve_sandbox_scope
+from cubeplex.api.routes.v1.ws_sandbox import _resolve_sandbox_scope, resolve_scope_provider
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
 from cubeplex.db.session import get_session
-from cubeplex.sandbox import SandboxError
+from cubeplex.sandbox import SandboxCapabilityUnsupportedError, SandboxError
 from cubeplex.sandbox.manager import get_sandbox_manager
 
 router = APIRouter(prefix="/ws/{workspace_id}/browser", tags=["ws-browser"])
@@ -67,6 +67,19 @@ async def get_live_view(
     scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
+    provider = await resolve_scope_provider(
+        session,
+        manager,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+    )
+    if provider is not None and not provider.capabilities.browser:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=f"browser live-view is not supported by provider '{provider.name}'",
+        )
     try:
         attachment = await manager.get_or_create(
             scope_type=scope_type,
@@ -92,6 +105,11 @@ async def get_live_view(
         # right safety net.
         await manager.renew_lease(sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
         endpoint = await sandbox.get_browser_endpoint()
+    except SandboxCapabilityUnsupportedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
     except SandboxError as exc:
         # Provisioning the sandbox (or its browser) failed — e.g. the provider
         # timed out waiting for a cold-starting pod. Surface a retryable 503 with a
