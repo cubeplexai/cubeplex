@@ -11,77 +11,42 @@ import { cn } from '@/lib/utils'
 
 const EMPTY_TODOS: TodoItem[] = []
 
-// Open or closed for this browser session. A live write_todos that fills an
-// empty list opens once. Restoring a list does not. Later updates do not
-// reopen it.
+// Open or closed for this browser session. Defaults to collapsed; only user
+// clicks toggle it, and clearing the list resets the preference.
 const expandedPrefs = new Map<string, boolean>()
 
 interface TaskProgressStripProps {
   conversationId: string
   todos: TodoItem[]
-  /** Bumps when a live write_todos call is applied. A restored list does not. */
-  liveNonce?: number
 }
 
 export function ConversationTaskProgress({ conversationId }: { conversationId: string }) {
   const todos = useMessageStore((s) => s.todosByConversation[conversationId] ?? EMPTY_TODOS)
-  const liveNonce = useMessageStore((s) => s.todoLiveNonceByConversation[conversationId] ?? 0)
-  return <TaskProgressStrip conversationId={conversationId} todos={todos} liveNonce={liveNonce} />
+  return <TaskProgressStrip conversationId={conversationId} todos={todos} />
 }
 
-export function TaskProgressStrip({
-  conversationId,
-  todos,
-  liveNonce = 0,
-}: TaskProgressStripProps) {
+export function TaskProgressStrip({ conversationId, todos }: TaskProgressStripProps) {
   const t = useTranslations('chat')
   const listId = useId()
   const [expanded, setExpanded] = useState(() => expandedPrefs.get(conversationId) ?? false)
   const [trackedConversation, setTrackedConversation] = useState(conversationId)
-  const [prevCount, setPrevCount] = useState(todos.length)
-  const [seenNonce, setSeenNonce] = useState(liveNonce)
 
   if (trackedConversation !== conversationId) {
     setTrackedConversation(conversationId)
     setExpanded(expandedPrefs.get(conversationId) ?? false)
-    setPrevCount(todos.length)
-    setSeenNonce(liveNonce)
-  } else if (liveNonce !== seenNonce) {
-    setSeenNonce(liveNonce)
-    if (todos.length === 0) {
-      expandedPrefs.delete(conversationId)
-      setExpanded(false)
-      setPrevCount(0)
-    } else if (prevCount === 0) {
-      expandedPrefs.set(conversationId, true)
-      setExpanded(true)
-      setPrevCount(todos.length)
-    } else if (prevCount !== todos.length) {
-      setPrevCount(todos.length)
-    }
-  } else if (todos.length === 0) {
-    if (prevCount !== 0 || expanded) {
-      expandedPrefs.delete(conversationId)
-      setExpanded(false)
-      setPrevCount(0)
-    }
-  } else if (prevCount !== todos.length) {
-    setPrevCount(todos.length)
+  } else if (todos.length === 0 && (expanded || expandedPrefs.has(conversationId))) {
+    expandedPrefs.delete(conversationId)
+    if (expanded) setExpanded(false)
   }
 
   if (todos.length === 0) return null
 
-  const completedItems = todos.filter((todo) => todo.status === 'completed')
-  const completed = completedItems.length
+  const completed = todos.filter((todo) => todo.status === 'completed').length
   const allDone = completed === todos.length
   const current =
     todos.find((todo) => todo.status === 'in_progress') ??
     todos.find((todo) => todo.status === 'pending') ??
     null
-  const otherOpen = todos.filter((todo) => todo.status !== 'completed' && todo !== current)
-  // The header already names the current step. Repeat it in the list only
-  // when it is the only open item, so the panel is not an empty shell.
-  const openItems = otherOpen.length > 0 || current === null ? otherOpen : [current]
   const label = allDone
     ? t('tasksDone', { completed, total: todos.length })
     : (current?.description ?? t('tasksProgress'))
@@ -140,11 +105,8 @@ export function TaskProgressStrip({
       {expanded && (
         <ComposerOverlayShell id={listId} aria-label={t('tasksProgress')}>
           <ul className="min-h-0 space-y-1 overflow-y-auto p-2">
-            {openItems.map((todo, index) => (
-              <TodoRow key={`open-${todo.description}-${index}`} todo={todo} />
-            ))}
-            {completedItems.map((todo, index) => (
-              <TodoRow key={`done-${todo.description}-${index}`} todo={todo} />
+            {todos.map((todo, index) => (
+              <TodoRow key={`${todo.id ?? todo.description}-${index}`} todo={todo} />
             ))}
           </ul>
         </ComposerOverlayShell>
