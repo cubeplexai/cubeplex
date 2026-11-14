@@ -9,7 +9,7 @@
 Decouple CubePlex's sandbox orchestration, routes, agent middleware, and panel
 proxy from OpenSandbox internals by introducing a pluggable control-plane
 `SandboxProvider` contract, a complete data-plane `Sandbox` interface, and a
-10-dimension `SandboxCapabilities` degradation model so full-featured runtimes
+9-dimension `SandboxCapabilities` degradation model so full-featured runtimes
 (`OpenSandbox`, `CubePod`) and partial-capability runtimes (`LocalSandbox`,
 future `E2B` / `Daytona` / plain `Docker`) run without provider branches or
 runtime errors.
@@ -89,21 +89,23 @@ PostgreSQL, so per-row provider dispatch requires **no schema migration**.
 |---|---|---|
 | **A. Branch on `provider` inside `manager.py` and route handlers** | Keep existing classes; add `if provider == "cubepod"` in `manager.py`, `sandbox_panel.py`, `ws_sandbox.py`, `background_tasks.py`, `sandbox_share.py`, and `lazy.py` (prototype attempted in closed PR #771). | Every new provider edits 8+ files, balloons `manager.py` past 2,500 lines, and leaves `SLF001` private-attribute leaks and partial-capability crashes in place. Rejected. |
 | **B. Expand `Sandbox` data-plane ABC only; keep control-plane factory branches in `manager.py`** | Add filesystem methods to `Sandbox` so routes are clean, but keep `create`/`connect`/`reconcile`/`kill` branching inside `SandboxManager`. | Fixes routes, but leaves `SandboxManager` coupled to every provider SDK's connection config, volume spec, error types, and panel URL rules. Rejected. |
-| **C. Three-layer split (`SandboxProvider` + `Sandbox` + `PosixSandboxMixin`) with explicit `SandboxCapabilities` graceful degradation** (chosen) | Separate domain orchestration (`SandboxManager`) from provider wire calls (`SandboxProvider`), promote filesystem streaming and `sync_archive` onto `Sandbox`, share guest POSIX helpers via `PosixSandboxMixin`, and gate optional subsystems (background, reconnect, PVC, pause, panels, egress proxy, network policy, rootfs reset, fork) via `SandboxCapabilities`. | Zero `isinstance` or `if provider == ...` in `manager.py`, `lazy.py`, `sandbox_panel.py`, or any API route. Both rich providers (`CubePod`, `OpenSandbox`) and minimal/SaaS providers (`Local`, future `E2B`) run cleanly without errors or follow-up refactoring. |
+| **C. Three-layer split (`SandboxProvider` + `Sandbox` + `PosixSandboxMixin`) with explicit `SandboxCapabilities` graceful degradation** (chosen) | Separate domain orchestration (`SandboxManager`) from provider wire calls (`SandboxProvider`), promote filesystem streaming and `sync_archive` onto `Sandbox`, share guest POSIX helpers via `PosixSandboxMixin`, and gate optional subsystems (background, reconnect, PVC, pause, panels, egress proxy, network policy, rootfs reset) via `SandboxCapabilities`. | Zero `isinstance` or `if provider == ...` in `manager.py`, `lazy.py`, `sandbox_panel.py`, or any API route. Both rich providers (`CubePod`, `OpenSandbox`) and minimal/SaaS providers (`Local`, future `E2B`) run cleanly without errors or follow-up refactoring. |
 
 **Chosen: C**, delivered as two sequential, single-concern PRs:
 
 1. **PR 1 (Framework refactor + capability degradation, zero regression on existing behavior):**
    Extract `SandboxProvider`, `ProviderRegistry`, `PosixSandboxMixin`, the
-   10-field `SandboxCapabilities` model + graceful degradation gates, unified
+   9-field `SandboxCapabilities` model + graceful degradation gates, unified
    `Sandbox` filesystem/archive methods, and neutral `SandboxNetworkPolicy`;
    move `OpenSandbox` and `LocalSandbox` onto the new contracts; remove all
    direct `opensandbox` imports from routes, `manager.py`, `app.py`, and
    `sandbox_policy/rules.py`.
-2. **PR 2 (CubePod provider + capability-gated lifecycle endpoints + docs):**
-   Add `cubepod>=0.4.0` via `uv add`, implement `sandbox/providers/cubepod.py`,
-   add capability-gated workspace `reset-rootfs` and `fork` endpoints, and ship
-   matching English + 简体中文 deployment docs.
+2. **PR 2 (CubePod provider + capability-gated lifecycle endpoint + docs):**
+   Once the upstream CubePod prerequisites (§7.1) land and release as
+   `cubepod>=0.4.1` on PyPI, add `cubepod>=0.4.1` via `uv add`, implement
+   `sandbox/providers/cubepod.py`, add the capability-gated workspace
+   `reset-rootfs` endpoint, and ship matching English + 简体中文 deployment
+   docs.
 
 ---
 
@@ -145,7 +147,6 @@ class SandboxCapabilities:
     persistent_volume: bool = False   # workdir survives terminate -> revive (PVC / volume_key)
     pause: bool = False               # provider suspend & resume
     reset_rootfs: bool = False        # wipe persistent rootfs upper while preserving workdir
-    fork: bool = False                # copy-on-write clone onto a new scope volume
     # Interactive Panels
     terminal: bool = False            # web terminal panel (ttyd / PTY stream)
     browser: bool = False             # GUI browser live-view / takeover panel (Neko / desktop)
@@ -156,16 +157,15 @@ class SandboxCapabilities:
 
 | Capability | `CubePod` | `OpenSandbox` | `Local` | Future `E2B` (stock cloud) | System behavior when `False` (zero errors) |
 |---|:---:|:---:|:---:|:---:|---|
-| `background` | `True` | `True` | `True` | `True` | `SandboxMiddleware` mounts foreground-only `execute` (same shape as subagents) and omits `monitor` and `kill_execute` tools. |
+| `background` | `True` | `True` | `True` | `True` | `SandboxMiddleware` mounts foreground-only `execute` (same shape as subagents) and omits `monitor` and `kill_execute` tools; `build_sandbox_prompt()` (`prompts/sandbox.py`) omits background-handoff, `notify_on_complete`, `monitor`, and `kill_execute` instructions so prompt instructions match mounted tools. |
 | `reconnect` | `True` | `True` | `False` | `False` / version-dependent | In-run background works; `connect_command_instance` is not called for remote cancel (`remote_cancel_supported=False`). |
-| `persistent_volume` | `True` | `True` | `True` | `False` | `SANDBOX_PROMPT_TEMPLATE` renders ephemeral-workdir wording (provider-constant, prompt-cache safe); `_sync_skills` auto-repushes on revive because manifest lives in-sandbox; `sandbox_share` maps missing files on revived sandboxes to `404`. |
+| `persistent_volume` | `True` | `True` | `True` | `False` | `build_sandbox_prompt()` (`prompts/sandbox.py`) renders ephemeral-workdir wording for both `**Persistence:**` and cross-session `Workspace Organization` rules (provider-constant); `_sync_skills` auto-repushes on revive because manifest lives in-sandbox; `sandbox_share` maps missing files on revived sandboxes to `404`. |
 | `pause` | `True` | `True` | `False` | `True` (`beta_pause`) | `SandboxManager.pause_idle()` skips `pause()` and terminates idle sandboxes directly (existing fallback). |
 | `terminal` | `True` | `True` | `False` | `False` (unless custom template) | `SandboxStatusOut.capabilities.terminal=False` lets UI hide Terminal tab; `GET /ws/{ws}/sandbox/terminal` fails fast *before* `get_or_create` with `501 Not Implemented` (`SandboxCapabilityUnsupportedError`), never `503`. |
 | `browser` | `True` | `True` | `False` | `False` (unless E2B Desktop) | `SandboxStatusOut.capabilities.browser=False` lets UI hide Browser button; `GET /ws/{ws}/browser/live-view` fails fast *before* `get_or_create` with `501 Not Implemented`, never `503`. |
 | `egress_proxy` | `True` | `True` | `False` | `False` | Plain env vars (`is_secret=False`) still inject via `set_run_env()`; secret vault entries (`is_secret=True`) are **never** injected as plaintext and do not inject unreachable `cpodref_` placeholders — `sandbox_config` reports `status="skipped_provider_unsupported"` so the agent gets an explicit explanation. |
 | `network_policy` | `True` | `True` | `False` | `False` | Default-allow requires no action; if org admin configures `network_default_action="deny"` or explicit `deny` rules, `GET/PUT /admin/sandbox-policy` appends a clear warning in `SandboxPolicyOut.warnings` instead of failing `create()`. |
 | `reset_rootfs` | `True` | `False` | `False` | `False` | `POST /ws/{ws}/sandbox/reset-rootfs` returns `501 Not Implemented`. |
-| `fork` | `True` | `False` | `False` | `False` | `POST /ws/{ws}/sandbox/fork` returns `501 Not Implemented`. |
 
 #### Exposing capabilities on workspace status (`SandboxStatusOut`)
 
@@ -178,7 +178,6 @@ class SandboxCapabilitiesOut(BaseModel):
     persistent_volume: bool
     pause: bool
     reset_rootfs: bool
-    fork: bool
     terminal: bool
     browser: bool
     egress_proxy: bool
@@ -269,6 +268,13 @@ Methods on `Sandbox`:
   Releases client transports owned by this `Sandbox` wrapper. `OpenSandbox.close()`
   calls `await self._sandbox.close()`, fixing the current leak workaround where
   `background_tasks.py` reached into `sandbox._sandbox.close`.
+- `async def renew(self, ttl_seconds: int) -> None`
+  Extends provider-side TTL on an already-connected `Sandbox` handle (delegating
+  to provider TTL renewal on `OpenSandbox` and `CubePodSandbox`). Preserved on
+  `Sandbox` because `BackgroundTaskCoordinator`
+  (`services/background_task_coordinator.py`) calls `await sandbox.renew(ttl)`
+  directly on observer handles yielded by
+  `connect_command_instance() -> provider.connect_observer()`.
 
 Route impact:
 
@@ -279,6 +285,15 @@ Route impact:
   and `sandbox.stream_file()` directly, mapping `FileNotFoundError -> 404`,
   `SandboxFileTooLargeError -> 413`, `SandboxCapabilityUnsupportedError -> 501`,
   and `SandboxError -> 503`.
+- For streaming responses (`ws_sandbox.py` `/files/download` and
+  `sandbox_share.py` `/public/sandbox/dl/{nonce}/{filename}`), wrap `sandbox`
+  creation/attachment and `sandbox.stream_file(path)` inside
+  `contextlib.AsyncExitStack`, closed by a generator `finally` plus
+  `BackgroundTask(stack.aclose)` (matching `background_tasks.py`). Do **not**
+  use `async with sandbox.stream_file(path)` inside the route handler body,
+  because FastAPI exits the context manager before Starlette iterates
+  `StreamingResponse` chunks; this also fixes existing `sandbox.close()`
+  transport leaks on those download routes.
 - All imports of `OpenSandbox`, `ProviderApiError`, and `# noqa: SLF001`
   disappear from `api/routes/`.
 - `LocalSandbox` implements `list_dir`, `stat_file`, `read_text`, and
@@ -305,9 +320,15 @@ async def sync_archive(
   — works on `OpenSandbox`, `LocalSandbox`, and any future `E2B` driver out of
   the box.
 - **`CubePodSandbox` override (`providers/cubepod.py`):** Calls
-  `await self._client.archive_sync(self.id, tarball or b"", dest=dest, uid=self._run_uid, gid=self._run_gid, remove_paths=[...])`
+  `await self._client.archive_sync(self.id, tarball or b"", dest=dest, uid=self._run_uid, gid=self._run_gid, remove_paths=[*repush_names, *remove_paths])`
   in a single HTTP request to `podd` without spawning a shell or writing a
-  temporary `.tgz` into `/tmp`.
+  temporary `.tgz` into `/tmp`. Passing **dest-relative** skill directory names
+  for both `repush_names` and `remove_paths` is required because `podd` deletes
+  `remove_paths` under `dest` *before* extracting tar entries (preserving
+  skill-sync invariant F9 so updated skills do not leave stale
+  `<skill>/<old_version>/` directories behind) and silently skips paths
+  starting with `/`. Empty `tarball` (`b""`) on uninstall-only syncs is handled
+  natively by `podd` (see §7.1).
 - **`lazy.py` (`_sync_skills`):** Calls `await sandbox.sync_archive(...)`
   unconditionally — zero capability flags or `if/else` branches.
 
@@ -349,7 +370,7 @@ class ProviderInstanceState(StrEnum):
     PAUSED = "paused"
     TRANSITIONAL = "transitional"  # creating / pausing / resuming
     FAILED = "failed"
-    TERMINATED = "terminated"      # includes OpenSandbox "Succeed"
+    TERMINATED = "terminated"      # includes "Succeed", "Stopped", "Killed"
 
 @dataclass(frozen=True, slots=True)
 class RunIdentity:
@@ -374,8 +395,12 @@ class SandboxCreateSpec:
 @dataclass(frozen=True, slots=True)
 class PanelUpstream:
     http_url: str
+    http_headers: dict[str, str]
     ws_url: str
-    headers: dict[str, str]
+    ws_headers: dict[str, str]
+    ws_connect_host: str | None = None
+    ws_connect_port: int | None = None
+    ws_server_hostname: str | None = None
 ```
 
 #### 5.2 `SandboxProvider` ABC
@@ -387,6 +412,10 @@ class SandboxProvider(ABC):
 
     @property
     def default_workdir(self) -> str: ...
+
+    @property
+    def default_image(self) -> str: ...
+        """Default container image / template ID when org policy leaves default_image unset."""
 
     @abstractmethod
     def validate_config(self) -> None:
@@ -457,16 +486,6 @@ class SandboxProvider(ABC):
     async def reset_rootfs(self, sandbox_id: str) -> None:
         raise SandboxCapabilityUnsupportedError("reset_rootfs", self.name)
 
-    async def fork(
-        self,
-        sandbox_id: str,
-        *,
-        target_volume_key: str | None,
-        metadata: dict[str, str],
-    ) -> str:
-        """Clone ``sandbox_id`` onto ``target_volume_key`` and return the new ``sandbox_id``."""
-        raise SandboxCapabilityUnsupportedError("fork", self.name)
-
     async def aclose(self) -> None:
         """Close long-lived control-plane HTTP pools on app shutdown."""
         return None
@@ -483,7 +502,11 @@ name (`"opensandbox"`, `"cubepod"`, `"local"`), plus `default_name` from
   `registry.default()`, and calls `provider.validate_config()`.
 - **Shutdown (`app.py`):** Lifespan shutdown awaits `registry.aclose()` so
   shared `httpx.AsyncClient` pools (such as `AsyncCubePod`) close cleanly.
-- **New vs. existing DB rows (`manager.py`):**
+- **New vs. existing DB rows & default image (`manager.py`, `admin_sandbox_policy.py`, `ws_sandbox.py`, `ws_topics.py`):**
+  - `SandboxManager` and admin/workspace policy routes obtain fallback
+    `default_image` from `registry.default().default_image` instead of reading
+    `config.get("sandbox.image")` directly (`sandbox.image` on OpenSandbox,
+    `sandbox.cubepod.default_template` on CubePod, `"local"` on Local).
   - `UserSandboxRepository.reserve()` stamps `record.provider = default_provider.name`.
   - When reviving a `terminated` / `failed` row in `_provision_new_container`,
     `promote_to_running` updates `provider = default_provider.name` so a revived
@@ -524,29 +547,78 @@ class PanelClaims:
 - `verify_panel_token()` reads `payload.get("prv")` (`None` for pre-upgrade
   tokens, which resolve to `registry.default()`).
 - `sandbox_panel.py` (`panel_http` and `panel_ws`) resolves
-  `provider = get_provider_registry().get(claims.provider)`, calls
-  `provider.build_panel_upstream(...)`, and merges `upstream.headers` onto the
-  outbound HTTP request / WebSocket handshake **after** stripping client
-  `_HOP_BY_HOP` headers (so provider-supplied `Host` or `Authorization` headers
-  are preserved):
+  `provider = get_provider_registry().get(claims.provider)` and calls
+  `provider.build_panel_upstream(...)`. HTTP vs WebSocket header handling is
+  explicitly separated because `httpx` overrides `Host` from `http_headers`,
+  whereas `websockets==14.2` derives `Host` from `ws_url` and **appends**
+  `additional_headers` — passing `"Host"` in `additional_headers` emits two
+  `Host` headers and triggers `400 Bad Request: too many Host headers` from
+  Go's `net/http` server:
+  - **`panel_http`:** Strips client `_HOP_BY_HOP` headers, forwards to
+    `upstream.http_url`, and overlays `upstream.http_headers`.
+  - **`panel_ws`:** Connects to `upstream.ws_url` with
+    `additional_headers=upstream.ws_headers or None`, plus
+    `host=upstream.ws_connect_host` / `port=upstream.ws_connect_port` (and
+    `server_hostname=upstream.ws_server_hostname` when using `wss://`) if set.
   - **`OpenSandboxProvider.build_panel_upstream`:**
-    `http://{domain_host}/sandboxes/{sandbox_id}/proxy/{port}/{path}` (and `ws://`),
-    `headers={"accept-encoding": "identity"}`.
+    `http_url="http://{domain_host}/sandboxes/{sandbox_id}/proxy/{port}/{path}"`,
+    `http_headers={"accept-encoding": "identity"}`,
+    `ws_url="ws://{domain_host}/sandboxes/{sandbox_id}/proxy/{port}/{path}"`,
+    `ws_headers={}`.
   - **`CubePodProvider.build_panel_upstream`:**
-    Targets `{base_url}/{path}` (and `ws://`/`wss://` matching `base_url`'s
-    scheme) using `cubepod-gateway`'s built-in virtual-host router:
-    `headers={"Host": f"{port}-{sandbox_id}.cubepod.local", "accept-encoding": "identity"}`
-    plus `"Authorization": f"Bearer {api_key}"` when `api_key` is configured.
-    `cubepod-gateway` auto-resumes paused sandboxes and records activity on
-    subdomain proxy hits with zero extra token-mint round-trip.
+    Uses `cubepod-gateway`'s built-in virtual-host router (which auto-resumes
+    paused sandboxes and records activity on subdomain hits with zero extra
+    token-mint round-trip):
+    - `http_url = f"{base_url}/{path}"`,
+      `http_headers = {"Host": f"{port}-{sandbox_id}.cubepod.local", "accept-encoding": "identity"}`
+      (+ `"Authorization": f"Bearer {api_key}"` when set).
+    - `ws_url = f"{ws_scheme}://{port}-{sandbox_id}.cubepod.local/{path}"`
+      (so `websockets` emits the single `Host` header natively from `ws_url`),
+      `ws_headers = {"Authorization": f"Bearer {api_key}"}` when set (never
+      `"Host"`), `ws_connect_host = gateway_host`, `ws_connect_port = gateway_port`
+      (plus `ws_server_hostname = gateway_host` for `wss://`).
 
 ---
 
 ### 7. CubePod provider (`sandbox/providers/cubepod.py` — PR 2)
 
-#### 7.1 Official SDK dependency & configuration
+#### 7.1 Upstream CubePod prerequisites (`cubepod>=0.4.1`)
 
-Add `cubepod>=0.4.0` to `backend/pyproject.toml` via `uv add "cubepod>=0.4.0"`.
+Capabilities that are incomplete or unexposed in `cubepod` `v0.4.0` are
+implemented upstream in `cubeplexai/cubepod` and released as `cubepod>=0.4.1` on
+PyPI **before** CubePlex PR 2 merges, rather than disabling capabilities or
+adding CubePlex-side workarounds:
+
+1. **`volumeKey`-backed persistent PVCs across `delete -> create` (`persistent_volume=True`):**
+   Currently `cubepod-gateway` stores `extension.volumeKey` only in annotations/memory,
+   while `BuildBlockPVCs` derives PVC names `<sandboxID>-rootfs-pvc` /
+   `<sandboxID>-workspace-pvc` from an ephemeral `cpod-<nano>` ID. Update
+   `cubepod-gateway` + controller so providing `extension.volumeKey` binds a
+   deterministic workspace PVC that survives normal `DELETE /sandboxes/{id}`
+   (with opt-in `?deleteVolumes=true` on gateway + `AsyncCubePod.delete(..., delete_volumes=False)`),
+   preserving `/workspace` across `terminate -> revive`.
+2. **End-to-end `NetworkPolicy` propagation & rule fidelity (`network_policy=True`):**
+   Update `cubepod-gateway` so `extension.networkPolicy` copies onto
+   `PodBoxSpec.NetworkPolicy`, is preserved across `pause`, `connect`,
+   `reset-rootfs`, and auto-resume `Reconcile` calls, and enforces
+   `SandboxNetworkPolicy` (`defaultAction` + ordered allow/deny host rules)
+   instead of silently ignoring policy rules.
+3. **Empty-body `archive-sync` on uninstall-only syncs:**
+   Currently `podd` rejects empty request bodies (`if req.body.is_empty()`)
+   with `400 empty_archive_body`. Update `POST /v1/files/archive-sync` in `podd`
+   (and gateway fallback) to accept an empty body when `remove_paths` is
+   non-empty (deleting the `dest`-relative paths and returning
+   `{"status": "ok", "extracted": 0}`), and align comma-separated `remove_paths`
+   handling in gateway local fallback so single-RTT uninstall-only skill sync works
+   without uploading a dummy tar.
+4. **Release `cubepod>=0.4.1` to PyPI:**
+   Publish the updated Python SDK via CubePod's PyPI OIDC workflow so CubePlex
+   PR 2 uses standard `uv add "cubepod>=0.4.1"` without private git credentials
+   in Docker or CI.
+
+#### 7.2 Official SDK dependency & configuration
+
+Add `cubepod>=0.4.1` to `backend/pyproject.toml` via `uv add "cubepod>=0.4.1"`.
 Configuration in `backend/config.yaml`:
 
 ```yaml
@@ -563,71 +635,63 @@ Configuration in `backend/config.yaml`:
 
 `CubePodProvider.validate_config()` verifies `sandbox.cubepod.base_url` and
 `sandbox.cubepod.default_template` (and rejects placeholder `api_key` values
-when set).
+when set). `CubePodProvider.default_image` returns `sandbox.cubepod.default_template`.
 
-#### 7.2 Mapping CubePlex invariants onto `AsyncCubePod`
+#### 7.3 Mapping CubePlex invariants onto `AsyncCubePod`
 
-| CubePlex operation | `CubePodProvider` / `CubePodSandbox` call (`cubepod>=0.4.0`) | Notes & invariants |
+| CubePlex operation | `CubePodProvider` / `CubePodSandbox` call (`cubepod>=0.4.1`) | Notes & invariants |
 |---|---|---|
-| `create(spec)` | `client.create(template_id, volume_key=spec.volume_key, metadata=spec.metadata, network_policy=..., timeout_seconds=spec.ttl_seconds, warm_pool_ref=..., resource=spec.resource)` | `spec.volume_key` uses `build_sandbox_pvc_name(...)`, so CubePod binds independent `rootfs-pvc` + `workspace-pvc` per `(workspace_id, scope_type, scope_id)`. |
-| `connect(id, check_health=True)` | `info = await client.get(id)` (or `client.connect(id)` when paused) | Verifies `info.state == "running"`; returns `None` on 404/failed so `SandboxManager` revives cleanly. |
-| `connect_observer(id)` | `info = await client.get(id)` → yields `CubePodSandbox` | Enables cross-worker background command polling, log tailing, and cancellation on CubePod (`capabilities.reconnect = True`). |
+| `create(spec)` | `info = await client.create(spec.image or self.default_image, volume_key=spec.volume_key, metadata=spec.metadata, network_policy=..., timeout_seconds=spec.ttl_seconds, warm_pool_ref=..., resource=spec.resource)` | Uses `info.sandbox_id` (not `info.id`) for `on_created(info.sandbox_id)` and readiness polling; `spec.volume_key` uses `build_sandbox_pvc_name(...)`, binding persistent `/workspace` across `terminate -> revive` (§7.1). `SandboxNetworkPolicy` maps onto CubePod's `NetworkPolicySpec`. |
+| `connect(id, check_health=True)` | `info = await client.get(id)` (or `client.connect(id)` when paused) | Normalizes `info.state.lower()`; verifies `"running"`, returns `None` on 404/failed/terminated so `SandboxManager` revives cleanly. |
+| `connect_observer(id)` | `info = await client.get(id)` → yields `CubePodSandbox` | Enables cross-worker background command polling, log tailing, cancellation, and `sandbox.renew(ttl)` keepalives on CubePod (`capabilities.reconnect = True`). |
 | `resume(id)` / `pause(id)` | `await client.connect(id)` / `await client.pause(id)` | Preserves both persistent RootFS `upperdir` and `/workspace` across suspend/resume. |
-| `inspect_state(id)` | `await client.get(id)` | Maps `running -> RUNNING`, `paused -> PAUSED`, `creating/pausing/resuming -> TRANSITIONAL`, `failed -> FAILED`, `terminated -> TERMINATED`, HTTP 404 -> `None`. |
-| `terminate(id)` | `await client.delete(id)` | Treats HTTP 404 as already terminated. |
-| `renew_ttl(id, ttl)` | `await client.renew_timeout(id, ttl)` | Non-fatal best-effort TTL extension on `touch`. |
+| `inspect_state(id)` | `await client.get(id)` | Normalizes `info.state.lower()` (`running -> RUNNING`, `paused -> PAUSED`, `creating/pausing/resuming -> TRANSITIONAL`, `failed -> FAILED`, `terminated/stopped/killed/succeed -> TERMINATED`), HTTP 404 -> `None`. |
+| `terminate(id)` | `await client.delete(id)` | Treats HTTP 404 as already terminated; retains `volumeKey` workspace PVC (§7.1). |
+| `renew_ttl(id, ttl)` / `Sandbox.renew(ttl)` | `await client.renew_timeout(id, ttl)` | Non-fatal best-effort TTL extension on `touch` and observer keepalive. |
 | `execute` / `start` / `poll` / `kill` | `client.execute`, `client.start_command`, `client.get_command_status`, `client.poll_command`, `client.kill_command` | Runs as `uid=run_uid, gid=run_gid` (`1000:1000`) by default, root (`0:0`) when `as_root=True`; merges `_run_env` (`cpodref_` placeholders). |
 | `upload` / `download` | `client.write_file(..., uid=run_uid, gid=run_gid)` / `client.read_file` | `podd` writes directly with `1000:1000` ownership — no follow-up shell `chown` round-trip needed. |
 | `list_dir` / `stat_file` / `read_text` / `stream_file` | `client.list_files`, `client.read_text_file(..., max_bytes=...)`, `client.stream_file` | Maps `CubePodFileTooLargeError -> SandboxFileTooLargeError` and HTTP 404 -> `FileNotFoundError`. |
-| `sync_archive` | `client.archive_sync(id, tarball, dest=dest, uid=run_uid, gid=run_gid, remove_paths=...)` | Single-RTT streaming `tar.gz` extraction + stale skill removal inside `podd`. |
+| `sync_archive` | `client.archive_sync(id, tarball or b"", dest=dest, uid=run_uid, gid=run_gid, remove_paths=[*repush_names, *remove_paths])` | Single-RTT streaming `tar.gz` extraction + stale/repush skill removal inside `podd` (dest-relative paths, including empty-body uninstall-only syncs per §7.1). |
 
-#### 7.3 Capability-gated workspace lifecycle routes (`ws_sandbox.py` — PR 2)
+#### 7.4 Capability-gated workspace lifecycle route (`ws_sandbox.py` — PR 2)
 
 Scope is strictly workspace-level (`/api/v1/ws/{workspace_id}/sandbox/...`,
 guarded by `require_member` + `_resolve_sandbox_scope`; no org-admin handler
 mixing):
 
-1. **`POST /api/v1/ws/{workspace_id}/sandbox/reset-rootfs`**
-   - Request query/body: optional `conversation_id: str | None = None`.
-   - Resolves `(scope_type, scope_id, owner_user_id)` and looks up the active
-     `UserSandbox` row (`404` if absent).
-   - Checks `provider.capabilities.reset_rootfs`; raises
-     `SandboxCapabilityUnsupportedError` -> `501 Not Implemented` when `False`.
-   - Calls `await manager.reset_sandbox_rootfs(record.id)`: fences managed
-     background tasks (`request_environment_stop`), calls
-     `provider.reset_rootfs(record.sandbox_id)` (wiping the persistent RootFS
-     `upperdir` while keeping `/workspace` intact), and refreshes egress env.
-   - Response: `{"ok": True, "user_sandbox_id": record.id, "sandbox_id": ...}`.
-
-2. **`POST /api/v1/ws/{workspace_id}/sandbox/fork`**
-   - Request body: `target_conversation_id: str` (must resolve to a dedicated
-     conversation/topic scope in the same workspace that does **not** already
-     have an active `running`/`provisioning` sandbox; `409 Conflict` if target
-     scope already has a live sandbox, `400` if source == target scope).
-   - Checks `provider.capabilities.fork`; returns `501 Not Implemented` when
-     `False`.
-   - Reserves the target `UserSandbox` row under `(target_scope_type, target_scope_id)`,
-     computes `target_volume_key = build_sandbox_pvc_name(...)`, calls
-     `provider.fork(source_sandbox_id, target_volume_key=target_volume_key, metadata=...)`
-     (cloning both RootFS and Workspace volumes via CoW), promotes the target
-     `UserSandbox` row to `running`, and mints fresh `EgressRef` bindings for
-     the new `sandbox_id` (never sharing `EgressRef` rows across sandboxes).
-   - Response: `{"ok": True, "user_sandbox_id": target_row.id, "sandbox_id": new_sandbox_id}`.
+- **`POST /api/v1/ws/{workspace_id}/sandbox/reset-rootfs`**
+  - Request query/body: optional `conversation_id: str | None = None`.
+  - Resolves `(scope_type, scope_id, owner_user_id)` and looks up the
+    `UserSandbox` row (`404` if absent or `status in ("terminated", "failed")`).
+  - Checks `provider.capabilities.reset_rootfs`; raises
+    `SandboxCapabilityUnsupportedError` -> `501 Not Implemented` when `False`.
+  - Returns `409 Conflict` when `record.status in ("provisioning", "pausing", "resuming", "kill_pending")`
+    (safe to call when `record.status` is `"running"` or `"paused"`, since
+    CubePod `reset-rootfs` reconciles `DesiredState=Running` and auto-resumes).
+  - Calls `await manager.reset_sandbox_rootfs(record.id)`: fences managed
+    background tasks (`request_environment_stop`), calls
+    `provider.reset_rootfs(record.sandbox_id)` (wiping the persistent RootFS
+    `upperdir` while keeping `/workspace` intact), updates DB status `"paused" -> "running"`
+    if needed + touches activity, and re-runs guest bootstrap
+    (`ensure_workspace_owner()`, `_apply_egress()`, `_write_terminal_env()`) on
+    the fresh RootFS because resetting RootFS clears `/run/cubeplex/sandbox-env.sh`
+    and restarts guest daemons.
+  - Response: `{"ok": True, "user_sandbox_id": record.id, "sandbox_id": ...}`.
 
 ---
 
 ## Edge cases & invariants preserved
 
-- **Prompt-cache discipline (`backend/docs/prompt-cache-discipline.md`):**
-  `SANDBOX_PROMPT_TEMPLATE` selects its persistence paragraph solely from
-  `sandbox.capabilities.persistent_volume`, and `SandboxMiddleware` selects its
-  tool list solely from `sandbox.capabilities.background`. Both are static per
-  provider across the entire deployment, so the system prompt prefix and tool
-  definitions never flip mid-conversation or across turns.
+- **Prompt-cache & tool/prompt consistency (`backend/docs/prompt-cache-discipline.md`):**
+  `build_sandbox_prompt(workdir, capabilities)` (`prompts/sandbox.py`) selects
+  persistence and cross-session workspace wording from `capabilities.persistent_volume`,
+  and background-handoff/`notify_on_complete`/`monitor`/`kill_execute` instructions
+  from `capabilities.background`, matching `SandboxMiddleware`'s mounted tools.
+  Both are static per provider across normal operation, keeping prompt prefixes
+  cache-stable and tool instructions consistent.
 - **Zero secret leakage across Egress:** `EgressRef` rows remain strictly bound
   to `sandbox_id`. Providers without `egress_proxy` never receive plaintext
-  secrets and never receive broken `cpodref_` placeholders. Forked sandboxes
-  mint independent `EgressRef` generations.
+  secrets and never receive broken `cpodref_` placeholders.
 - **Provisioning race & mid-create cancel fence:** `provider.create()` invokes
   `on_created(sandbox_id)` before waiting on readiness, keeping
   `UserSandboxRepository.set_sandbox_id()`'s `kill_pending` /
@@ -646,10 +710,14 @@ mixing):
 - Multi-provider selection per workspace or per org in the admin UI (one active
   default `sandbox.provider` per deployment; `record.provider` exists for clean
   abstraction and safe drain across config switches).
+- Sandbox CoW `fork` (`SandboxCapabilities.fork`, `provider.fork()`, and
+  `POST /ws/{ws}/sandbox/fork`) — deferred until a product workflow consumes
+  it (today conversation fork shares `"user"` scope and topic/group upgrades
+  rebind the existing row via `UserSandboxRepository.rekey`).
 - Shipping a concrete `E2BProvider` in this feature cycle (this cycle lands the
   framework + capability degradation in PR 1 and `CubePodProvider` in PR 2 so a
   future `E2BProvider` is a single ~200-line file under `sandbox/providers/`).
-- Frontend UI buttons for `reset-rootfs` or `fork` (backend workspace APIs and
+- Frontend UI buttons for `reset-rootfs` (backend workspace API and
   `SandboxStatusOut.capabilities` land here; frontend hiding/buttons belong to a
   separate frontend PR).
 
@@ -665,8 +733,9 @@ mixing):
 3. **Graceful degradation for partial-capability providers (verified via `LocalSandboxProvider` & capability-matrix contract tests):**
    - `capabilities.browser=False` / `terminal=False` returns `501` before
      provisioning and surfaces `False` in `SandboxStatusOut.capabilities`.
-   - `capabilities.background=False` mounts foreground-only `execute` and omits
-     `monitor` / `kill_execute`.
+   - `capabilities.background=False` mounts foreground-only `execute`, omits
+     `monitor` / `kill_execute`, and omits background instructions from the
+     system prompt.
    - `capabilities.egress_proxy=False` injects plain envs, skips secret
      `cpodref_` bindings without leaking secrets, and marks them
      `skipped_provider_unsupported` in `sandbox_config`.
@@ -675,9 +744,10 @@ mixing):
 4. **Existing test suite passes unchanged in PR 1:**
    All unit, integration, and e2e tests for `SandboxManager`, pause/resume
    reconciler, background tasks, skill sync, egress refs, and panel proxy pass.
-5. **CubePod full parity + advanced lifecycle in PR 2:**
-   With `sandbox.provider = "cubepod"` backed by `cubepod>=0.4.0`, foreground &
+5. **CubePod full parity + `reset-rootfs` in PR 2:**
+   With `sandbox.provider = "cubepod"` backed by `cubepod>=0.4.1`, foreground &
    background commands, cross-worker observer, file listing/preview/streaming,
-   single-RTT skill `archive_sync`, panel HTTP+WS proxy, `pause`/`resume`,
-   `reset-rootfs`, and `fork` pass contract and integration tests; Bilingual
-   (English + 简体中文) deployment docs ship in lockstep.
+   single-RTT skill `archive_sync` (including uninstall-only), panel HTTP+WS
+   proxy, `pause`/`resume`, `terminate -> revive` persistence, `network_policy`
+   enforcement, and `reset-rootfs` pass contract and integration tests;
+   bilingual (English + 简体中文) deployment docs ship in lockstep.
