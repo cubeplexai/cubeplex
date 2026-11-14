@@ -346,21 +346,40 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         When ``clear_sandbox_id`` is set, also null out ``sandbox_id`` so the
         provider ID is freed for reuse on a later revive/re-provision.
         """
-        record = await self.get(record_id)
-        if record:
-            record.status = "terminated"
-            record.cleanup_action = None
-            record.cleanup_requested_at = None
-            if clear_sandbox_id:
-                record.sandbox_id = None
-            await self.session.commit()
+        values: dict[str, Any] = {
+            "status": "terminated",
+            "cleanup_action": None,
+            "cleanup_requested_at": None,
+        }
+        if clear_sandbox_id:
+            values["sandbox_id"] = None
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
 
     async def mark_kill_pending(self, record_id: str) -> None:
         """Mark a sandbox as kill_pending (provider kill failed, retry later)."""
-        record = await self.get(record_id)
-        if record:
-            record.status = "kill_pending"
-            await self.session.commit()
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+            )
+            .values(status="kill_pending")
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
 
     async def mark_failed_from_transient(self, record_id: str) -> bool:
         """Atomically flip ``pausing``/``resuming`` -> ``failed``.
@@ -516,10 +535,18 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
 
     async def mark_failed(self, record_id: str) -> None:
         """Mark a sandbox as failed (terminal)."""
-        record = await self.get(record_id)
-        if record:
-            record.status = "failed"
-            await self.session.commit()
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+            )
+            .values(status="failed")
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
 
     async def soft_delete(self, record_id: str) -> bool:
         """Conditional UPDATE: SET deleted_at=now() WHERE deleted_at IS NULL.
@@ -536,6 +563,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
             )
             .values(deleted_at=datetime.now(UTC))
+            .execution_options(synchronize_session=False)
         )
         result = cast(CursorResult[Any], await self.session.execute(stmt))
         await self.session.commit()
@@ -620,6 +648,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                     else_=requested_at,
                 ),
             )
+            .execution_options(synchronize_session=False)
         )
         result = cast(CursorResult[Any], await self.session.execute(stmt))
         await self.session.commit()

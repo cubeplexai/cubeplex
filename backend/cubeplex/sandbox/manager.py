@@ -24,7 +24,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 from sqlalchemy import select
@@ -1139,29 +1139,44 @@ class SandboxManager:
             if record:
                 await repo.release_in_use(record.id)
 
-    async def restart_user_sandbox(self, user_sandbox_id: str) -> None:
-        """Request restart, fence new work, then stop the original instance."""
+    async def _request_user_cleanup(
+        self,
+        user_sandbox_id: str,
+        *,
+        action: Literal["restart", "delete"],
+        raise_on_delete_conflict: bool,
+    ) -> None:
+        """Snapshot row state, fence new work, and finalize or terminate."""
         async with self._session_factory() as session:
             row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
             if row is None or row.deleted_at is not None:
                 return
+            row_id = row.id
+            prior_status = row.status
+            prior_action = row.cleanup_action
+            prior_requested_at = row.cleanup_requested_at
+            instance_id = self._cleanup_instance_id(row.sandbox_id)
             repo = UserSandboxRepository(session, org_id=row.org_id, workspace_id=row.workspace_id)
             requested_at = datetime.now(UTC)
             if not await repo.request_cleanup(
-                row.id,
-                action="restart",
+                row_id,
+                action=action,
                 requested_at=requested_at,
             ):
-                if row.status == "kill_pending" and row.cleanup_action == "delete":
+                if raise_on_delete_conflict and (
+                    prior_status == "kill_pending" and prior_action == "delete"
+                ):
                     raise SandboxConflictError("sandbox deletion is already pending")
                 return
-            instance_id = self._cleanup_instance_id(row.sandbox_id)
             if instance_id is None:
                 await self._finalize_cleanup_without_instance(
                     repo,
                     row,
-                    action="restart",
+                    action=action,
                     now=requested_at,
+                    prior_status=prior_status,
+                    prior_cleanup_action=prior_action,
+                    prior_cleanup_requested_at=prior_requested_at,
                 )
                 return
             await self._request_managed_task_stop(
@@ -1173,43 +1188,24 @@ class SandboxManager:
                 session,
                 repo,
                 row,
-                delete_on_success=False,
+                delete_on_success=(action == "delete"),
             )
+
+    async def restart_user_sandbox(self, user_sandbox_id: str) -> None:
+        """Request restart, fence new work, then stop the original instance."""
+        await self._request_user_cleanup(
+            user_sandbox_id,
+            action="restart",
+            raise_on_delete_conflict=True,
+        )
 
     async def delete_user_sandbox(self, user_sandbox_id: str) -> None:
         """Request deletion and hide the row only after provider cleanup."""
-        async with self._session_factory() as session:
-            row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
-            if row is None or row.deleted_at is not None:
-                return
-            repo = UserSandboxRepository(session, org_id=row.org_id, workspace_id=row.workspace_id)
-            requested_at = datetime.now(UTC)
-            if not await repo.request_cleanup(
-                row.id,
-                action="delete",
-                requested_at=requested_at,
-            ):
-                return
-            instance_id = self._cleanup_instance_id(row.sandbox_id)
-            if instance_id is None:
-                await self._finalize_cleanup_without_instance(
-                    repo,
-                    row,
-                    action="delete",
-                    now=requested_at,
-                )
-                return
-            await self._request_managed_task_stop(
-                row,
-                sandbox_instance_id=instance_id,
-                now=requested_at,
-            )
-            await self._kill_record(
-                session,
-                repo,
-                row,
-                delete_on_success=True,
-            )
+        await self._request_user_cleanup(
+            user_sandbox_id,
+            action="delete",
+            raise_on_delete_conflict=False,
+        )
 
     def _get_lifecycle_lock(self, user_sandbox_id: str) -> asyncio.Lock:
         lock = self._lifecycle_locks.get(user_sandbox_id)
@@ -1380,10 +1376,22 @@ class SandboxManager:
         *,
         action: str,
         now: datetime,
+        prior_status: str | None = None,
+        prior_cleanup_action: str | None = None,
+        prior_cleanup_requested_at: datetime | None = None,
     ) -> bool:
-        safe_without_provider = row.status in ("terminated", "failed")
-        if row.status == "kill_pending" and row.cleanup_requested_at is not None:
-            requested_at = row.cleanup_requested_at
+        row_id = row.id
+        status = prior_status if prior_status is not None else row.status
+        cleanup_action = prior_cleanup_action if prior_status is not None else row.cleanup_action
+        requested_at = (
+            prior_cleanup_requested_at if prior_status is not None else row.cleanup_requested_at
+        )
+        safe_without_provider = status in ("terminated", "failed")
+        if (
+            status == "kill_pending"
+            and (prior_status is None or cleanup_action == action)
+            and requested_at is not None
+        ):
             if requested_at.tzinfo is None:
                 requested_at = requested_at.replace(tzinfo=UTC)
             safe_without_provider = (now - requested_at).total_seconds() >= (
@@ -1391,9 +1399,9 @@ class SandboxManager:
             )
         if not safe_without_provider:
             return False
-        await repo.mark_terminated(row.id, clear_sandbox_id=True)
+        await repo.mark_terminated(row_id, clear_sandbox_id=True)
         if action == "delete":
-            await repo.soft_delete(row.id)
+            await repo.soft_delete(row_id)
         return True
 
     async def _request_managed_task_stop(
@@ -1855,17 +1863,23 @@ class SandboxManager:
         delete_on_success: bool = False,
     ) -> None:
         """Terminate remote instance, revoke egress, and mark DB row terminated."""
-        assert record.sandbox_id, "kill target must have sandbox_id"
+        record_id = record.id
+        sandbox_id = record.sandbox_id
+        should_delete = delete_on_success or record.cleanup_action == "delete"
+        workspace_id = record.workspace_id
+        scope_type = record.scope_type
+        scope_id = record.scope_id
+        assert sandbox_id, "kill target must have sandbox_id"
         provider = self._provider_for_record(record)
         killed = False
         try:
-            await provider.terminate(record.sandbox_id)
-            logger.info("Killed sandbox {}", record.sandbox_id)
+            await provider.terminate(sandbox_id)
+            logger.info("Killed sandbox {}", sandbox_id)
             killed = True
         except Exception as exc:
             logger.warning(
                 "Failed to kill sandbox {} (will retry on next loop): {}",
-                record.sandbox_id,
+                sandbox_id,
                 exc,
             )
         if killed:
@@ -1875,27 +1889,27 @@ class SandboxManager:
                 async def _no_sandbox(_row: object) -> None:
                     return None
 
-                await kill_sandbox_commands(session, record.id, get_sandbox=_no_sandbox)
+                await kill_sandbox_commands(session, record_id, get_sandbox=_no_sandbox)
             except Exception:
-                logger.exception("failed to mark sandbox commands killed for {}", record.id)
-            await scoped_repo.mark_terminated(record.id, clear_sandbox_id=True)
-            if delete_on_success or record.cleanup_action == "delete":
-                await scoped_repo.soft_delete(record.id)
+                logger.exception("failed to mark sandbox commands killed for {}", record_id)
+            await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
+            if should_delete:
+                await scoped_repo.soft_delete(record_id)
                 logger.warning(
                     "UserSandbox {} soft-deleted after provider cleanup; volume {} is now "
                     "orphaned for operator reclamation",
-                    record.id,
+                    record_id,
                     build_sandbox_pvc_name(
                         self._volume_pvc_prefix,
-                        record.workspace_id,
-                        record.scope_type,
-                        record.scope_id,
+                        workspace_id,
+                        scope_type,
+                        scope_id,
                     ),
                 )
-            if self._exchange_host and record.sandbox_id:
-                await self._revoke_egress(session, record.sandbox_id)
+            if self._exchange_host and sandbox_id:
+                await self._revoke_egress(session, sandbox_id)
         else:
-            await scoped_repo.mark_kill_pending(record.id)
+            await scoped_repo.mark_kill_pending(record_id)
 
 
 _sandbox_manager: SandboxManager | None = None
