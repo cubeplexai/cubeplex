@@ -33,6 +33,10 @@ class SandboxConflictError(SandboxError):
     (e.g. restart while provisioning)."""
 
 
+class SandboxNotFoundError(SandboxError):
+    """No active sandbox exists for the target record or scope."""
+
+
 class SandboxInstanceGoneError(SandboxError):
     """The provider confirms this exact instance is absent or terminal."""
 
@@ -348,6 +352,10 @@ class Sandbox(ABC):
 
     async def ensure_workspace_owner(self) -> None:
         """Ensure the sandbox workdir exists and has appropriate ownership."""
+        return
+
+    async def write_terminal_env(self) -> None:
+        """Publish current run env for interactive shells when supported."""
         return
 
     # Container port the Neko browser live view is served on.

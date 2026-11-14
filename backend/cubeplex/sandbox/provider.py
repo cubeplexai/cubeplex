@@ -195,6 +195,65 @@ class SandboxProvider(ABC):
 
 
 FALLBACK_SANDBOX_IMAGE = "ubuntu:22.04"
+_PLACEHOLDER_VALUES = frozenset(
+    {"USE ENV", "REPLACE_ME", "CHANGE_ME", "CHANGEME", "TODO", "YOUR_API_KEY"}
+)
+
+
+def configured_text(key: str) -> str:
+    """Read a config string, treating unresolved dynaconf ``@format`` templates as empty."""
+    from cubeplex.config import config
+
+    raw = config.get(key)
+    if raw is None:
+        return ""
+    text = str(raw).strip()
+    if "@format" in text or "{env[" in text:
+        return ""
+    return text
+
+
+def is_placeholder_value(value: str) -> bool:
+    """Return True when *value* looks like an unedited template placeholder."""
+    upper = value.upper()
+    lower = value.lower()
+    return (
+        upper in _PLACEHOLDER_VALUES
+        or lower.startswith(("change_me", "replace_me", "your_", "your-"))
+        or lower in {"replace_me", "use env", "todo", "changeme"}
+    )
+
+
+def validate_required_setting(key: str, env_name: str) -> str:
+    """Ensure config setting *key* is present and non-placeholder."""
+    value = configured_text(key)
+    if not value:
+        raise RuntimeError(f"{env_name} is required when sandbox.enabled=true")
+    if is_placeholder_value(value):
+        raise RuntimeError(f"{env_name} must not use a placeholder value")
+    return value
+
+
+def validate_optional_setting(key: str, env_name: str) -> str:
+    """Validate config setting *key* when non-empty; empty values remain allowed."""
+    value = configured_text(key)
+    if value and is_placeholder_value(value):
+        raise RuntimeError(f"{env_name} must not use a placeholder value")
+    return value
+
+
+def default_run_identity() -> RunIdentity:
+    """Read the default POSIX guest UID/GID/user from ``sandbox.*`` settings."""
+    from cubeplex.config import config
+
+    raw_user = config.get("sandbox.run_user", "cubeplex")
+    raw_uid = config.get("sandbox.run_uid", 1000)
+    raw_gid = config.get("sandbox.run_gid", 1000)
+    return RunIdentity(
+        user=str(raw_user) if raw_user else None,
+        uid=int(raw_uid) if raw_uid is not None else None,
+        gid=int(raw_gid) if raw_gid is not None else None,
+    )
 
 
 def resolve_default_image(provider: SandboxProvider | None) -> str:

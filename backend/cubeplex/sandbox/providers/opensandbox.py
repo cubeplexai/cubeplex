@@ -46,6 +46,9 @@ from cubeplex.sandbox.provider import (
     RunIdentity,
     SandboxCreateSpec,
     SandboxProvider,
+    configured_text,
+    default_run_identity,
+    validate_required_setting,
 )
 from cubeplex.sandbox_policy.rules import SandboxNetworkPolicy
 
@@ -59,10 +62,6 @@ _OPENSANDBOX_CAPABILITIES = SandboxCapabilities(
     browser=True,
     egress_proxy=True,
     network_policy=True,
-)
-
-_PLACEHOLDER_VALUES = frozenset(
-    {"USE ENV", "REPLACE_ME", "CHANGE_ME", "CHANGEME", "TODO", "YOUR_API_KEY"}
 )
 
 _orig_aiter_sse_events = _cmd_adapter.aiter_sse_events  # type: ignore[attr-defined]
@@ -152,27 +151,11 @@ def _to_opensandbox_network_policy(
 
 
 def _configured_text(key: str) -> str:
-    raw = config.get(key)
-    if raw is None:
-        return ""
-    text = str(raw).strip()
-    if "@format" in text or "{env[" in text:
-        return ""
-    return text
+    return configured_text(key)
 
 
 def _validate_required_setting(key: str, env_name: str) -> str:
-    value = _configured_text(key)
-    if not value:
-        raise RuntimeError(f"{env_name} is required when sandbox.enabled=true")
-    normalized = value.lower()
-    if (
-        value.upper() in _PLACEHOLDER_VALUES
-        or normalized.startswith("change_me")
-        or normalized in {"replace_me", "use env"}
-    ):
-        raise RuntimeError(f"{env_name} must not use a placeholder value")
-    return value
+    return validate_required_setting(key, env_name)
 
 
 class OpenSandbox(PosixSandboxMixin):
@@ -632,14 +615,7 @@ class OpenSandboxProvider(SandboxProvider):
         _validate_required_setting("sandbox.api_key", "CUBEPLEX_SANDBOX__API_KEY")
 
     def _default_run_identity(self) -> RunIdentity:
-        raw_user = config.get("sandbox.run_user", "cubeplex")
-        raw_uid = config.get("sandbox.run_uid", 1000)
-        raw_gid = config.get("sandbox.run_gid", 1000)
-        return RunIdentity(
-            user=str(raw_user) if raw_user else None,
-            uid=int(raw_uid) if raw_uid is not None else None,
-            gid=int(raw_gid) if raw_gid is not None else None,
-        )
+        return default_run_identity()
 
     def _request_timeout_seconds(self) -> float:
         return float(config.get("sandbox.request_timeout", 1860))

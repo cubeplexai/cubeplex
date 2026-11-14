@@ -7,6 +7,16 @@
 {{- if .Values.tempo.enabled -}}
 {{- $overrides = omit $overrides "tracing" -}}
 {{- end -}}
+{{- $sandboxCfg := .Values.backend.sandbox | default dict -}}
+{{- $sandboxProvider := (dig "provider" "opensandbox" $sandboxCfg) | default "opensandbox" -}}
+{{- $cubepodCfg := (dig "cubepod" dict $sandboxCfg) | default dict -}}
+{{- $cubepodBaseUrl := dig "base_url" "" $cubepodCfg -}}
+{{- $cubepodDefaultTemplate := dig "default_template" "" $cubepodCfg -}}
+{{- $cubepodWarmPool := dig "warm_pool" "" $cubepodCfg -}}
+{{- if eq $sandboxProvider "cubepod" -}}
+{{- $_ := required "backend.sandbox.cubepod.base_url must be set in values.local.yaml when backend.sandbox.provider is cubepod" $cubepodBaseUrl -}}
+{{- $_ := required "backend.sandbox.cubepod.default_template must not be empty when backend.sandbox.provider is cubepod" $cubepodDefaultTemplate -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -31,12 +41,25 @@ data:
         bucket: {{ .Values.rustfs.defaultBucket | quote }}
         region: "us-east-1"
       sandbox:
-        # The bundled chart or an external endpoint must provide OpenSandbox.
+        # Sandbox execution is required (default: opensandbox; supports cubepod / local).
         enabled: true
+        provider: {{ $sandboxProvider | quote }}
         use_server_proxy: {{ dig "sandbox" "use_server_proxy" false .Values.backend }}
         # Panels flow through cubeplex's token-authed panel reverse proxy (not the
         # OpenSandbox ingress gateway), so signed secured-endpoint mode is off.
         secure_access: {{ dig "sandbox" "secure_access" false .Values.backend }}
+        {{- if or (eq $sandboxProvider "cubepod") $cubepodBaseUrl $cubepodWarmPool (and $cubepodDefaultTemplate (ne $cubepodDefaultTemplate "cubeplex-ubuntu24-desktop")) }}
+        cubepod:
+          {{- if $cubepodBaseUrl }}
+          base_url: {{ $cubepodBaseUrl | quote }}
+          {{- end }}
+          {{- if $cubepodDefaultTemplate }}
+          default_template: {{ $cubepodDefaultTemplate | quote }}
+          {{- end }}
+          {{- if $cubepodWarmPool }}
+          warm_pool: {{ $cubepodWarmPool | quote }}
+          {{- end }}
+        {{- end }}
         {{- if .Values.egress.enabled }}
         # Activates egress secret-injection in SandboxManager (every
         # injection call is gated on `if self._exchange_host:`) and is

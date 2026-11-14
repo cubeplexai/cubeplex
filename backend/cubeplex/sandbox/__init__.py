@@ -15,6 +15,7 @@ from cubeplex.sandbox.base import (
     SandboxError,
     SandboxFileTooLargeError,
     SandboxInstanceGoneError,
+    SandboxNotFoundError,
     close_sandbox_handle,
     closing_sandbox,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "SandboxError",
     "SandboxFileTooLargeError",
     "SandboxInstanceGoneError",
+    "SandboxNotFoundError",
     "SandboxProvider",
     "UnknownSandboxProviderError",
     "close_sandbox_handle",

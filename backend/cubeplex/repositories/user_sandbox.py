@@ -665,6 +665,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             select(UserSandbox)
             .where(UserSandbox.status.in_(cls._REAPABLE_STATUSES))  # type: ignore[attr-defined]
             .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
+            .where(text("(in_use_until IS NULL OR in_use_until < NOW())"))
         )
         result = await session.execute(stmt)
         return list(result.scalars().all())
@@ -718,6 +719,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                     "OR last_provider_check + :ct * INTERVAL '1 second' <= NOW())"
                 )
             )
+            .where(text("(in_use_until IS NULL OR in_use_until < NOW())"))
             .params(ct=claim_timeout)
         )
         result = await session.execute(stmt)

@@ -42,8 +42,10 @@ from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox import (
     SandboxCapabilities,
     SandboxCapabilityUnsupportedError,
+    SandboxConflictError,
     SandboxError,
     SandboxFileTooLargeError,
+    SandboxNotFoundError,
     close_sandbox_handle,
     closing_sandbox,
 )
@@ -759,3 +761,69 @@ async def get_terminal(
             detail=("terminal endpoint requires header auth; not yet supported"),
         )
     return SandboxTerminalResponse(url=endpoint.url)
+
+
+class SandboxResetRootfsResponse(BaseModel):
+    ok: bool
+    user_sandbox_id: str
+    sandbox_id: str
+
+
+@router.post("/reset-rootfs", response_model=SandboxResetRootfsResponse)
+async def reset_sandbox_rootfs(
+    workspace_id: str,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    conversation_id: str | None = Query(default=None),
+) -> SandboxResetRootfsResponse:
+    """Reset the sandbox RootFS while keeping its persistent workspace volume intact."""
+    scope_type, scope_id, _owner_user_id = await _resolve_sandbox_scope(
+        session, ctx, conversation_id
+    )
+    repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
+    row = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
+    if row is None or row.status in ("terminated", "failed"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active sandbox found",
+        )
+
+    manager = get_sandbox_manager()
+    try:
+        result = await manager.reset_sandbox_rootfs(row.id)
+    except SandboxNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active sandbox found",
+        ) from exc
+    except SandboxCapabilityUnsupportedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
+    except SandboxConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except UnknownSandboxProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
+    except SandboxError as exc:
+        logger.warning(
+            "reset-rootfs unavailable for workspace {}: {}",
+            ctx.workspace_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sandbox unavailable; please retry",
+        ) from exc
+
+    return SandboxResetRootfsResponse(
+        ok=True,
+        user_sandbox_id=result.user_sandbox_id,
+        sandbox_id=result.sandbox_id,
+    )

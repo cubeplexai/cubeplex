@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from cubeplex.config import config
 from cubeplex.sandbox.base import SandboxError
 from cubeplex.sandbox.provider import SandboxProvider
+from cubeplex.sandbox.providers.cubepod import CubePodProvider
 from cubeplex.sandbox.providers.local import LocalSandboxProvider
 from cubeplex.sandbox.providers.opensandbox import OpenSandboxProvider
 
@@ -27,6 +28,7 @@ class ProviderRegistry:
         if providers is None:
             builtin: list[SandboxProvider] = [
                 OpenSandboxProvider(),
+                CubePodProvider(),
                 LocalSandboxProvider(),
             ]
             self._providers: dict[str, SandboxProvider] = {p.name: p for p in builtin}

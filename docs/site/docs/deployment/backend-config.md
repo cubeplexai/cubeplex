@@ -86,8 +86,18 @@ an auth signing secret is a known placeholder or has fewer than 32 characters:
 | `objectstore.access_key` / `access_secret` | S3 / rustfs credentials. |
 | `llm.providers.*` | At least one working provider — see [LLM provider configuration](./overview.md#llm-provider-configuration). |
 
-`sandbox.{domain,image,api_key}` are additionally required if you enable the
-sandbox (agent tool execution).
+`sandbox.enabled` must be `true` (agent tool execution), and additional sandbox
+settings are required based on `sandbox.provider`:
+
+- **`opensandbox` (default):** `sandbox.domain`, `sandbox.image`, and
+  `sandbox.api_key` are required (placeholder values are rejected).
+- **`cubepod`:** `sandbox.cubepod.base_url` and
+  `sandbox.cubepod.default_template` (defaults to `cubeplex-ubuntu24-desktop`)
+  are required. `sandbox.cubepod.api_key` is optional (placeholder values are
+  rejected if set).
+- **`local`:** intended for local development and testing only (runs commands
+  in a local directory on the backend process without container isolation); no
+  external endpoint or API key is required.
 
 ---
 
@@ -202,6 +212,7 @@ for the user-facing behaviour and each deployment guide for wiring it up.
 ```yaml
 sandbox:
   enabled: true
+  provider: "opensandbox" # "opensandbox" | "cubepod" | "local"
   domain: "…"             # OpenSandbox API host:port (no scheme)
   image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.9.5"
   api_key: "…"
@@ -211,19 +222,43 @@ sandbox:
   ttl: 1800               # idle seconds before cleanup
   ready_timeout: 300      # wait for a sandbox to become ready (covers a cold pull)
   run_user: "cubeplex"    # agent shell identity inside the container
-  run_uid: 1000           # OpenSandbox RunCommandOpts.uid (null = root)
+  run_uid: 1000           # guest execution UID inside the container (null = root)
   run_gid: 1000
   resource:
     cpu: "2"
     memory: "4Gi"
 ```
 
+When using the CubePod provider (`sandbox.provider: "cubepod"`), configure
+`sandbox.cubepod` instead of the OpenSandbox keys (`domain`, `image`, `api_key`,
+`use_server_proxy`, `secure_access`); shared settings (`ttl`, `ready_timeout`,
+`command_default_timeout_seconds`, `run_user` / `run_uid` / `run_gid`,
+`resource`) still apply:
+
+```yaml
+sandbox:
+  enabled: true
+  provider: "cubepod"
+  cubepod:
+    base_url: "http://cubepod-gateway:8080"
+    api_key: ""                                 # optional Bearer token
+    default_template: "cubeplex-ubuntu24-desktop"
+    warm_pool: ""                               # optional PodWarmPool name
+```
+
 | Key | Default | Notes |
 |---|---|---|
 | `sandbox.enabled` | `true` | Required. The backend refuses to start if it is not `true`. |
-| `sandbox.use_server_proxy` | `true` | Set `false` for direct pod access; `true` for Docker-bridge / isolated networks. |
-| `sandbox.secure_access` | `false` | Enables Kubernetes ingress-gateway signed URLs when `true`. **Must be `false`** on docker-runtime OpenSandbox. |
+| `sandbox.provider` | `opensandbox` | Sandbox runtime provider: `opensandbox`, `cubepod`, or `local` (`local` is for local dev/testing only without container isolation). Environment override: `CUBEPLEX_SANDBOX__PROVIDER`. |
+| `sandbox.domain` / `image` / `api_key` | — | OpenSandbox only. All three are required when `sandbox.provider` is `opensandbox` (placeholder values are rejected). Environment overrides: `CUBEPLEX_SANDBOX__DOMAIN`, `CUBEPLEX_SANDBOX__IMAGE`, `CUBEPLEX_SANDBOX__API_KEY`. |
+| `sandbox.use_server_proxy` | `true` | OpenSandbox only. Set `false` for direct pod access; `true` for Docker-bridge / isolated networks. |
+| `sandbox.secure_access` | `false` | OpenSandbox only. Enables Kubernetes ingress-gateway signed URLs when `true`. **Must be `false`** on docker-runtime OpenSandbox. |
+| `sandbox.cubepod.base_url` | `""` | CubePod gateway base URL (for example `http://cubepod-gateway:8080`). Required when `sandbox.provider` is `cubepod`. Environment override: `CUBEPLEX_SANDBOX__CUBEPOD__BASE_URL`. |
+| `sandbox.cubepod.api_key` | `""` | Optional Bearer token for the CubePod gateway (placeholder values are rejected if set). Environment override: `CUBEPLEX_SANDBOX__CUBEPOD__API_KEY`. |
+| `sandbox.cubepod.default_template` | `cubeplex-ubuntu24-desktop` | Default CubePod template name. Required when `sandbox.provider` is `cubepod`. Environment override: `CUBEPLEX_SANDBOX__CUBEPOD__DEFAULT_TEMPLATE`. |
+| `sandbox.cubepod.warm_pool` | `""` | Optional CubePod `PodWarmPool` name used when creating sandboxes. Environment override: `CUBEPLEX_SANDBOX__CUBEPOD__WARM_POOL`. |
 | `sandbox.ttl` | `1800` | Idle sandbox is reaped after 30 min. |
+| `sandbox.ready_timeout` | `300` | Seconds to wait for a newly created sandbox to become ready (covers a cold pull). |
 | `sandbox.command_default_timeout_seconds` | `3600` | Positive integer seconds, at most `2147483647` (the technical 32-bit seconds limit). The backend rejects out-of-range values, non-integers, booleans, and null at startup. Environment override: `CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS`. |
 | `sandbox.run_user` / `run_uid` / `run_gid` | `cubeplex` / `1000` / `1000` | Agent commands and uploaded files run as this user. Match the sandbox image. Set `run_uid` to `null` to keep the previous root default. Browser stack still starts as root. |
 | `sandbox.resource.cpu` / `memory` | `2` / `4Gi` | Per-sandbox limits. |

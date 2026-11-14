@@ -19,6 +19,7 @@ import asyncio
 import hashlib
 import re
 import time
+import weakref
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -47,9 +48,12 @@ from cubeplex.repositories.user_sandbox import (
 from cubeplex.sandbox.base import (
     Sandbox,
     SandboxCapabilities,
+    SandboxCapabilityUnsupportedError,
     SandboxConflictError,
     SandboxError,
     SandboxInstanceGoneError,
+    SandboxNotFoundError,
+    closing_sandbox,
 )
 from cubeplex.sandbox.provider import (
     ProviderInstanceState,
@@ -138,6 +142,17 @@ class SandboxAttachment:
 
     sandbox: Sandbox
     user_sandbox_id: str
+
+
+_RESET_ROOTFS_CONFLICT_STATES = frozenset({"provisioning", "pausing", "resuming", "kill_pending"})
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxResetRootfsResult:
+    """Outcome of a capability-gated RootFS reset."""
+
+    user_sandbox_id: str
+    sandbox_id: str
 
 
 # (env_var_id, env_name, is_secret, value-if-plain) per entry — see _egress_signature.
@@ -231,6 +246,9 @@ class SandboxManager:
 
         self._touch_cache: dict[str, datetime] = {}
         self._egress_generations: dict[str, _EgressGeneration] = {}
+        self._lifecycle_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     @property
     def registry(self) -> ProviderRegistry:
@@ -1193,6 +1211,162 @@ class SandboxManager:
                 delete_on_success=True,
             )
 
+    def _get_lifecycle_lock(self, user_sandbox_id: str) -> asyncio.Lock:
+        lock = self._lifecycle_locks.get(user_sandbox_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._lifecycle_locks[user_sandbox_id] = lock
+        return lock
+
+    def _validate_reset_rootfs_row(
+        self,
+        row: UserSandbox | None,
+        user_sandbox_id: str,
+    ) -> tuple[UserSandbox, SandboxProvider, str]:
+        if row is None or row.deleted_at is not None or row.status in ("terminated", "failed"):
+            raise SandboxNotFoundError(f"Sandbox {user_sandbox_id} not found")
+        provider = self._provider_for_record(row)
+        if not provider.capabilities.reset_rootfs:
+            raise SandboxCapabilityUnsupportedError("reset_rootfs", provider.name)
+        if row.status in _RESET_ROOTFS_CONFLICT_STATES or row.cleanup_action is not None:
+            raise SandboxConflictError(f"Sandbox {row.id} cannot reset rootfs while {row.status}")
+        if row.status not in ("running", "paused") or not row.sandbox_id:
+            raise SandboxConflictError(
+                f"Sandbox {row.id} is in state {row.status!r} and cannot reset rootfs"
+            )
+        return row, provider, row.sandbox_id
+
+    async def reset_sandbox_rootfs(self, user_sandbox_id: str) -> SandboxResetRootfsResult:
+        """Reset an active or paused sandbox RootFS and re-bootstrap guest state."""
+        async with self._session_factory() as session:
+            pre_row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+        self._validate_reset_rootfs_row(pre_row, user_sandbox_id)
+
+        async with self._get_lifecycle_lock(user_sandbox_id):
+            async with self._session_factory() as session:
+                current = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+                row, provider, sandbox_id = self._validate_reset_rootfs_row(
+                    current, user_sandbox_id
+                )
+                repo = UserSandboxRepository(
+                    session, org_id=row.org_id, workspace_id=row.workspace_id
+                )
+                org_id = row.org_id
+                workspace_id = row.workspace_id
+                user_id = row.user_id
+                scope_type = row.scope_type
+                scope_id = row.scope_id
+                was_paused = row.status == "paused"
+                paused_at = row.paused_at
+                if was_paused:
+                    claimed = await repo.mark_resuming(row.id)
+                    if not claimed:
+                        raise SandboxConflictError(
+                            f"Sandbox {row.id} state changed concurrently; retry"
+                        )
+                await repo.update_activity(row.id)
+                await repo.acquire_in_use(row.id, max(self._lease_seconds, 120))
+
+            marked_running = False
+            try:
+                now = datetime.now(UTC)
+                await self._request_managed_task_stop(
+                    row,
+                    sandbox_instance_id=sandbox_id,
+                    now=now,
+                )
+                async with self._session_factory() as cmd_session:
+                    from cubeplex.sandbox.command_coordinator import kill_sandbox_commands
+
+                    async def _no_sandbox(_row: object) -> None:
+                        return None
+
+                    await kill_sandbox_commands(
+                        cmd_session,
+                        user_sandbox_id,
+                        get_sandbox=_no_sandbox,
+                        now=now,
+                    )
+                    await cmd_session.commit()
+                await provider.reset_rootfs(sandbox_id)
+
+                async with self._session_factory() as session:
+                    repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+                    if was_paused:
+                        run_ok = await repo.mark_running(
+                            user_sandbox_id, last_resumed_at=datetime.now(UTC)
+                        )
+                        if not run_ok:
+                            current_row = await repo.get(user_sandbox_id)
+                            current_status = current_row.status if current_row is not None else None
+                            if current_status == "running":
+                                run_ok = True
+                            elif current_status == "paused":
+                                await repo.mark_resuming(user_sandbox_id)
+                                run_ok = await repo.mark_running(
+                                    user_sandbox_id, last_resumed_at=datetime.now(UTC)
+                                )
+                            elif current_row is None or current_status in ("terminated", "failed"):
+                                raise SandboxNotFoundError(f"Sandbox {user_sandbox_id} not found")
+                            if not run_ok:
+                                raise SandboxConflictError(
+                                    f"Sandbox {user_sandbox_id} changed state "
+                                    f"({current_status!r}) before running transition"
+                                )
+                    marked_running = True
+                    await repo.update_activity(user_sandbox_id)
+
+                self._touch_cache[user_sandbox_id] = datetime.now(UTC)
+                workdir = self.resolve_scope_workdir(
+                    provider=provider,
+                    workspace_id=workspace_id,
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                )
+                backend = await provider.connect(
+                    sandbox_id,
+                    workdir=workdir,
+                    user_sandbox_id=user_sandbox_id,
+                    run_identity=self._run_identity(),
+                )
+                async with closing_sandbox(backend):
+                    await backend.ensure_workspace_owner()
+                    async with self._session_factory() as guest_session:
+                        await self._apply_egress(
+                            guest_session,
+                            backend,
+                            provider=provider,
+                            org_id=org_id,
+                            workspace_id=workspace_id,
+                            user_id=user_id,
+                            sandbox_id=sandbox_id,
+                        )
+                        await guest_session.commit()
+                    await backend.write_terminal_env()
+
+                return SandboxResetRootfsResult(
+                    user_sandbox_id=user_sandbox_id,
+                    sandbox_id=sandbox_id,
+                )
+            except Exception:
+                if was_paused and not marked_running:
+                    with suppress(Exception):
+                        state = await provider.inspect_state(sandbox_id)
+                        if state == ProviderInstanceState.PAUSED:
+                            async with self._session_factory() as revert_session:
+                                revert_repo = UserSandboxRepository(
+                                    revert_session, org_id=org_id, workspace_id=workspace_id
+                                )
+                                await revert_repo.mark_paused(user_sandbox_id, paused_at=paused_at)
+                raise
+            finally:
+                with suppress(Exception):
+                    async with self._session_factory() as cleanup_session:
+                        cleanup_repo = UserSandboxRepository(
+                            cleanup_session, org_id=org_id, workspace_id=workspace_id
+                        )
+                        await cleanup_repo.release_in_use(user_sandbox_id)
+
     @staticmethod
     def _cleanup_instance_id(sandbox_id: str | None) -> str | None:
         if not sandbox_id or sandbox_id.startswith("pending-"):
@@ -1601,64 +1775,76 @@ class SandboxManager:
                     org_id=record.org_id,
                     workspace_id=record.workspace_id,
                 )
-                assert record.sandbox_id, "transient rows must have sandbox_id"
-                provider = self._provider_for_record(record)
                 try:
-                    state = await provider.inspect_state(record.sandbox_id)
-                except Exception as exc:
-                    logger.warning(
-                        "Reconciler: inspect_state failed for {}: {}",
-                        record.sandbox_id,
-                        exc,
-                    )
-                    await scoped.touch_provider_check(record.id)
-                    continue
-
-                if state is None:
-                    logger.warning(
-                        "Reconciler: provider reports {} gone (404 / NOT_FOUND); killing the row",
-                        record.sandbox_id,
-                    )
-                    await self._kill_record(session, scoped, record)
-                    await scoped.touch_provider_check(record.id)
-                    continue
-
-                if state == ProviderInstanceState.PAUSED:
-                    await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
-                elif state == ProviderInstanceState.RUNNING:
-                    last_active = (
-                        record.last_activity_at.replace(tzinfo=UTC)
-                        if record.last_activity_at.tzinfo is None
-                        else record.last_activity_at
-                    )
-                    pause_idle_age = (datetime.now(UTC) - last_active).total_seconds()
-                    if (
-                        record.status == "pausing"
-                        and pause_idle_age >= self._pause_attempt_grace_seconds
-                    ):
+                    if not record.sandbox_id:
                         logger.warning(
-                            "Reconciler: {} stuck pausing on no-op-pause backend "
-                            "(idle {}s >= grace {}s); killing instead of reverting",
+                            "Reconciler: transient row {} has no sandbox_id; skipping",
+                            record.id,
+                        )
+                        await scoped.touch_provider_check(record.id)
+                        continue
+                    try:
+                        provider = self._provider_for_record(record)
+                        state = await provider.inspect_state(record.sandbox_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Reconciler: inspect_state failed for {}: {}",
                             record.sandbox_id,
-                            int(pause_idle_age),
-                            self._pause_attempt_grace_seconds,
+                            exc,
+                        )
+                        await scoped.touch_provider_check(record.id)
+                        continue
+
+                    if state is None:
+                        logger.warning(
+                            "Reconciler: provider reports {} gone (404 / NOT_FOUND); killing row",
+                            record.sandbox_id,
                         )
                         await self._kill_record(session, scoped, record)
-                    else:
-                        await scoped.mark_running(
-                            record.id,
-                            last_resumed_at=(
-                                datetime.now(UTC) if record.status == "resuming" else None
-                            ),
-                        )
-                elif state == ProviderInstanceState.FAILED:
-                    await scoped.mark_failed_from_transient(record.id)
-                elif state == ProviderInstanceState.TERMINATED:
-                    await self._kill_record(session, scoped, record)
-                else:
-                    logger.debug("Reconciler: {} still {}", record.sandbox_id, state.value)
+                        await scoped.touch_provider_check(record.id)
+                        continue
 
-                await scoped.touch_provider_check(record.id)
+                    if state == ProviderInstanceState.PAUSED:
+                        await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
+                    elif state == ProviderInstanceState.RUNNING:
+                        last_active = (
+                            record.last_activity_at.replace(tzinfo=UTC)
+                            if record.last_activity_at.tzinfo is None
+                            else record.last_activity_at
+                        )
+                        pause_idle_age = (datetime.now(UTC) - last_active).total_seconds()
+                        if (
+                            record.status == "pausing"
+                            and pause_idle_age >= self._pause_attempt_grace_seconds
+                        ):
+                            logger.warning(
+                                "Reconciler: {} stuck pausing on no-op-pause backend "
+                                "(idle {}s >= grace {}s); killing instead of reverting",
+                                record.sandbox_id,
+                                int(pause_idle_age),
+                                self._pause_attempt_grace_seconds,
+                            )
+                            await self._kill_record(session, scoped, record)
+                        else:
+                            await scoped.mark_running(
+                                record.id,
+                                last_resumed_at=(
+                                    datetime.now(UTC) if record.status == "resuming" else None
+                                ),
+                            )
+                    elif state == ProviderInstanceState.FAILED:
+                        await scoped.mark_failed_from_transient(record.id)
+                    elif state == ProviderInstanceState.TERMINATED:
+                        await self._kill_record(session, scoped, record)
+                    else:
+                        logger.debug("Reconciler: {} still {}", record.sandbox_id, state.value)
+
+                    await scoped.touch_provider_check(record.id)
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "Reconciler: unexpected error reconciling {}",
+                        record.id,
+                    )
 
     async def _kill_record(
         self,
