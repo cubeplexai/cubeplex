@@ -1264,6 +1264,7 @@ class SandboxManager:
                         raise SandboxConflictError(
                             f"Sandbox {row.id} state changed concurrently; retry"
                         )
+                await repo.update_activity(row.id)
                 await repo.acquire_in_use(row.id, max(self._lease_seconds, 120))
 
             marked_running = False
@@ -1274,6 +1275,19 @@ class SandboxManager:
                     sandbox_instance_id=sandbox_id,
                     now=now,
                 )
+                async with self._session_factory() as cmd_session:
+                    from cubeplex.sandbox.command_coordinator import kill_sandbox_commands
+
+                    async def _no_sandbox(_row: object) -> None:
+                        return None
+
+                    await kill_sandbox_commands(
+                        cmd_session,
+                        user_sandbox_id,
+                        get_sandbox=_no_sandbox,
+                        now=now,
+                    )
+                    await cmd_session.commit()
                 await provider.reset_rootfs(sandbox_id)
 
                 async with self._session_factory() as session:
@@ -1283,9 +1297,22 @@ class SandboxManager:
                             user_sandbox_id, last_resumed_at=datetime.now(UTC)
                         )
                         if not run_ok:
-                            raise SandboxConflictError(
-                                f"Sandbox {user_sandbox_id} changed state before running transition"
-                            )
+                            current_row = await repo.get(user_sandbox_id)
+                            current_status = current_row.status if current_row is not None else None
+                            if current_status == "running":
+                                run_ok = True
+                            elif current_status == "paused":
+                                await repo.mark_resuming(user_sandbox_id)
+                                run_ok = await repo.mark_running(
+                                    user_sandbox_id, last_resumed_at=datetime.now(UTC)
+                                )
+                            elif current_row is None or current_status in ("terminated", "failed"):
+                                raise SandboxNotFoundError(f"Sandbox {user_sandbox_id} not found")
+                            if not run_ok:
+                                raise SandboxConflictError(
+                                    f"Sandbox {user_sandbox_id} changed state "
+                                    f"({current_status!r}) before running transition"
+                                )
                     marked_running = True
                     await repo.update_activity(user_sandbox_id)
 

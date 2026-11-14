@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import posixpath
+import threading
 import time
+import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
@@ -22,6 +25,7 @@ from cubepod import (
 from cubepod import (
     FileEntry as CubePodFileEntry,
 )
+from loguru import logger
 
 from cubeplex.config import config
 from cubeplex.sandbox.base import (
@@ -236,13 +240,20 @@ class CubePodSandbox(PosixSandboxMixin):
                 gid=gid,
                 timeout=float(timeout) if timeout is not None else None,
             )
-        except (httpx.TimeoutException, TimeoutError):
+        except (httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
+            raise _translate_lifecycle_error(exc, self._sandbox_id) from exc
+        except (httpx.TimeoutException, TimeoutError) as exc:
+            if timeout is None:
+                raise _translate_lifecycle_error(exc, self._sandbox_id) from exc
             return ExecuteResult("[timeout]", -1)
         except (httpx.HTTPError, OSError) as exc:
             raise _translate_lifecycle_error(exc, self._sandbox_id) from exc
 
         if on_chunk is not None and res.output:
-            on_chunk(res.output)
+            try:
+                on_chunk(res.output)
+            except Exception:
+                logger.exception("CubePod on_chunk failed")
         return ExecuteResult(output=res.output, exit_code=res.exit_code)
 
     async def start(
@@ -312,7 +323,6 @@ class CubePodSandbox(PosixSandboxMixin):
             await self._raise_if_instance_gone()
             raise SandboxError(str(exc)) from exc
 
-        self._log_cursors[handle.provider_ref] = int(logs.cursor)
         return ProcessSnapshot(
             status="running" if logs.running else "exited",
             exit_code=logs.exit_code,
@@ -335,8 +345,13 @@ class CubePodSandbox(PosixSandboxMixin):
         except (httpx.HTTPError, TimeoutError, OSError) as exc:
             raise SandboxError(str(exc)) from exc
 
-        self._log_cursors[handle.provider_ref] = int(logs.cursor)
         return ProcessOutput(new_output=logs.content, log_cursor=str(logs.cursor))
+
+    async def acknowledge_output(self, handle: ProcessHandle, cursor: str) -> None:
+        await super().acknowledge_output(handle, cursor)
+        if handle.provider_ref:
+            with suppress(ValueError):
+                self._log_cursors[handle.provider_ref] = int(cursor)
 
     async def kill(self, handle: ProcessHandle) -> None:
         try:
@@ -497,6 +512,13 @@ class CubePodSandbox(PosixSandboxMixin):
             raise _translate_lifecycle_error(exc, self._sandbox_id) from exc
 
 
+@dataclass
+class _LoopClientState:
+    lock: asyncio.Lock
+    client: AsyncCubePod | None = None
+    key: tuple[str, str, float] | None = None
+
+
 class CubePodProvider(SandboxProvider):
     """Control-plane ``SandboxProvider`` backed by CubePod."""
 
@@ -508,8 +530,11 @@ class CubePodProvider(SandboxProvider):
     ) -> None:
         self._injected_client = client
         self._poll_interval = poll_interval
-        self._client: AsyncCubePod | None = client
-        self._client_key: tuple[str, str, float] | None = None
+        self._states_guard = threading.Lock()
+        self._loop_states: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, _LoopClientState
+        ] = weakref.WeakKeyDictionary()
+        self._retired_clients: list[tuple[asyncio.AbstractEventLoop, AsyncCubePod]] = []
 
     @property
     def name(self) -> str:
@@ -548,7 +573,15 @@ class CubePodProvider(SandboxProvider):
         return configured_text("sandbox.cubepod.api_key")
 
     def _request_timeout_seconds(self) -> float:
-        return float(config.get("sandbox.request_timeout", 60.0))
+        return float(config.get("sandbox.request_timeout", 1860.0))
+
+    def _state_for_loop(self, loop: asyncio.AbstractEventLoop) -> _LoopClientState:
+        with self._states_guard:
+            state = self._loop_states.get(loop)
+            if state is None:
+                state = _LoopClientState(lock=asyncio.Lock())
+                self._loop_states[loop] = state
+            return state
 
     async def _get_client(self) -> AsyncCubePod:
         if self._injected_client is not None:
@@ -557,21 +590,25 @@ class CubePodProvider(SandboxProvider):
         if not base_url:
             raise SandboxError("CubePod requires sandbox.cubepod.base_url")
         api_key = self._api_key()
-        timeout = min(self._request_timeout_seconds(), 120.0)
+        timeout = self._request_timeout_seconds()
         key = (base_url, api_key, timeout)
-        if self._client is not None and self._client_key == key:
-            return self._client
-        if self._client is not None:
-            with suppress(Exception):
-                await self._client.close()
-        self._client = AsyncCubePod(
-            base_url=base_url,
-            api_key=api_key or None,
-            timeout=timeout,
-            trust_env=False,
-        )
-        self._client_key = key
-        return self._client
+
+        loop = asyncio.get_running_loop()
+        state = self._state_for_loop(loop)
+        async with state.lock:
+            if state.client is not None and state.key == key:
+                return state.client
+            if state.client is not None:
+                with self._states_guard:
+                    self._retired_clients.append((loop, state.client))
+            state.client = AsyncCubePod(
+                base_url=base_url,
+                api_key=api_key or None,
+                timeout=timeout,
+                trust_env=False,
+            )
+            state.key = key
+            return state.client
 
     def _make_handle(
         self,
@@ -821,6 +858,7 @@ class CubePodProvider(SandboxProvider):
         parsed = urlsplit(base_url)
         http_scheme = parsed.scheme or "http"
         ws_scheme = "wss" if http_scheme == "https" else "ws"
+        base_path = parsed.path.rstrip("/")
         host_header = f"{port}-{sandbox_id}.cubepod.local"
         clean_path = path.lstrip("/")
         qs = f"?{query}" if query else ""
@@ -844,7 +882,7 @@ class CubePodProvider(SandboxProvider):
         return PanelUpstream(
             http_url=f"{base_url}/{clean_path}{qs}",
             http_headers=http_headers,
-            ws_url=f"{ws_scheme}://{host_header}/{clean_path}{qs}",
+            ws_url=f"{ws_scheme}://{host_header}{base_path}/{clean_path}{qs}",
             ws_headers=ws_headers,
             ws_connect_host=connect_host,
             ws_connect_port=connect_port,
@@ -852,8 +890,24 @@ class CubePodProvider(SandboxProvider):
         )
 
     async def aclose(self) -> None:
-        client = self._client
-        self._client = None
-        self._client_key = None
-        if client is not None:
-            await client.close()
+        with self._states_guard:
+            entries: list[tuple[asyncio.AbstractEventLoop, AsyncCubePod]] = [
+                (loop, state.client)
+                for loop, state in list(self._loop_states.items())
+                if state.client is not None
+            ]
+            entries.extend(self._retired_clients)
+            self._loop_states.clear()
+            self._retired_clients.clear()
+            injected = self._injected_client
+            self._injected_client = None
+
+        current_loop = asyncio.get_running_loop()
+        for client_loop, client in entries:
+            if client_loop.is_closed() and client_loop is not current_loop:
+                continue
+            with suppress(Exception):
+                await client.close()
+        if injected is not None:
+            with suppress(Exception):
+                await injected.close()

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import threading
 from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import httpx
@@ -478,12 +481,33 @@ async def test_cubepod_commands_uid_cursor_and_gone_detection() -> None:
     assert snap1.status == "running"
     assert snap1.new_output == "hello"
     assert snap1.log_cursor == "5"
+    assert handle.log_cursor is None
+
+    # Unacknowledged poll/read_output must retry from cursor=0 until acknowledge_output().
+    retry_poll = await sandbox.poll(handle)
+    assert retry_poll.new_output == "hello"
+    assert retry_poll.log_cursor == "5"
+    retry_read = await sandbox.read_output(
+        ProcessHandle(command_id="c1", provider_ref="cmd-7", log_cursor=None)
+    )
+    assert retry_read.new_output == "hello"
+    assert retry_read.log_cursor == "5"
+
+    await sandbox.acknowledge_output(handle, snap1.log_cursor)
+    assert handle.log_cursor == "5"
 
     snap2 = await sandbox.poll(handle)
     assert snap2.status == "exited"
     assert snap2.exit_code == 0
     assert snap2.new_output == " world"
     assert snap2.log_cursor == "11"
+
+    # Driver-local cursor advanced on acknowledge_output() even if caller omits log_cursor.
+    out_from_local = await sandbox.read_output(
+        ProcessHandle(command_id="c1", provider_ref="cmd-7", log_cursor=None)
+    )
+    assert out_from_local.new_output == " world"
+    assert out_from_local.log_cursor == "11"
 
     # Cross-worker observer passing explicit log_cursor respects caller cursor.
     out = await sandbox.read_output(
@@ -671,6 +695,35 @@ def test_cubepod_build_panel_upstream_http_and_ws_headers(
     assert tls_up.ws_connect_port == 8443
     assert tls_up.ws_server_hostname == "pods.example.com"
 
+    monkeypatch.setattr(
+        config,
+        "get",
+        lambda key, default=None: {
+            "sandbox.cubepod.base_url": "https://ingress.example.com/cubepod/",
+            "sandbox.cubepod.api_key": "",
+        }.get(key, default),
+    )
+    prefixed_up = provider.build_panel_upstream(
+        sandbox_id="cpod-abc",
+        port=8080,
+        path="/vnc/index.html",
+        query="autoconnect=1",
+    )
+    assert prefixed_up.http_url == (
+        "https://ingress.example.com/cubepod/vnc/index.html?autoconnect=1"
+    )
+    assert prefixed_up.ws_url == (
+        "wss://8080-cpod-abc.cubepod.local/cubepod/vnc/index.html?autoconnect=1"
+    )
+    prefixed_root = provider.build_panel_upstream(
+        sandbox_id="cpod-abc",
+        port=7681,
+        path="",
+        query="",
+    )
+    assert prefixed_root.http_url == "https://ingress.example.com/cubepod/"
+    assert prefixed_root.ws_url == "wss://7681-cpod-abc.cubepod.local/cubepod/"
+
 
 async def test_cubepod_conflict_error_mapping() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -681,3 +734,134 @@ async def test_cubepod_conflict_error_mapping() -> None:
     provider = CubePodProvider(client=_client_for(handler))
     with pytest.raises(SandboxConflictError):
         await provider.pause("cpod-1")
+
+
+async def test_cubepod_execute_timeout_and_on_chunk_contract() -> None:
+    mode = "ok"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/sandboxes/cpod-1/commands/run":
+            if mode == "read_timeout":
+                raise httpx.ReadTimeout("read timed out", request=request)
+            if mode == "connect_timeout":
+                raise httpx.ConnectTimeout("connect timed out", request=request)
+            if mode == "pool_timeout":
+                raise httpx.PoolTimeout("pool exhausted", request=request)
+            return _json_response(
+                200,
+                {"id": "cmd-1", "exitCode": 0, "output": "ok\n", "running": False},
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    sandbox = CubePodSandbox(
+        client=_client_for(handler),
+        sandbox_id="cpod-1",
+        workdir="/workspace",
+    )
+
+    # Read timeout with timeout=None must raise SandboxError instead of ExecuteResult("[timeout]").
+    mode = "read_timeout"
+    with pytest.raises(SandboxError, match="read timed out"):
+        await sandbox.execute("long-task", timeout=None)
+
+    # Connect/Pool timeouts must always raise SandboxError even when timeout is set.
+    mode = "connect_timeout"
+    with pytest.raises(SandboxError, match="connect timed out"):
+        await sandbox.execute("short-task", timeout=5)
+
+    mode = "pool_timeout"
+    with pytest.raises(SandboxError, match="pool exhausted"):
+        await sandbox.execute("short-task", timeout=5)
+
+    # Read timeout with bounded timeout maps to [timeout] / -1.
+    mode = "read_timeout"
+    timed_out = await sandbox.execute("sleep 99", timeout=5)
+    assert timed_out == ExecuteResult(output="[timeout]", exit_code=-1)
+
+    # Callback errors inside on_chunk must be caught and never fail execute().
+    mode = "ok"
+
+    def _boom(_chunk: str) -> None:
+        raise RuntimeError("callback failure")
+
+    ok = await sandbox.execute("echo ok", on_chunk=_boom)
+    assert ok == ExecuteResult(output="ok\n", exit_code=0)
+
+
+def test_cubepod_provider_loop_bound_client_pool_and_request_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _KeepAliveHandler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:
+            sid = self.path.rsplit("/", 1)[-1]
+            body = json.dumps(
+                {
+                    "sandboxID": sid,
+                    "templateID": "cubeplex-ubuntu24-desktop",
+                    "state": "Running",
+                }
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+            del format, args
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _KeepAliveHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        orig_get = config.get
+        api_key = "k1"
+
+        def _fake_get(key: str, default: Any = None, *args: Any, **kwargs: Any) -> Any:
+            overrides: dict[str, Any] = {
+                "sandbox.cubepod.base_url": f"http://127.0.0.1:{port}",
+                "sandbox.cubepod.api_key": api_key,
+                "sandbox.request_timeout": 1860,
+            }
+            if key in overrides:
+                return overrides[key]
+            return orig_get(key, default, *args, **kwargs)
+
+        monkeypatch.setattr(config, "get", _fake_get)
+        provider = CubePodProvider()
+
+        async def _probe_loop(count: int) -> tuple[list[ProviderInstanceState], list[AsyncCubePod]]:
+            states = await asyncio.gather(
+                *(provider.inspect_state(f"cpod-{i}") for i in range(count))
+            )
+            clients = await asyncio.gather(*(provider._get_client() for _ in range(count)))
+            return list(states), list(clients)
+
+        states1, clients1 = asyncio.run(_probe_loop(4))
+        assert states1 == [ProviderInstanceState.RUNNING] * 4
+        assert len({id(c) for c in clients1}) == 1
+        assert clients1[0]._client.timeout == httpx.Timeout(1860.0)
+
+        async def _probe_second_loop() -> tuple[list[ProviderInstanceState], AsyncCubePod]:
+            states = await asyncio.gather(
+                *(provider.inspect_state(f"cpod-b-{i}") for i in range(3))
+            )
+            c_before = await provider._get_client()
+            nonlocal api_key
+            api_key = "k2"
+            c_after = await provider._get_client()
+            assert c_after is not c_before
+            await provider.aclose()
+            return list(states), c_before
+
+        states2, client_loop2 = asyncio.run(_probe_second_loop())
+        assert states2 == [ProviderInstanceState.RUNNING] * 3
+        assert client_loop2 is not clients1[0]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

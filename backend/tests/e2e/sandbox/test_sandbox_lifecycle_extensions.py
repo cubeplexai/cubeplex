@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +14,14 @@ from cubepod import AsyncCubePod
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import cubeplex.sandbox.command_coordinator as command_coordinator
 from cubeplex.config import config
 from cubeplex.models.background_task import BackgroundTask, BackgroundTaskState, TaskStopReason
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.sandbox_command import SandboxCommand, SandboxCommandStatus
 from cubeplex.models.user_sandbox import UserSandbox
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox.manager import get_sandbox_manager
 from cubeplex.sandbox.providers.cubepod import CubePodProvider
 from cubeplex.sandbox.providers.local import LocalSandboxProvider
@@ -518,3 +520,186 @@ async def test_reset_rootfs_supports_running_dedicated_topic_conversation_scope(
     }
     assert backend.reset_calls == [sandbox_id]
     assert backend.rootfs_generation[sandbox_id] == 2
+
+
+async def test_leased_rows_excluded_from_reconcile_and_expired_cleanup(
+    admin_client_with_user_id: tuple[httpx.AsyncClient, str, str],
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _client, ws_id, user_id = admin_client_with_user_id
+    now = datetime.now(UTC)
+
+    async with session_factory() as session:
+        org_id = await _org_for_workspace(session, ws_id)
+
+        def _row(
+            *,
+            scope_id: str,
+            status: str,
+            expires_at: datetime,
+            in_use_until: datetime | None,
+        ) -> UserSandbox:
+            return UserSandbox(
+                org_id=org_id,
+                workspace_id=ws_id,
+                scope_type="conversation",
+                scope_id=scope_id,
+                user_id=user_id,
+                provider="cubepod",
+                sandbox_id=f"cpod-{ws_id}-{scope_id}",
+                image="cubeplex-ubuntu24-desktop",
+                status=status,
+                expires_at=expires_at,
+                last_activity_at=now - timedelta(hours=1),
+                last_provider_check=None,
+                in_use_until=in_use_until,
+            )
+
+        leased_transient = _row(
+            scope_id="lease-tr-active",
+            status="resuming",
+            expires_at=now + timedelta(minutes=10),
+            in_use_until=now + timedelta(seconds=120),
+        )
+        stale_transient = _row(
+            scope_id="lease-tr-expired",
+            status="resuming",
+            expires_at=now + timedelta(minutes=10),
+            in_use_until=now - timedelta(seconds=5),
+        )
+        leased_expired = _row(
+            scope_id="lease-exp-active",
+            status="running",
+            expires_at=now - timedelta(seconds=60),
+            in_use_until=now + timedelta(seconds=120),
+        )
+        unleased_expired = _row(
+            scope_id="lease-exp-expired",
+            status="running",
+            expires_at=now - timedelta(seconds=60),
+            in_use_until=now - timedelta(seconds=5),
+        )
+        session.add_all([leased_transient, stale_transient, leased_expired, unleased_expired])
+        await session.commit()
+
+        leased_transient_id = leased_transient.id
+        stale_transient_id = stale_transient.id
+        leased_expired_id = leased_expired.id
+        unleased_expired_id = unleased_expired.id
+
+    async with session_factory() as session:
+        transient_ids = {
+            r.id
+            for r in await UserSandboxRepository.list_transient_for_reconcile_system(
+                session, claim_timeout=0
+            )
+            if r.workspace_id == ws_id
+        }
+        expired_ids = {
+            r.id
+            for r in await UserSandboxRepository.list_expired_system(session)
+            if r.workspace_id == ws_id
+        }
+
+    assert leased_transient_id not in transient_ids
+    assert stale_transient_id in transient_ids
+    assert leased_expired_id not in expired_ids
+    assert unleased_expired_id in expired_ids
+
+
+async def test_reset_rootfs_protects_lease_activity_runs_kill_commands_and_handles_reconciler_flip(
+    admin_client_with_user_id: tuple[httpx.AsyncClient, str, str],
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, ws_id, user_id = admin_client_with_user_id
+    backend = _FakeCubePodBackend()
+    cpod = CubePodProvider(client=backend.client(), poll_interval=0.0)
+    _mount_registry(
+        monkeypatch,
+        ProviderRegistry({"cubepod": cpod}, default_name="cubepod"),
+    )
+
+    sandbox_id = f"cpod-race-{ws_id}"
+    backend.states[sandbox_id] = "Paused"
+    old_activity = datetime.now(UTC) - timedelta(hours=1)
+    async with session_factory() as session:
+        org_id = await _org_for_workspace(session, ws_id)
+        usbx = UserSandbox(
+            org_id=org_id,
+            workspace_id=ws_id,
+            scope_type="user",
+            scope_id=user_id,
+            user_id=user_id,
+            provider="cubepod",
+            sandbox_id=sandbox_id,
+            image="cubeplex-ubuntu24-desktop",
+            status="paused",
+            paused_at=old_activity,
+            expires_at=datetime.now(UTC) + timedelta(minutes=30),
+            last_activity_at=old_activity,
+        )
+        session.add(usbx)
+        await session.commit()
+        usbx_id = usbx.id
+
+    kill_calls: list[str] = []
+    orig_kill = command_coordinator.kill_sandbox_commands
+
+    async def _spy_kill(
+        session: AsyncSession,
+        target_sandbox_id: str,
+        **kwargs: Any,
+    ) -> list[str]:
+        kill_calls.append(target_sandbox_id)
+        return await orig_kill(session, target_sandbox_id, **kwargs)
+
+    monkeypatch.setattr(command_coordinator, "kill_sandbox_commands", _spy_kill)
+
+    inspected_during_reset: list[str] = []
+    orig_inspect = cpod.inspect_state
+
+    async def _spy_inspect(target_id: str) -> Any:
+        inspected_during_reset.append(target_id)
+        return await orig_inspect(target_id)
+
+    monkeypatch.setattr(cpod, "inspect_state", _spy_inspect)
+
+    orig_reset_rootfs = cpod.reset_rootfs
+
+    async def _reset_with_concurrent_race(target_id: str) -> None:
+        # While reset_rootfs is in-flight, lease + activity bump must hide row from reconciler.
+        async with session_factory() as check_session:
+            inflight = await check_session.get(UserSandbox, usbx_id)
+            assert inflight is not None
+            assert inflight.status == "resuming"
+            assert inflight.in_use_until is not None
+            assert inflight.in_use_until > datetime.now(UTC)
+            assert inflight.last_activity_at > old_activity
+
+        await get_sandbox_manager().reconcile_transients(claim_timeout=0)
+        assert sandbox_id not in inspected_during_reset
+
+        await orig_reset_rootfs(target_id)
+
+        # Simulate a concurrent transition flipping resuming -> running before post-reset commit.
+        async with session_factory() as race_session:
+            race_repo = UserSandboxRepository(race_session, org_id=org_id, workspace_id=ws_id)
+            assert await race_repo.mark_running(usbx_id, last_resumed_at=datetime.now(UTC))
+
+    monkeypatch.setattr(cpod, "reset_rootfs", _reset_with_concurrent_race)
+
+    resp = await client.post(f"/api/v1/ws/{ws_id}/sandbox/reset-rootfs")
+    assert resp.status_code == 200, resp.text
+    assert kill_calls == [usbx_id]
+
+    cmd_strings = [payload["command"] for sid, payload in backend.commands if sid == sandbox_id]
+    assert any("chown" in c for c in cmd_strings)
+    assert any("/run/cubeplex/sandbox-env.sh" in c for c in cmd_strings)
+
+    async with session_factory() as session:
+        refreshed = await session.get(UserSandbox, usbx_id)
+        assert refreshed is not None
+        assert refreshed.status == "running"
+        assert refreshed.in_use_until is None
+        assert refreshed.last_activity_at > old_activity
