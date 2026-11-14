@@ -283,3 +283,16 @@ async def test_posix_panel_endpoint_embeds_provider_claim() -> None:
     assert claims.sandbox_id == "sbx_posix"
     assert claims.port == Sandbox.TERMINAL_PORT
     assert claims.provider == "stub-posix"
+
+
+@pytest.mark.asyncio
+async def test_posix_start_terminal_clamps_nofile_and_waits_listen() -> None:
+    sb = _StubPosixSandbox(SandboxCapabilities(terminal=True))
+    await sb.start_terminal()
+    assert len(sb.commands) == 2
+    raw_cmd, as_root = sb.commands[1]
+    assert as_root is True
+    assert raw_cmd.startswith("ulimit -n 65536 ")
+    assert "/usr/bin/ttyd" in raw_cmd
+    assert "/proc/net/tcp" in raw_cmd
+    assert f":{Sandbox.TERMINAL_PORT:04X}" in raw_cmd

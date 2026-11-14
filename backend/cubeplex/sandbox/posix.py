@@ -97,12 +97,19 @@ class PosixSandboxMixin(Sandbox):
             raise SandboxCapabilityUnsupportedError("terminal", self.provider_name)
         await self.write_terminal_env()
         wd = shlex.quote(self.workdir)
+        port_hex = f"{self.TERMINAL_PORT:04X}"
+        ready_check = (
+            "(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null || true) "
+            f'| grep -qiE ":{port_hex} [0-9a-f:]+ 0A "'
+        )
         cmd = (
+            "ulimit -n 65536 2>/dev/null || true; "
             "start-stop-daemon --start --oknodo --background"
             " --make-pidfile --pidfile /tmp/ttyd.pid"
             f" --exec /usr/bin/ttyd -- -p {self.TERMINAL_PORT} -W -w {wd} "
-            f"{self._terminal_shell_command()}"
-            " && sleep 1"
+            f"{self._terminal_shell_command()} && "
+            f'{{ i=0; while [ "$i" -lt 50 ]; do {ready_check} && exit 0; '
+            "i=$((i + 1)); sleep 0.2 2>/dev/null || sleep 1; done; exit 1; }"
         )
         res = await self.execute(cmd, timeout=30, as_root=True)
         if isinstance(res.exit_code, int) and res.exit_code != 0:
