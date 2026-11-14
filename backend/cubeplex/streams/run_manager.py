@@ -5342,6 +5342,38 @@ class RunManager:
             event_service=UserSandboxSyncEventService(_sb_session_maker),
         )
 
+    @staticmethod
+    async def _release_run_sandbox(
+        sandbox: Any,
+        *,
+        sandbox_manager: Any,
+        org_id: str,
+        workspace_id: str,
+    ) -> None:
+        """Release the run's sandbox lease (if active) and close its client transport."""
+        if not sandbox:
+            return
+        from cubeplex.sandbox.base import close_sandbox_handle
+        from cubeplex.sandbox.lazy import LazySandbox
+
+        if isinstance(sandbox, LazySandbox):
+            if sandbox.initialized:
+                with suppress(Exception):
+                    await sandbox._manager.release(
+                        sandbox.id,
+                        org_id=org_id,
+                        workspace_id=workspace_id,
+                    )
+        elif sandbox_manager is not None:
+            with suppress(Exception):
+                await sandbox_manager.release(
+                    sandbox.id,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                )
+        with suppress(Exception):
+            await close_sandbox_handle(sandbox)
+
     async def _execute_run(
         self,
         *,
@@ -6036,23 +6068,12 @@ class RunManager:
                                         )
                                     await _notice_session.commit()
 
-            if sandbox:
-                from cubeplex.sandbox.lazy import LazySandbox
-
-                if isinstance(sandbox, LazySandbox) and sandbox.initialized:
-                    with suppress(Exception):
-                        await sandbox._manager.release(
-                            sandbox.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
-                elif sandbox_manager and not isinstance(sandbox, LazySandbox):
-                    with suppress(Exception):
-                        await sandbox_manager.release(
-                            sandbox.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
+            await self._release_run_sandbox(
+                sandbox,
+                sandbox_manager=sandbox_manager,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
 
             if catalog_session_ctx is not None:
                 with suppress(Exception):
@@ -6589,23 +6610,12 @@ class RunManager:
             except ValueError:
                 citation_event_queue.set(None)
 
-            if sandbox:
-                from cubeplex.sandbox.lazy import LazySandbox
-
-                if isinstance(sandbox, LazySandbox) and sandbox.initialized:
-                    with suppress(Exception):
-                        await sandbox._manager.release(
-                            sandbox.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
-                elif sandbox_manager and not isinstance(sandbox, LazySandbox):
-                    with suppress(Exception):
-                        await sandbox_manager.release(
-                            sandbox.id,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                        )
+            await self._release_run_sandbox(
+                sandbox,
+                sandbox_manager=sandbox_manager,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
 
             if catalog_session_ctx is not None:
                 with suppress(Exception):

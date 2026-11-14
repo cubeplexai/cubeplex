@@ -421,6 +421,7 @@ async def test_best_effort_sandbox_synced(db_session: AsyncSession) -> None:
     assert result.sandbox_synced is True
     assert result.sandbox_sync_reason is None
     sandbox.upload.assert_awaited()
+    sandbox.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -497,6 +498,7 @@ async def test_best_effort_sandbox_upload_error(db_session: AsyncSession) -> Non
     assert result.sandbox_synced is False
     assert result.sandbox_sync_reason == "sandbox_error"
     assert result.artifact.version == 2  # save still succeeds
+    sandbox.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

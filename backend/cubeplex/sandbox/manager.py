@@ -1496,9 +1496,15 @@ class SandboxManager:
         assert row.sandbox_id, "running row must have sandbox_id"
         sandbox_id = row.sandbox_id
         provider = self._provider_for_record(row)
+        workdir = self.resolve_scope_workdir(
+            provider=provider,
+            workspace_id=workspace_id,
+            scope_type=row.scope_type,
+            scope_id=row.scope_id,
+        )
         backend = await provider.connect(
             sandbox_id,
-            workdir=provider.default_workdir,
+            workdir=workdir,
             user_sandbox_id=row.id,
             run_identity=self._run_identity(),
         )

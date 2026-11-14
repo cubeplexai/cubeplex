@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import orjson
@@ -484,4 +485,170 @@ async def test_background_task_output_closes_sandbox_on_user_sandbox_mismatch(
             ctx=ctx,  # type: ignore[arg-type]
         )
     assert exc.value.status_code == 503
+    assert sb.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_run_manager_release_run_sandbox_closes_lazy_and_direct_handles() -> None:
+    """RunManager cleanup closes initialized LazySandbox and handles uninitialized."""
+    from cubeplex.sandbox.lazy import LazySandbox
+    from cubeplex.streams.run_manager import RunManager
+
+    # 1. Initialized LazySandbox releases lease and closes underlying Sandbox.
+    sb_init = _SpySandbox()
+    mgr_init = SimpleNamespace(
+        release=AsyncMock(),
+        default_provider=SimpleNamespace(name="spy", capabilities=SandboxCapabilities()),
+    )
+    lazy_init = LazySandbox(
+        manager=mgr_init,  # type: ignore[arg-type]
+        scope_type="user",
+        scope_id="u-1",
+        user_id="u-1",
+        org_id="org-1",
+        workspace_id="ws-1",
+        workdir="/workspace",
+    )
+    lazy_init._sandbox = sb_init
+    await RunManager._release_run_sandbox(
+        lazy_init,
+        sandbox_manager=None,
+        org_id="org-1",
+        workspace_id="ws-1",
+    )
+    mgr_init.release.assert_awaited_once_with(
+        sb_init.id,
+        org_id="org-1",
+        workspace_id="ws-1",
+    )
+    assert sb_init.close_calls == 1
+
+    # 2. Uninitialized LazySandbox skips release and closes cleanly as a no-op.
+    mgr_idle = SimpleNamespace(
+        release=AsyncMock(),
+        default_provider=SimpleNamespace(name="spy", capabilities=SandboxCapabilities()),
+    )
+    lazy_idle = LazySandbox(
+        manager=mgr_idle,  # type: ignore[arg-type]
+        scope_type="user",
+        scope_id="u-1",
+        user_id="u-1",
+        org_id="org-1",
+        workspace_id="ws-1",
+        workdir="/workspace",
+    )
+    await RunManager._release_run_sandbox(
+        lazy_idle,
+        sandbox_manager=None,
+        org_id="org-1",
+        workspace_id="ws-1",
+    )
+    mgr_idle.release.assert_not_called()
+
+    # 3. Direct non-lazy Sandbox releases through sandbox_manager and closes handle.
+    sb_direct = _SpySandbox()
+    mgr_direct = SimpleNamespace(release=AsyncMock())
+    await RunManager._release_run_sandbox(
+        sb_direct,
+        sandbox_manager=mgr_direct,
+        org_id="org-1",
+        workspace_id="ws-1",
+    )
+    mgr_direct.release.assert_awaited_once_with(
+        sb_direct.id,
+        org_id="org-1",
+        workspace_id="ws-1",
+    )
+    assert sb_direct.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_command_coordinator_sandbox_from_row_closes_on_mismatch_and_touch_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """sandbox_from_row closes attached handle on sandbox mismatch or touch failure."""
+    from cubeplex.sandbox import command_coordinator
+
+    us_row = SimpleNamespace(
+        id="us-1",
+        status="running",
+        sandbox_id="sbx-expected",
+        scope_type="user",
+        scope_id="u-1",
+        user_id="u-1",
+        org_id="org-1",
+        workspace_id="ws-1",
+    )
+    cmd_row = SimpleNamespace(id="cmd-1", user_sandbox_id="us-1")
+    session = SimpleNamespace(get=AsyncMock(return_value=us_row))
+
+    # Case 1: attached sandbox id replaced since command started -> closed before None.
+    class _IdSpySandbox(_SpySandbox):
+        def __init__(self, sandbox_id: str) -> None:
+            super().__init__()
+            self._custom_id = sandbox_id
+
+        @property
+        def id(self) -> str:
+            return self._custom_id
+
+    replaced = _IdSpySandbox("sbx-replaced")
+    mgr_mismatch = _SpyManager(replaced)
+    monkeypatch.setattr("cubeplex.sandbox.manager.get_sandbox_manager", lambda: mgr_mismatch)
+    monkeypatch.setattr(command_coordinator, "_terminalize", AsyncMock(return_value=True))
+    res_mismatch = await command_coordinator.sandbox_from_row(
+        cmd_row,  # type: ignore[arg-type]
+        session,  # type: ignore[arg-type]
+    )
+    assert res_mismatch is None
+    assert replaced.close_calls == 1
+
+    # Case 2: manager.touch raises -> handle closed before returning None.
+    attached_err = _IdSpySandbox("sbx-expected")
+    mgr_err = _SpyManager(attached_err)
+    monkeypatch.setattr(mgr_err, "touch", AsyncMock(side_effect=RuntimeError("touch failed")))
+    monkeypatch.setattr("cubeplex.sandbox.manager.get_sandbox_manager", lambda: mgr_err)
+    res_err = await command_coordinator.sandbox_from_row(
+        cmd_row,  # type: ignore[arg-type]
+        session,  # type: ignore[arg-type]
+    )
+    assert res_err is None
+    assert attached_err.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_kill_stranded_commands_closes_attached_sandbox_handles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_kill_stranded_commands closes sandbox_from_row handles when done."""
+    import importlib
+    from contextlib import asynccontextmanager
+
+    from cubeplex.sandbox import command_coordinator
+    from cubeplex.streams import recovery
+
+    db_engine = importlib.import_module("cubeplex.db.engine")
+
+    sb = _SpySandbox()
+
+    @asynccontextmanager
+    async def _fake_session() -> AsyncIterator[SimpleNamespace]:
+        yield SimpleNamespace()
+
+    async def _fake_kill_run(
+        _session: object,
+        _run_id: str,
+        *,
+        get_sandbox: Any,
+    ) -> list[str]:
+        got = await get_sandbox(SimpleNamespace(id="cmd-1"))
+        assert got is sb
+        return ["cmd-1"]
+
+    monkeypatch.setattr(recovery, "_stop_managed_stranded_runs", AsyncMock())
+    monkeypatch.setattr(db_engine, "async_session_maker", _fake_session)
+    monkeypatch.setattr(command_coordinator, "sandbox_from_row", AsyncMock(return_value=sb))
+    monkeypatch.setattr(command_coordinator, "kill_run_commands", _fake_kill_run)
+
+    await recovery._kill_stranded_commands(["run-1"])
     assert sb.close_calls == 1

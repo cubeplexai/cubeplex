@@ -407,3 +407,57 @@ async def test_await_resumed_by_winner_takes_over_on_paused_revert(
     assert result is backend
     resume_fn.assert_awaited_once()
     repo.mark_resuming.assert_awaited()
+
+
+async def test_await_resumed_by_winner_uses_scoped_workdir(
+    scope: dict[str, str],
+) -> None:
+    """Race loser connecting after winner finishes must pass scope-resolved workdir."""
+    mgr, _poll_session = _make_manager()
+    mgr._volume_enabled = True
+    provider = mgr._registry.get("opensandbox")
+
+    running_view = _paused_record(scope)
+    running_view.status = "running"
+    running_view.provider = "opensandbox"
+
+    repo = MagicMock(spec=UserSandboxRepository)
+    repo.get = AsyncMock(return_value=running_view)
+
+    loser_backend = MagicMock(name="loser_backend")
+    expected_volume = mgr.scope_volume_key(
+        provider=provider,
+        workspace_id=scope["workspace_id"],
+        scope_type=running_view.scope_type,
+        scope_id=running_view.scope_id,
+    )
+    assert expected_volume is not None
+    scoped_workdir = f"/scoped/{expected_volume}"
+
+    with (
+        patch.object(
+            provider,
+            "resolve_workdir",
+            side_effect=lambda *, volume_key=None: (
+                f"/scoped/{volume_key}" if volume_key else "/scoped/root"
+            ),
+        ),
+        patch.object(
+            provider,
+            "connect",
+            new=AsyncMock(return_value=loser_backend),
+        ) as connect_fn,
+        patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=repo),
+    ):
+        result = await mgr._await_resumed_by_winner(
+            running_view.id,
+            org_id=scope["org_id"],
+            workspace_id=scope["workspace_id"],
+            user_id=scope["user_id"],
+        )
+
+    assert result is loser_backend
+    connect_fn.assert_awaited_once()
+    assert connect_fn.call_args is not None
+    assert connect_fn.call_args.kwargs["workdir"] == scoped_workdir
+    assert scoped_workdir != provider.default_workdir

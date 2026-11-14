@@ -6,6 +6,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack, suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
@@ -28,7 +29,7 @@ from cubeplex.models.sandbox_command import (
     SandboxCommandWakeState,
 )
 from cubeplex.repositories.sandbox_command import claim_expired_inflight
-from cubeplex.sandbox.base import ProcessHandle, Sandbox
+from cubeplex.sandbox.base import ProcessHandle, Sandbox, close_sandbox_handle
 from cubeplex.sandbox.log_io import AppendOutputResult, append_output
 
 if TYPE_CHECKING:
@@ -219,7 +220,7 @@ async def command_coordinator_loop(
     while True:
         await asyncio.sleep(interval)
         try:
-            async with session_factory() as session:
+            async with session_factory() as session, AsyncExitStack() as stack:
 
                 async def _get(
                     row: SandboxCommand,
@@ -227,7 +228,10 @@ async def command_coordinator_loop(
                 ) -> Sandbox | None:
                     if get_sandbox is not None:
                         return await get_sandbox(row)
-                    return await sandbox_from_row(row, _session)
+                    attached = await sandbox_from_row(row, _session)
+                    if attached is not None:
+                        stack.push_async_callback(close_sandbox_handle, attached)
+                    return attached
 
                 await reconcile_once(session, get_sandbox=_get)
             if run_manager is not None and redis is not None and redis_key_prefix is not None:
@@ -253,6 +257,7 @@ async def sandbox_from_row(
     session: AsyncSession,
 ) -> Sandbox | None:
     """Reconnect the provider sandbox that owns ``row`` (best-effort)."""
+    attached: Sandbox | None = None
     try:
         from cubeplex.models.user_sandbox import UserSandbox
         from cubeplex.sandbox.manager import get_sandbox_manager
@@ -269,7 +274,11 @@ async def sandbox_from_row(
             org_id=us.org_id,
             workspace_id=us.workspace_id,
         )
-        if attachment.sandbox.id != original_sandbox_id:
+        attached = attachment.sandbox
+        if attached.id != original_sandbox_id:
+            with suppress(Exception):
+                await close_sandbox_handle(attached)
+            attached = None
             await _terminalize(
                 session,
                 row,
@@ -282,13 +291,16 @@ async def sandbox_from_row(
             )
             return None
         await manager.touch(
-            attachment.sandbox.id,
+            attached.id,
             org_id=us.org_id,
             workspace_id=us.workspace_id,
             force=True,
         )
-        return attachment.sandbox
+        return attached
     except Exception:
+        if attached is not None:
+            with suppress(Exception):
+                await close_sandbox_handle(attached)
         logger.exception("could not attach sandbox for command {}", row.id)
         return None
 
