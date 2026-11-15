@@ -35,6 +35,7 @@ class SandboxNetworkPolicy:
 
     default_action: Literal["allow", "deny"]
     egress: tuple[SandboxNetworkRule, ...] = ()
+    upstream_proxy: str | None = None
 
 
 CommandAction = Literal["deny", "confirm", "allow"]
@@ -221,6 +222,7 @@ def build_network_policy(
     admin_rules: list[dict[str, Any]] | None,
     default_action: str,
     force_allow_hosts: list[str],
+    upstream_proxy: str | None = None,
 ) -> SandboxNetworkPolicy:
     """Assemble the egress policy from admin rules + default action.
 
@@ -247,4 +249,5 @@ def build_network_policy(
     return SandboxNetworkPolicy(
         default_action=cast(Literal["allow", "deny"], default_action),
         egress=egress,
+        upstream_proxy=upstream_proxy,
     )

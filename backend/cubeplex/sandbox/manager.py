@@ -813,6 +813,9 @@ class SandboxManager:
                         if (self._exchange_host and provider.capabilities.egress_proxy)
                         else []
                     ),
+                    upstream_proxy=(
+                        policy.egress_proxy if provider.capabilities.egress_proxy else None
+                    ),
                 )
 
             async def _on_created(created_id: str) -> None:
@@ -975,6 +978,8 @@ class SandboxManager:
         if backend is not None:
             with suppress(Exception):
                 await backend.close()
+        with suppress(Exception):
+            await provider.terminate(sandbox_id)
         await repo.mark_terminated(record.id, clear_sandbox_id=True)
         if self._exchange_host:
             await self._revoke_egress(session, sandbox_id)

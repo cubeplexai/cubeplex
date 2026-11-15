@@ -28,7 +28,11 @@ from cubeplex.sandbox.base import (
     SandboxInstanceGoneError,
 )
 from cubeplex.sandbox.provider import ProviderInstanceState, RunIdentity, SandboxCreateSpec
-from cubeplex.sandbox.providers.cubepod import CubePodProvider, CubePodSandbox
+from cubeplex.sandbox.providers.cubepod import (
+    CubePodProvider,
+    CubePodSandbox,
+    _to_cubepod_network_policy,
+)
 from cubeplex.sandbox.registry import get_provider_registry
 from cubeplex.sandbox_policy.rules import SandboxNetworkPolicy, SandboxNetworkRule
 
@@ -882,3 +886,67 @@ def test_cubepod_provider_loop_bound_client_pool_and_request_timeout(
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+async def test_to_cubepod_network_policy_and_create_upstream_proxy() -> None:
+    assert _to_cubepod_network_policy(None) is None
+
+    without_proxy = SandboxNetworkPolicy(
+        default_action="deny",
+        egress=(SandboxNetworkRule(action="allow", target="api.github.com"),),
+    )
+    converted_no_proxy = _to_cubepod_network_policy(without_proxy)
+    assert converted_no_proxy is not None
+    assert "upstreamProxy" not in converted_no_proxy
+
+    with_proxy = SandboxNetworkPolicy(
+        default_action="deny",
+        egress=(SandboxNetworkRule(action="allow", target="api.github.com"),),
+        upstream_proxy="http://proxy.corp:3128",
+    )
+    converted_with_proxy = _to_cubepod_network_policy(with_proxy)
+    assert converted_with_proxy == {
+        "defaultAction": "deny",
+        "egress": [{"action": "allow", "target": "api.github.com"}],
+        "upstreamProxy": "http://proxy.corp:3128",
+    }
+
+    create_bodies: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/sandboxes":
+            create_bodies.append(json.loads(request.content))
+            return _json_response(
+                201,
+                {
+                    "sandboxID": "cpod-up-1",
+                    "templateID": "cubeplex-ubuntu24-desktop",
+                    "state": "Running",
+                },
+            )
+        if request.method == "GET" and request.url.path == "/sandboxes/cpod-up-1":
+            return _json_response(
+                200,
+                {
+                    "sandboxID": "cpod-up-1",
+                    "templateID": "cubeplex-ubuntu24-desktop",
+                    "state": "Running",
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    provider = CubePodProvider(
+        client=AsyncCubePod(
+            base_url="http://cubepod.local",
+            transport=httpx.MockTransport(handler),
+        ),
+        poll_interval=0.0,
+    )
+    try:
+        await provider.create(_spec(network_policy=with_proxy))
+    finally:
+        await provider.aclose()
+
+    assert create_bodies[0]["extension"]["networkPolicy"]["upstreamProxy"] == (
+        "http://proxy.corp:3128"
+    )
