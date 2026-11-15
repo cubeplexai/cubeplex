@@ -294,3 +294,31 @@ async def test_cleanup_expired_uses_fresh_row_not_stale_snapshot() -> None:
         await mgr.cleanup_expired()
     mark_terminated.assert_not_called()
     kill.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_kill_record_preserves_delete_and_egress_revoke_after_clear_sandbox_id() -> None:
+    """Snapshot cleanup_action and sandbox_id before mark_terminated clears them."""
+    provider = _make_provider()
+    mgr = _make_manager(provider)
+    mgr._exchange_host = "exchange.internal"
+    mgr._revoke_egress = AsyncMock()  # type: ignore[method-assign]
+    session = MagicMock()
+    record = _make_record(sandbox_id="sbx-clear-1", cleanup_action="delete")
+
+    async def _clear_mark(record_id: str, *, clear_sandbox_id: bool = False) -> None:
+        del record_id
+        record.status = "terminated"
+        record.cleanup_action = None
+        if clear_sandbox_id:
+            record.sandbox_id = None
+
+    repo = AsyncMock()
+    repo.mark_terminated = AsyncMock(side_effect=_clear_mark)
+    repo.soft_delete = AsyncMock()
+
+    await mgr._kill_record(session, repo, record, delete_on_success=False)
+
+    repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
+    repo.soft_delete.assert_awaited_once_with(record.id)
+    mgr._revoke_egress.assert_awaited_once_with(session, "sbx-clear-1")
