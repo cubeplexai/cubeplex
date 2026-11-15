@@ -226,12 +226,17 @@ class SkillInstallService:
                 commit=commit,
             )
         else:
-            await OrgSkillInstallRepository(self._session).upsert(
+            install_repo = OrgSkillInstallRepository(self._session)
+            existing_install = await install_repo.get(self._org_id, skill.id)
+            default_auto_bind: bool | None = (
+                skill.source == "preinstalled" if existing_install is None else None
+            )
+            await install_repo.upsert(
                 org_id=self._org_id,
                 skill_id=skill.id,
                 installed_version=skill.current_version,
                 installed_by_user_id=self._actor,
-                auto_bind=False,
+                auto_bind=default_auto_bind,
                 commit=commit,
             )
         return InstallResult(
@@ -321,7 +326,7 @@ class SkillInstallService:
                     skill_id=existing.id,
                     installed_version=install_version,
                     installed_by_user_id=self._actor,
-                    auto_bind=False,
+                    auto_bind=None,
                     commit=commit,
                 )
             return InstallResult(

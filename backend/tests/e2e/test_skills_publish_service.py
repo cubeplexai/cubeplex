@@ -246,3 +246,45 @@ async def test_publish_rejects_oversized_file(tmp_path, db_session) -> None:
     )
     with pytest.raises(FileTooLargeError):
         await publisher.publish_from_zip(org_id="o", org_slug="o", actor_user_id="u", zip_bytes=z)
+
+
+@pytest.mark.asyncio
+async def test_publish_from_zip_upgrade_preserves_auto_bind(tmp_path, db_session) -> None:
+    """Publishing a new org-wide skill version must not reset auto_bind to False."""
+    org_id = f"org-{secrets.token_hex(4)}"
+    org_slug = f"org-{secrets.token_hex(4)}"
+    skill_name = f"upgrade-keep-ab-{secrets.token_hex(4)}"
+    await _seed_org_and_user(db_session, org_id, "user-1")
+
+    def _zip(version: str) -> bytes:
+        md = f"---\nname: {skill_name}\ndescription: desc\nversion: {version}\n---\n# {version}\n"
+        return _make_zip({"SKILL.md": md.encode()})
+
+    publisher = SkillPublishService(
+        session=db_session, cache=SkillCache(cache_root=tmp_path / "cache")
+    )
+    sv1 = await publisher.publish_from_zip(
+        org_id=org_id,
+        org_slug=org_slug,
+        actor_user_id="user-1",
+        zip_bytes=_zip("0.1.0"),
+    )
+
+    installs = OrgSkillInstallRepository(db_session)
+    install = await installs.get(org_id, sv1.skill_id)
+    assert install is not None
+    assert install.auto_bind is False
+
+    install.auto_bind = True
+    await db_session.commit()
+
+    await publisher.publish_from_zip(
+        org_id=org_id,
+        org_slug=org_slug,
+        actor_user_id="user-1",
+        zip_bytes=_zip("0.2.0"),
+    )
+    upgraded = await installs.get(org_id, sv1.skill_id)
+    assert upgraded is not None
+    assert upgraded.installed_version == "0.2.0"
+    assert upgraded.auto_bind is True
