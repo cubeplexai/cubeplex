@@ -23,6 +23,11 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     _ACTIVE_STATUSES = ("provisioning", "running")
     _REAPABLE_STATUSES = ("provisioning", "running", "kill_pending")
 
+    def _scoped_select(self) -> Any:
+        # Callers reuse one expire_on_commit=False AsyncSession across update transitions;
+        # force identity-map refresh so core updates are never masked by stale ORM state.
+        return super()._scoped_select().execution_options(populate_existing=True)
+
     async def create(
         self,
         *,
@@ -317,7 +322,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         Mirrors the ``list_*_system`` classmethods used by the reapers.
         """
         stmt = select(UserSandbox).where(UserSandbox.id == record_id)  # type: ignore[arg-type]
-        result = await session.execute(stmt)
+        result = await session.execute(stmt.execution_options(populate_existing=True))
         return result.scalar_one_or_none()
 
     async def get_by_sandbox_id(self, sandbox_id: str) -> UserSandbox | None:
@@ -696,7 +701,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
             .where(text("(in_use_until IS NULL OR in_use_until < NOW())"))
         )
-        result = await session.execute(stmt)
+        result = await session.execute(stmt.execution_options(populate_existing=True))
         return list(result.scalars().all())
 
     @classmethod
@@ -720,7 +725,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             )
             .where(text("(in_use_until IS NULL OR in_use_until < NOW())"))
         )
-        result = await session.execute(stmt)
+        result = await session.execute(stmt.execution_options(populate_existing=True))
         return list(result.scalars().all())
 
     @classmethod
@@ -751,7 +756,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             .where(text("(in_use_until IS NULL OR in_use_until < NOW())"))
             .params(ct=claim_timeout)
         )
-        result = await session.execute(stmt)
+        result = await session.execute(stmt.execution_options(populate_existing=True))
         return list(result.scalars().all())
 
     async def touch_provider_check(self, record_id: str) -> None:
@@ -781,5 +786,5 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             .where(UserSandbox.paused_at.is_not(None))  # type: ignore[union-attr]
             .where(text("paused_at + paused_ttl_seconds * INTERVAL '1 second' <= NOW()"))
         )
-        result = await session.execute(stmt)
+        result = await session.execute(stmt.execution_options(populate_existing=True))
         return list(result.scalars().all())

@@ -315,3 +315,82 @@ async def test_cleanup_expired_kill_pending_delete_soft_deletes_and_revokes_egre
             )
         ).scalar_one()
         assert ref_row.status == "revoked"
+
+
+async def test_get_or_create_revives_unhealthy_running_sandbox(
+    session_factory: async_sessionmaker[AsyncSession],
+    seeded_org_ws_user: tuple[str, str, str, str],
+    enc_backend: FernetBackend,
+) -> None:
+    """Dead running sandbox is terminated and re-provisioned in one get_or_create call."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from cubeplex.sandbox.base import SandboxError
+
+    org_id, ws_a, _ws_b, user_id = seeded_org_ws_user
+    stale_id = f"stale-{secrets.token_hex(4)}"
+    fresh_id = f"fresh-{secrets.token_hex(4)}"
+
+    class _ReviveProvider(_FakeCleanupProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.connected_ids: list[str] = []
+
+        async def create(self, spec: Any, *, on_created: Any = None) -> Any:
+            if on_created is not None:
+                await on_created(fresh_id)
+            fake = MagicMock()
+            fake.id = fresh_id
+            fake.check_ready = AsyncMock()
+            fake.is_healthy = AsyncMock(return_value=True)
+            fake.ensure_workspace_owner = AsyncMock()
+            fake.close = AsyncMock()
+            return fake
+
+        async def connect(
+            self,
+            sandbox_id: str,
+            *,
+            workdir: str | None = None,
+            user_sandbox_id: str | None = None,
+            run_identity: Any = None,
+        ) -> Any:
+            del workdir, user_sandbox_id, run_identity
+            self.connected_ids.append(sandbox_id)
+            if sandbox_id == stale_id:
+                raise SandboxError("stale sandbox unreachable")
+            fake = MagicMock()
+            fake.id = sandbox_id
+            fake.check_ready = AsyncMock()
+            fake.is_healthy = AsyncMock(return_value=True)
+            fake.ensure_workspace_owner = AsyncMock()
+            fake.close = AsyncMock()
+            return fake
+
+    provider = _ReviveProvider()
+    mgr = _make_manager(session_factory, enc_backend, provider)
+    stale_row_id = await _seed_row(
+        session_factory,
+        org_id=org_id,
+        workspace_id=ws_a,
+        user_id=user_id,
+        status="running",
+        sandbox_id=stale_id,
+    )
+    seeded = await _fetch_row(session_factory, stale_row_id)
+
+    attachment = await mgr.get_or_create(
+        scope_type=seeded.scope_type,
+        scope_id=seeded.scope_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_a,
+    )
+
+    assert provider.connected_ids[0] == stale_id
+    assert attachment.sandbox.id == fresh_id
+    assert attachment.user_sandbox_id == stale_row_id
+
+    revived_row = await _fetch_row(session_factory, stale_row_id)
+    assert revived_row.status == "running"
+    assert revived_row.sandbox_id == fresh_id
