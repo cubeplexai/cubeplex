@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest_asyncio
 from alembic.config import Config
-from sqlalchemy import create_engine, delete, func, select, text
+from sqlalchemy import create_engine, delete, func, select, text, update
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -22,13 +22,14 @@ from cubeplex.models import (
     BackgroundTaskEvent,
     Conversation,
     ConversationExecutionAdmission,
+    EgressRef,
     Organization,
     SandboxCommand,
     SandboxCommandWake,
     SteeringMessage,
     User,
     UserSandbox,
-    Workspace,
+    UserSandboxSyncEvent,
 )
 from cubeplex.scripts.dev.migrate_background_tasks import (
     _load_injected_notice_ids,
@@ -92,6 +93,23 @@ async def isolated_lifecycle_db() -> AsyncIterator[AsyncSession]:
 
 @pytest_asyncio.fixture
 async def expanded_lifecycle_schema(db_session: AsyncSession) -> AsyncIterator[None]:
+    await _ensure_default_user_and_membership()
+    null_sbx_ids = select(col(UserSandbox.id)).where(col(UserSandbox.user_id).is_(None))
+    await db_session.execute(delete(EgressRef).where(col(EgressRef.user_id).is_(None)))
+    await db_session.execute(
+        delete(SandboxCommand).where(col(SandboxCommand.user_sandbox_id).in_(null_sbx_ids))
+    )
+    await db_session.execute(
+        update(UserSandbox)
+        .where(col(UserSandbox.user_id).is_(None))
+        .values(last_skill_sync_event_id=None)
+    )
+    await db_session.execute(
+        delete(UserSandboxSyncEvent).where(
+            col(UserSandboxSyncEvent.user_sandbox_id).in_(null_sbx_ids)
+        )
+    )
+    await db_session.execute(delete(UserSandbox).where(col(UserSandbox.user_id).is_(None)))
     await db_session.commit()
     await asyncio.to_thread(_migrate, "76a2d219d682", downgrade=True)
     try:
@@ -106,17 +124,29 @@ async def test_expand_preserves_legacy_handles_notices_and_unknown_instance(
 ) -> None:
     db_session = isolated_lifecycle_db
     assert str(config.get("database.name")).startswith("cubeplex_test")
+    now = datetime.now(UTC)
     user = User(email=DEFAULT_TEST_EMAIL, hashed_password="test")
     db_session.add_all(
         [
             Organization(
                 id=DEFAULT_ORG_ID, name="Lifecycle Migration Org", slug="lifecycle-migration"
             ),
-            Workspace(id=DEFAULT_WS_ID, org_id=DEFAULT_ORG_ID, name="Lifecycle Migration WS"),
             user,
         ]
     )
     await db_session.flush()
+    await db_session.execute(
+        text(
+            "INSERT INTO workspaces (id, org_id, name, created_at, updated_at) "
+            "VALUES (:id, :org_id, :name, :now, :now)"
+        ),
+        {
+            "id": DEFAULT_WS_ID,
+            "org_id": DEFAULT_ORG_ID,
+            "name": "Lifecycle Migration WS",
+            "now": now,
+        },
+    )
     conv = Conversation(
         org_id=DEFAULT_ORG_ID,
         workspace_id=DEFAULT_WS_ID,
@@ -217,7 +247,6 @@ async def test_legacy_backfill_is_idempotent_and_does_not_reinterpret_monitors(
     expanded_lifecycle_schema: None,
 ) -> None:
     del expanded_lifecycle_schema
-    await _ensure_default_user_and_membership()
     baseline_status = await inspect_background_task_cutover(db_session)
     user = (
         await db_session.execute(select(User).where(col(User.email) == DEFAULT_TEST_EMAIL))
@@ -650,7 +679,6 @@ async def test_legacy_backfill_preserves_original_execution_generation(
     expanded_lifecycle_schema: None,
 ) -> None:
     del expanded_lifecycle_schema
-    await _ensure_default_user_and_membership()
     user = (
         await db_session.execute(select(User).where(col(User.email) == DEFAULT_TEST_EMAIL))
     ).scalar_one()
@@ -751,7 +779,6 @@ async def test_legacy_backfill_keeps_command_cancellation_evidence_local(
     expanded_lifecycle_schema: None,
 ) -> None:
     del expanded_lifecycle_schema
-    await _ensure_default_user_and_membership()
     user = (
         await db_session.execute(select(User).where(col(User.email) == DEFAULT_TEST_EMAIL))
     ).scalar_one()

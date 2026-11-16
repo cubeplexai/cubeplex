@@ -2969,9 +2969,11 @@
   "wsSandboxes": {
     "title": "Sandboxes",
     "subtitle": "Your isolated sandbox environments in this workspace.",
+    "sharedSubtitle": "The shared sandbox environment for this workspace.",
     "empty": "No sandboxes yet",
     "emptyHint": "Sandboxes appear here once you start a conversation in this workspace.",
     "intro": "Each sandbox is an isolated environment tied to a conversation or topic. Restarting keeps your files; deletion stays visible until the provider confirms the sandbox stopped.",
+    "sharedIntro": "All conversations, topics, and automations in this workspace share this sandbox. Only workspace admins can restart or delete it.",
     "lastActive": "Last active {time}",
     "lastActiveNever": "Never used",
     "restart": "Restart",

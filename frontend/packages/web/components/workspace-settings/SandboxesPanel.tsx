@@ -2,6 +2,7 @@
 
 import { Boxes, Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
+import { useWorkspaceStore } from '@cubeplex/core'
 import { useMySandboxes } from '@/hooks/useMySandboxes'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { SETTINGS_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
@@ -20,13 +21,17 @@ interface SandboxesPanelProps {
  */
 export function SandboxesPanel({ wsId }: SandboxesPanelProps): React.ReactElement {
   const t = useTranslations('wsSandboxes')
+  const sandboxMode = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === wsId)?.sandbox_mode ?? 'per_user',
+  )
+  const isSharedSandbox = sandboxMode === 'workspace'
   const { data: sandboxes, mutate, isLoading } = useMySandboxes(wsId)
 
   return (
     <div className="flex h-full flex-col">
       <SectionHeader
         title={t('title')}
-        description={t('subtitle')}
+        description={isSharedSandbox ? t('sharedSubtitle') : t('subtitle')}
         contained={SETTINGS_CONTENT_WIDTH}
       />
 
@@ -40,7 +45,9 @@ export function SandboxesPanel({ wsId }: SandboxesPanelProps): React.ReactElemen
             <EmptyState icon={Boxes} title={t('empty')} description={t('emptyHint')} />
           ) : (
             <>
-              <p className="text-sm text-muted-foreground">{t('intro')}</p>
+              <p className="text-sm text-muted-foreground">
+                {isSharedSandbox ? t('sharedIntro') : t('intro')}
+              </p>
               <ul className="divide-y divide-border rounded-lg border">
                 {sandboxes.map((sb) => (
                   <SandboxCard

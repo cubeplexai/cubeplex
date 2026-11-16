@@ -9,6 +9,7 @@ import {
   useAuthStore,
   useConversationStore,
   useMemberStore,
+  useWorkspaceStore,
   type WsMember,
 } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
@@ -42,6 +43,9 @@ export function InviteToConversationDialog({
   const participants = useConversationStore((s) => s.conversationParticipants[conversationId])
   const conversation = useConversationStore((s) =>
     s.conversations.find((c) => c.id === conversationId),
+  )
+  const workspaceSandboxMode = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === wsId)?.sandbox_mode ?? 'per_user',
   )
   // The note only matters on the 1:1 → group chat transition (memory turns
   // off, sandbox starts being shared). Already-group chats don't change.
@@ -156,7 +160,7 @@ export function InviteToConversationDialog({
                 <Info className="size-3.5 shrink-0 mt-0.5" />
                 <div className="flex flex-col gap-0.5">
                   <p>{t('noteMemory')}</p>
-                  <p>{t('noteSandbox')}</p>
+                  {workspaceSandboxMode !== 'workspace' && <p>{t('noteSandbox')}</p>}
                 </div>
               </div>
             )}

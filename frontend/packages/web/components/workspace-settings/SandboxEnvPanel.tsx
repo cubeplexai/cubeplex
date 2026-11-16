@@ -31,6 +31,7 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
   const t = useTranslations('wsSettings.sandboxEnv')
   const client = useMemo(() => createApiClient(''), [])
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId))
+  const wsListError = useWorkspaceStore((s) => s.error)
   const wsRole = workspace?.role
   const sandboxMode = workspace?.sandbox_mode ?? 'per_user'
   const isAdmin = wsRole === 'admin'
@@ -143,6 +144,9 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
 
   const showActionButtons = isWorkspaceLoaded && (isAdmin || !isSharedSandbox)
 
+  const effectiveLoading = isWorkspaceLoaded ? loading : !wsListError
+  const effectiveError = isWorkspaceLoaded ? loadError : wsListError
+
   return (
     <div className="flex h-full flex-col">
       <SectionHeader
@@ -195,8 +199,8 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
           <EnvTable
             mode={tableMode}
             entries={entries}
-            loading={loading}
-            error={loadError}
+            loading={effectiveLoading}
+            error={effectiveError}
             onEdit={(entry) => setModal({ kind: 'edit', entry })}
             onDelete={handleDelete}
           />

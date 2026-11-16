@@ -172,7 +172,7 @@ export function OnboardingForm({
         />
       </div>
 
-      <fieldset className="space-y-2">
+      <fieldset className="space-y-2 disabled:opacity-60" disabled={submitting}>
         <legend className="text-sm font-medium">{t('sandboxMode')}</legend>
         <div className="flex flex-col gap-2">
           {(['per_user', 'workspace'] as const).map((mode) => {
