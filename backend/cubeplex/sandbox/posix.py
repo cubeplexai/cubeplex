@@ -78,7 +78,10 @@ class PosixSandboxMixin(Sandbox):
             uid = int(self._run_uid)
             gid = int(self._run_gid)
             inner = (
-                f'export HOME="$(getent passwd {uid} | cut -d: -f6 || echo /root)" '
+                'if [ -z "${HOME:-}" ] || [ "$HOME" = "/" ] '
+                f'|| {{ [ "{uid}" != "0" ] && [ "$HOME" = "/root" ]; }}; then '
+                f'export HOME="$(getent passwd {uid} | cut -d: -f6 || echo /root)"; '
+                "fi "
                 f"&& cd {wd} && exec bash -i"
             )
             return f"setpriv --reuid={uid} --regid={gid} --init-groups sh -c {shlex.quote(inner)}"
@@ -102,8 +105,17 @@ class PosixSandboxMixin(Sandbox):
             "(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null || true) "
             f'| grep -qiE ":{port_hex} [0-9a-f:]+ 0A "'
         )
+        # Preserve an image-configured HOME (e.g. /workspace from PID 1) because
+        # root exec providers may start ttyd with HOME=/root before setpriv.
+        preserve_home = (
+            "_img_home=$(tr '\\0' '\\n' < /proc/1/environ 2>/dev/null "
+            "| sed -n 's/^HOME=//p' | head -n1); "
+            'if [ -n "$_img_home" ] && [ "$_img_home" != "/" ] '
+            '&& [ "$_img_home" != "/root" ]; then export HOME="$_img_home"; fi; '
+        )
         cmd = (
             "ulimit -n 65536 2>/dev/null || true; "
+            f"{preserve_home}"
             "start-stop-daemon --start --oknodo --background"
             " --make-pidfile --pidfile /tmp/ttyd.pid"
             f" --exec /usr/bin/ttyd -- -p {self.TERMINAL_PORT} -W -w {wd} "
