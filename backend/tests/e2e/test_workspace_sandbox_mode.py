@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -25,14 +26,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+import pytest_asyncio
 from cryptography.fernet import Fernet
 from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.schemas import BaseUserCreate
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+from sqlmodel import col
 
 from cubeplex.auth.users import UserManager, _slugify_org_name
 from cubeplex.credentials.encryption import FernetBackend
@@ -45,9 +48,11 @@ from cubeplex.models import (
     OrganizationMembership,
     OrgRole,
     Role,
+    SandboxCommand,
     Topic,
     User,
     UserSandbox,
+    UserSandboxSyncEvent,
 )
 from cubeplex.models.im_connector import IMConnectorAccount
 from cubeplex.repositories import (
@@ -87,6 +92,36 @@ pytestmark = pytest.mark.e2e
 def _make_session_maker() -> tuple[Any, async_sessionmaker[AsyncSession]]:
     eng = create_async_engine(_build_database_url(), poolclass=NullPool)
     return eng, async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _cleanup_shared_sandbox_rows() -> AsyncIterator[None]:
+    """Delete any NULL-user shared sandbox / egress rows after each test."""
+    yield
+    eng, maker = _make_session_maker()
+    try:
+        async with maker() as session:
+            null_sbx_ids = select(col(UserSandbox.id)).where(col(UserSandbox.user_id).is_(None))
+            await session.execute(sa_delete(EgressRef).where(col(EgressRef.user_id).is_(None)))
+            await session.execute(
+                sa_delete(SandboxCommand).where(
+                    col(SandboxCommand.user_sandbox_id).in_(null_sbx_ids)
+                )
+            )
+            await session.execute(
+                update(UserSandbox)
+                .where(col(UserSandbox.user_id).is_(None))
+                .values(last_skill_sync_event_id=None)
+            )
+            await session.execute(
+                sa_delete(UserSandboxSyncEvent).where(
+                    col(UserSandboxSyncEvent.user_sandbox_id).in_(null_sbx_ids)
+                )
+            )
+            await session.execute(sa_delete(UserSandbox).where(col(UserSandbox.user_id).is_(None)))
+            await session.commit()
+    finally:
+        await eng.dispose()
 
 
 async def _create_org_user(

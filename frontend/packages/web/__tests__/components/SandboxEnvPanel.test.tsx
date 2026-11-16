@@ -18,6 +18,7 @@ vi.mock('@cubeplex/core', async () => {
   const { create } = await import('zustand')
   const useWorkspaceStore = create(() => ({
     workspaces: [] as Workspace[],
+    error: null as string | null,
   }))
   return {
     createApiClient: () => mocks.client,
@@ -55,7 +56,7 @@ const sampleWsEntry: EnvEntryOut = {
 describe('SandboxEnvPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useWorkspaceStore.setState({ workspaces: [] })
+    useWorkspaceStore.setState({ workspaces: [], error: null })
   })
 
   it('shows read-only workspace env vars and skips personal env fetch for non-admin members in workspace-shared mode', async () => {
@@ -161,5 +162,15 @@ describe('SandboxEnvPanel', () => {
     await waitFor(() => expect(screen.getByText('SHARED_API_KEY')).toBeInTheDocument())
     expect(mocks.listWsEnvWorkspace).toHaveBeenCalledTimes(1)
     expect(mocks.listWsEnvMe).not.toHaveBeenCalled()
+  })
+
+  it('surfaces workspaceStore error instead of spinning indefinitely if workspace list fails', () => {
+    useWorkspaceStore.setState({ workspaces: [], error: 'Workspace list failed' })
+
+    render(<SandboxEnvPanel wsId="ws-shared" />)
+
+    expect(screen.getByText('loadError')).toBeInTheDocument()
+    expect(mocks.listWsEnvMe).not.toHaveBeenCalled()
+    expect(mocks.listWsEnvWorkspace).not.toHaveBeenCalled()
   })
 })

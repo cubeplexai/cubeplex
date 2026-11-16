@@ -46,7 +46,7 @@ export function WorkspaceCreateForm() {
         />
       </label>
 
-      <fieldset className="space-y-2">
+      <fieldset className="space-y-2 disabled:opacity-60" disabled={submitting}>
         <legend className="text-sm font-medium text-foreground">{t('sandboxModeLabel')}</legend>
         <div className="flex flex-col gap-2">
           {(['per_user', 'workspace'] as const).map((mode) => {
