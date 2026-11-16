@@ -30,8 +30,12 @@ interface SandboxEnvPanelProps {
 export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElement {
   const t = useTranslations('wsSettings.sandboxEnv')
   const client = useMemo(() => createApiClient(''), [])
-  const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
+  const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId))
+  const wsRole = workspace?.role
+  const sandboxMode = workspace?.sandbox_mode ?? 'per_user'
   const isAdmin = wsRole === 'admin'
+  const isSharedSandbox = sandboxMode === 'workspace'
+  const isWorkspaceLoaded = workspace !== undefined
 
   const [entries, setEntries] = useState<EnvEntryOut[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,9 +44,11 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
 
   const load = async () => {
     try {
-      const fetches = isAdmin
-        ? await Promise.all([listWsEnvWorkspace(client, wsId), listWsEnvMe(client, wsId)])
-        : [await listWsEnvMe(client, wsId)]
+      const fetches = isSharedSandbox
+        ? [await listWsEnvWorkspace(client, wsId)]
+        : isAdmin
+          ? await Promise.all([listWsEnvWorkspace(client, wsId), listWsEnvMe(client, wsId)])
+          : [await listWsEnvMe(client, wsId)]
       const merged = fetches
         .flatMap((r) => r.entries)
         .sort((a, b) => a.env_name.localeCompare(b.env_name))
@@ -55,12 +61,16 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
   }
 
   useEffect(() => {
+    if (!isWorkspaceLoaded) return
     let cancelled = false
     const fetcher = async () => {
+      setLoading(true)
       try {
-        const fetches = isAdmin
-          ? await Promise.all([listWsEnvWorkspace(client, wsId), listWsEnvMe(client, wsId)])
-          : [await listWsEnvMe(client, wsId)]
+        const fetches = isSharedSandbox
+          ? [await listWsEnvWorkspace(client, wsId)]
+          : isAdmin
+            ? await Promise.all([listWsEnvWorkspace(client, wsId), listWsEnvMe(client, wsId)])
+            : [await listWsEnvMe(client, wsId)]
         if (cancelled) return
         const merged = fetches
           .flatMap((r) => r.entries)
@@ -78,7 +88,7 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
     return () => {
       cancelled = true
     }
-  }, [client, wsId, isAdmin])
+  }, [client, wsId, isWorkspaceLoaded, isAdmin, isSharedSandbox])
 
   async function handleSubmit(
     body: CreateEnvIn | UpdateEntryIn,
@@ -117,37 +127,67 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
     }
   }
 
-  const tableMode = isAdmin ? 'workspace-admin' : 'workspace-member'
+  const tableMode = isSharedSandbox
+    ? isAdmin
+      ? 'workspace-admin'
+      : 'workspace-readonly'
+    : isAdmin
+      ? 'workspace-admin'
+      : 'workspace-member'
+
+  const headerDescription = isSharedSandbox
+    ? isAdmin
+      ? t('sharedWorkspaceAdminDescription')
+      : t('sharedWorkspaceMemberDescription')
+    : t('description')
+
+  const showActionButtons = isWorkspaceLoaded && (isAdmin || !isSharedSandbox)
 
   return (
     <div className="flex h-full flex-col">
       <SectionHeader
         title={t('title')}
-        description={t('description')}
+        description={headerDescription}
         contained={SETTINGS_CONTENT_WIDTH}
         action={
-          <div className="flex gap-2">
-            {isAdmin && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'workspace' })}
-              >
-                <Plus className="size-3.5" />
-                {t('addWorkspaceVar')}
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5"
-              onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'user' })}
-            >
-              <Plus className="size-3.5" />
-              {t('addPersonalVar')}
-            </Button>
-          </div>
+          showActionButtons ? (
+            <div className="flex gap-2">
+              {isAdmin && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() =>
+                    setModal({
+                      kind: 'add-workspace',
+                      defaultScope: 'workspace',
+                      allowPersonalScope: !isSharedSandbox,
+                    })
+                  }
+                >
+                  <Plus className="size-3.5" />
+                  {t('addWorkspaceVar')}
+                </Button>
+              )}
+              {!isSharedSandbox && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() =>
+                    setModal({
+                      kind: 'add-workspace',
+                      defaultScope: 'user',
+                      allowPersonalScope: true,
+                    })
+                  }
+                >
+                  <Plus className="size-3.5" />
+                  {t('addPersonalVar')}
+                </Button>
+              )}
+            </div>
+          ) : undefined
         }
       />
       <div className="flex-1 overflow-y-auto px-6 py-6">

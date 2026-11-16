@@ -12,6 +12,7 @@ import {
   useConversationStore,
   useMemberStore,
   useTopicStore,
+  useWorkspaceStore,
   type WsMember,
 } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
@@ -47,6 +48,10 @@ export function UpgradeToTopicDialog({
     return c
   }, [wsId])
   const currentUserId = useAuthStore((s) => s.user?.id ?? null)
+  const workspaceSandboxMode = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === wsId)?.sandbox_mode ?? 'per_user',
+  )
+  const isWorkspaceSharedSandbox = workspaceSandboxMode === 'workspace'
   const { wsMembers, loadWsMembers } = useMemberStore()
   const upgradeConversationToTopic = useTopicStore((s) => s.upgradeConversationToTopic)
   const fetchTopicList = useTopicStore((s) => s.fetchList)
@@ -94,7 +99,7 @@ export function UpgradeToTopicDialog({
     try {
       await upgradeConversationToTopic(client, conversationId, {
         title: title.trim(),
-        sandbox_mode: sandboxMode,
+        ...(isWorkspaceSharedSandbox ? {} : { sandbox_mode: sandboxMode }),
         member_user_ids: Array.from(selected),
       })
       // Refresh sidebar lists so the conversation moves under its new topic
@@ -196,32 +201,34 @@ export function UpgradeToTopicDialog({
               />
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label>{tDialog('sandboxLabel')}</Label>
-              <RadioGroup
-                value={sandboxMode}
-                onValueChange={(v) => setSandboxMode((v as SandboxMode) ?? 'creator')}
-              >
-                <label className="flex cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 hover:bg-accent/40">
-                  <div className="flex items-center gap-2 text-sm">
-                    <RadioGroupItem value="creator" />
-                    <span>{t('sandboxCreator')}</span>
-                  </div>
-                  <p className="pl-6 text-xs text-muted-foreground leading-relaxed">
-                    {t('sandboxCreatorDescription')}
-                  </p>
-                </label>
-                <label className="flex cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 hover:bg-accent/40">
-                  <div className="flex items-center gap-2 text-sm">
-                    <RadioGroupItem value="dedicated" />
-                    <span>{t('sandboxDedicated')}</span>
-                  </div>
-                  <p className="pl-6 text-xs text-muted-foreground leading-relaxed">
-                    {t('sandboxDedicatedDescription')}
-                  </p>
-                </label>
-              </RadioGroup>
-            </div>
+            {!isWorkspaceSharedSandbox && (
+              <div className="flex flex-col gap-2">
+                <Label>{tDialog('sandboxLabel')}</Label>
+                <RadioGroup
+                  value={sandboxMode}
+                  onValueChange={(v) => setSandboxMode((v as SandboxMode) ?? 'creator')}
+                >
+                  <label className="flex cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 hover:bg-accent/40">
+                    <div className="flex items-center gap-2 text-sm">
+                      <RadioGroupItem value="creator" />
+                      <span>{t('sandboxCreator')}</span>
+                    </div>
+                    <p className="pl-6 text-xs text-muted-foreground leading-relaxed">
+                      {t('sandboxCreatorDescription')}
+                    </p>
+                  </label>
+                  <label className="flex cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 hover:bg-accent/40">
+                    <div className="flex items-center gap-2 text-sm">
+                      <RadioGroupItem value="dedicated" />
+                      <span>{t('sandboxDedicated')}</span>
+                    </div>
+                    <p className="pl-6 text-xs text-muted-foreground leading-relaxed">
+                      {t('sandboxDedicatedDescription')}
+                    </p>
+                  </label>
+                </RadioGroup>
+              </div>
+            )}
 
             {error && (
               <div

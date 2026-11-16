@@ -4,14 +4,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.models import Workspace
+from cubeplex.sandbox.scope import WORKSPACE_SANDBOX_MODES, WorkspaceSandboxMode
 
 
 class WorkspaceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def create(self, *, org_id: str, name: str) -> Workspace:
-        ws = Workspace(org_id=org_id, name=name)
+    async def create(
+        self,
+        *,
+        org_id: str,
+        name: str,
+        sandbox_mode: WorkspaceSandboxMode = "per_user",
+    ) -> Workspace:
+        if sandbox_mode not in WORKSPACE_SANDBOX_MODES:
+            raise ValueError(
+                f"sandbox_mode must be one of {WORKSPACE_SANDBOX_MODES}, got {sandbox_mode!r}"
+            )
+        ws = Workspace(org_id=org_id, name=name, sandbox_mode=sandbox_mode)
         self.session.add(ws)
         await self.session.commit()
         await self.session.refresh(ws)

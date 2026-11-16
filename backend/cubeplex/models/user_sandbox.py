@@ -13,9 +13,10 @@ from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
 class UserSandbox(CubeplexBase, OrgScopedMixin, table=True):
     """Tracks sandbox instances bound to (org, workspace, scope_type, scope_id).
 
-    The scope tuple is polymorphic: ``scope_type`` is one of ``'user'``,
-    ``'conversation'``, or ``'topic'`` and ``scope_id`` references the
-    corresponding row. At most one row per scope key may be active
+    The scope tuple is polymorphic: ``scope_type`` is one of ``'workspace'``,
+    ``'user'``, ``'conversation'``, or ``'topic'`` and ``scope_id`` references
+    the corresponding row. ``user_id`` is ``None`` when
+    ``scope_type == 'workspace'``. At most one row per scope key may be active
     (``status IN ('provisioning','running')``).
     """
 
@@ -36,7 +37,9 @@ class UserSandbox(CubeplexBase, OrgScopedMixin, table=True):
         ),
     )
 
-    user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
+    user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True, index=True
+    )
     scope_type: str = Field(max_length=20)
     scope_id: str = Field(max_length=20)
     sandbox_id: str | None = Field(default=None, max_length=255, unique=True, nullable=True)

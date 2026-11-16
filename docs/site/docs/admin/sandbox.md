@@ -94,6 +94,8 @@ When the same variable name exists at multiple scopes, the narrower scope wins: 
 
 The **Admin > Sandbox Environment** page manages **Organization**-scope variables only — these are injected into every workspace sandbox. Workspace- and user-scope variables are added from within each workspace, not from this admin page.
 
+In workspaces configured with a **Workspace shared sandbox** (see [Managing Sandboxes](../guides/conversations/sandboxes.md)), **User**-scope (personal) variables are disabled — only **Organization** and **Workspace** variables apply (`Workspace` overrides `Organization`). Workspace admins add, edit, and delete **Workspace** variables in that workspace, while regular workspace members have read-only visibility into the Workspace variable list (names, secret vs. plain type, and allowed hosts — never secret values).
+
 ### Add an organization environment variable
 
 1. Go to **Admin > Sandbox Environment**.

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.auth.dependencies import current_active_user
 from cubeplex.db import get_session
 from cubeplex.models import Membership, OrganizationMembership, User
+from cubeplex.sandbox.scope import WorkspaceSandboxMode
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
@@ -28,6 +29,7 @@ class OnboardingRequest(BaseModel):
     org_name: str | None = Field(default=None, min_length=2, max_length=64)
     org_slug: str | None = Field(default=None, max_length=32)
     workspace_name: str = Field(min_length=1, max_length=64)
+    sandbox_mode: WorkspaceSandboxMode = "per_user"
 
     @field_validator("org_slug")
     @classmethod
@@ -116,6 +118,7 @@ async def complete_onboarding(
                 org_name=body.org_name,
                 org_slug=body.org_slug,
                 workspace_name=body.workspace_name,
+                sandbox_mode=body.sandbox_mode,
             )
         else:
             # Workspace-only mode: caller already in an org.
@@ -125,6 +128,7 @@ async def complete_onboarding(
                 user_id=user.id,
                 org_id=org_id,
                 workspace_name=body.workspace_name,
+                sandbox_mode=body.sandbox_mode,
             )
     except IntegrityError as exc:
         await session.rollback()

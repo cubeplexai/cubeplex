@@ -73,7 +73,7 @@ def make_session_loader(
     session_factory: Callable[[], Any],
     org_id: str,
     workspace_id: str,
-    user_id: str,
+    user_id: str | None,
     default_image: str,
     egress_proxy_supported: bool | None = None,
 ) -> SandboxConfigLoader:

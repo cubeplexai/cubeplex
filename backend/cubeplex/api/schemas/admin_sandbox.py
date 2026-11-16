@@ -12,7 +12,7 @@ class UserSandboxSnapshotOut(BaseModel):
     id: str
     org_id: str
     workspace_id: str
-    user_id: str
+    user_id: str | None
     scope_type: str
     scope_id: str
     sandbox_id: str | None

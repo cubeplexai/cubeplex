@@ -32,9 +32,44 @@ describe('workspaceStore', () => {
     const client = createApiClient('')
     const created = await useWorkspaceStore.getState().create(client, 'Team')
     expect(created.id).toBe('w2')
+    expect(created.role).toBe('admin')
+    expect(created.sandbox_mode).toBe('per_user')
     const list = useWorkspaceStore.getState().workspaces
     expect(list[0].id).toBe('w2')
+    expect(list[0].role).toBe('admin')
+    expect(list[0].sandbox_mode).toBe('per_user')
     expect(list).toHaveLength(2)
+  })
+
+  it('create forwards sandboxMode and preserves workspace mode on prepended entry', async () => {
+    useWorkspaceStore.setState({
+      workspaces: [{ id: 'w1', name: 'Personal', org_id: 'o1', role: 'admin' }],
+    })
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ id: 'w3', name: 'Shared Team', org_id: 'o1', sandbox_mode: 'workspace' }),
+        { status: 201 },
+      ),
+    )
+    const client = createApiClient('')
+    const created = await useWorkspaceStore.getState().create(client, 'Shared Team', 'workspace')
+    expect(created).toMatchObject({
+      id: 'w3',
+      name: 'Shared Team',
+      role: 'admin',
+      sandbox_mode: 'workspace',
+    })
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      name: 'Shared Team',
+      org_id: 'o1',
+      sandbox_mode: 'workspace',
+    })
+    expect(useWorkspaceStore.getState().workspaces[0]).toMatchObject({
+      id: 'w3',
+      role: 'admin',
+      sandbox_mode: 'workspace',
+    })
   })
 
   it('create throws when no workspaces (no org_id to use)', async () => {

@@ -61,6 +61,7 @@ from cubeplex.repositories.steering_message import (
     SteeringMessageContentTooLargeError,
     SteeringMessageQueueFullError,
 )
+from cubeplex.sandbox.scope import get_workspace_sandbox_mode
 from cubeplex.services.avatar_store import resolve_avatar_url
 from cubeplex.services.background_task_query import BackgroundTaskQueryService
 from cubeplex.services.conversation_execution import (
@@ -723,6 +724,8 @@ async def upgrade_conversation_to_topic(
     conversation = locked
     creator_user_id = conversation.creator_user_id
 
+    ws_mode = await get_workspace_sandbox_mode(session, ctx.workspace_id)
+    effective_topic_sandbox_mode = None if ws_mode == "workspace" else body.sandbox_mode
     topic_repo = TopicRepository(
         session,
         org_id=ctx.org_id,
@@ -731,7 +734,7 @@ async def upgrade_conversation_to_topic(
     )
     topic = await topic_repo.create_topic(
         title=body.title,
-        sandbox_mode=body.sandbox_mode,
+        sandbox_mode=effective_topic_sandbox_mode,
     )
 
     conversation.topic_id = topic.id
@@ -757,21 +760,19 @@ async def upgrade_conversation_to_topic(
     # Sandbox rekey: standalone group chat (or personal) -> topic. The
     # running sandbox row (if any) is re-scoped in place under the topic
     # so subsequent operations from any participant hit the same row.
-    # A single UPDATE that matches either the personal user-scope row OR
-    # the standalone-group-chat conversation-scope row avoids a race with
-    # a concurrent invite-to-group: even if the sandbox flips to
-    # conversation-scope between our ``was_group_chat`` read and this
-    # UPDATE, the OR-branch still catches the moved row.
-    sbx_repo = UserSandboxRepository(
-        session,
-        org_id=ctx.org_id,
-        workspace_id=ctx.workspace_id,
-    )
-    await sbx_repo.rekey_to_topic(
-        creator_user_id=creator_user_id,
-        conversation_id=conversation_id,
-        topic_id=topic.id,
-    )
+    # Skipped in workspace-shared sandbox mode where all conversations/topics
+    # already share ("workspace", workspace_id).
+    if ws_mode != "workspace":
+        sbx_repo = UserSandboxRepository(
+            session,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        await sbx_repo.rekey_to_topic(
+            creator_user_id=creator_user_id,
+            conversation_id=conversation_id,
+            topic_id=topic.id,
+        )
 
     await session.commit()
     await session.refresh(conversation)
@@ -913,22 +914,25 @@ async def invite_to_conversation(
     await cp_repo.add_many(conversation_id, body.user_ids)
 
     # Sandbox rekey on the 1 -> 2 transition. Only applies to personal
-    # (non-topic) conversations: topic conversations have their sandbox
-    # keyed by topic_id and don't move.
+    # (non-topic) conversations in per_user workspaces: topic conversations
+    # have their sandbox keyed by topic_id, and workspace-shared sandboxes
+    # stay keyed by ("workspace", workspace_id).
     if conversation.topic_id is None:
         await session.refresh(conversation)
         if conversation.is_group_chat:
-            sbx_repo = UserSandboxRepository(
-                session,
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-            )
-            await sbx_repo.rekey(
-                from_scope_type="user",
-                from_scope_id=conversation.creator_user_id,
-                to_scope_type="conversation",
-                to_scope_id=conversation_id,
-            )
+            ws_mode = await get_workspace_sandbox_mode(session, ctx.workspace_id)
+            if ws_mode != "workspace":
+                sbx_repo = UserSandboxRepository(
+                    session,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                )
+                await sbx_repo.rekey(
+                    from_scope_type="user",
+                    from_scope_id=conversation.creator_user_id,
+                    to_scope_type="conversation",
+                    to_scope_id=conversation_id,
+                )
 
     await session.commit()
     await session.refresh(conversation)

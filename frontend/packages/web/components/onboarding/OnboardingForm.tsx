@@ -3,7 +3,12 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { completeOnboarding, useAuthStore, type ApiClient } from '@cubeplex/core'
+import {
+  completeOnboarding,
+  useAuthStore,
+  type ApiClient,
+  type WorkspaceSandboxMode,
+} from '@cubeplex/core'
 import {
   SLUG_MAX,
   SLUG_MIN,
@@ -12,6 +17,7 @@ import {
   validateSlug,
   type SlugError,
 } from '@/lib/slugRules'
+import { cn } from '@/lib/utils'
 
 export function OnboardingForm({
   client,
@@ -31,6 +37,7 @@ export function OnboardingForm({
   const [slugTouched, setSlugTouched] = useState(false)
   const [workspaceName, setWorkspaceName] = useState('')
   const [workspaceTouched, setWorkspaceTouched] = useState(false)
+  const [sandboxMode, setSandboxMode] = useState<WorkspaceSandboxMode>('per_user')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -71,8 +78,12 @@ export function OnboardingForm({
             org_name: orgName.trim(),
             org_slug: slug,
             workspace_name: workspaceName.trim(),
+            sandbox_mode: sandboxMode,
           }
-        : { workspace_name: workspaceName.trim() }
+        : {
+            workspace_name: workspaceName.trim(),
+            sandbox_mode: sandboxMode,
+          }
       const result = await completeOnboarding(client, body)
       await useAuthStore.getState().loadMe(client)
       const refreshed = useAuthStore.getState()
@@ -160,6 +171,45 @@ export function OnboardingForm({
           placeholder={t('workspaceNamePlaceholder')}
         />
       </div>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium">{t('sandboxMode')}</legend>
+        <div className="flex flex-col gap-2">
+          {(['per_user', 'workspace'] as const).map((mode) => {
+            const selected = sandboxMode === mode
+            return (
+              <label
+                key={mode}
+                className={cn(
+                  'flex cursor-pointer items-start gap-2.5 rounded-md border p-3 transition-colors duration-fast',
+                  selected
+                    ? 'border-primary/50 bg-primary/5'
+                    : 'border-border bg-background hover:bg-muted/60',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="sandbox_mode"
+                  value={mode}
+                  checked={selected}
+                  onChange={() => setSandboxMode(mode)}
+                  className="mt-0.5 accent-primary"
+                />
+                <div className="min-w-0 space-y-0.5">
+                  <div className="text-sm font-medium text-foreground">
+                    {mode === 'per_user' ? t('sandboxPerUserTitle') : t('sandboxWorkspaceTitle')}
+                  </div>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {mode === 'per_user'
+                      ? t('sandboxPerUserDescription')
+                      : t('sandboxWorkspaceDescription')}
+                  </p>
+                </div>
+              </label>
+            )
+          })}
+        </div>
+      </fieldset>
 
       {error && <div className="text-sm text-destructive">{error}</div>}
 

@@ -2,13 +2,15 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, useWorkspaceStore } from '@cubeplex/core'
+import { createApiClient, useWorkspaceStore, type WorkspaceSandboxMode } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
+import { cn } from '@/lib/utils'
 
 export function WorkspaceCreateForm() {
   const t = useTranslations('workspaceCreate')
   const router = useRouter()
   const [name, setName] = useState('')
+  const [sandboxMode, setSandboxMode] = useState<WorkspaceSandboxMode>('per_user')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -18,8 +20,9 @@ export function WorkspaceCreateForm() {
     setSubmitting(true)
     try {
       const client = createApiClient('')
-      const ws = await useWorkspaceStore.getState().create(client, name)
+      const ws = await useWorkspaceStore.getState().create(client, name, sandboxMode)
       setName('')
+      setSandboxMode('per_user')
       router.push(`/w/${ws.id}`)
     } catch (err) {
       setError((err as Error).message)
@@ -29,9 +32,9 @@ export function WorkspaceCreateForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-3 rounded-md border border-border p-4">
+    <form onSubmit={onSubmit} className="space-y-4 rounded-md border border-border p-4">
       <label className="block">
-        <span className="text-sm text-foreground/80">{t('nameLabel')}</span>
+        <span className="text-sm font-medium text-foreground">{t('nameLabel')}</span>
         <input
           type="text"
           required
@@ -42,6 +45,46 @@ export function WorkspaceCreateForm() {
           placeholder={t('namePlaceholder')}
         />
       </label>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-foreground">{t('sandboxModeLabel')}</legend>
+        <div className="flex flex-col gap-2">
+          {(['per_user', 'workspace'] as const).map((mode) => {
+            const selected = sandboxMode === mode
+            return (
+              <label
+                key={mode}
+                className={cn(
+                  'flex cursor-pointer items-start gap-2.5 rounded-md border p-3 transition-colors duration-fast',
+                  selected
+                    ? 'border-primary/50 bg-primary/5'
+                    : 'border-border bg-background hover:bg-muted/60',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="sandbox_mode"
+                  value={mode}
+                  checked={selected}
+                  onChange={() => setSandboxMode(mode)}
+                  className="mt-0.5 accent-primary"
+                />
+                <div className="min-w-0 space-y-0.5">
+                  <div className="text-sm font-medium text-foreground">
+                    {mode === 'per_user' ? t('sandboxPerUserTitle') : t('sandboxWorkspaceTitle')}
+                  </div>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    {mode === 'per_user'
+                      ? t('sandboxPerUserDescription')
+                      : t('sandboxWorkspaceDescription')}
+                  </p>
+                </div>
+              </label>
+            )
+          })}
+        </div>
+      </fieldset>
+
       {error && <div className="text-sm text-danger-fg">{error}</div>}
       <button
         type="submit"

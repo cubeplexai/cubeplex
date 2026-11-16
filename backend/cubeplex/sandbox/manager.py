@@ -20,7 +20,7 @@ import hashlib
 import re
 import time
 import weakref
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -28,6 +28,7 @@ from typing import Any, Literal
 
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
 
@@ -66,6 +67,11 @@ from cubeplex.sandbox.registry import (
     ProviderRegistry,
     UnknownSandboxProviderError,
     get_provider_registry,
+)
+from cubeplex.sandbox.scope import (
+    ResolvedSandboxTarget,
+    WorkspaceSandboxMode,
+    get_workspace_sandbox_mode,
 )
 from cubeplex.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubeplex.sandbox_policy.rules import SandboxNetworkPolicy, build_network_policy
@@ -321,6 +327,33 @@ class SandboxManager:
         )
         return provider, workdir
 
+    async def resolve_run_sandbox_runtime(
+        self,
+        *,
+        org_id: str,
+        workspace_id: str,
+        resolve_target: Callable[[WorkspaceSandboxMode], ResolvedSandboxTarget],
+    ) -> tuple[ResolvedSandboxTarget, SandboxProvider, str]:
+        """Resolve ``(target, provider, workdir)`` in one ``_session_factory`` round-trip."""
+        provider = self.default_provider
+        async with self._session_factory() as session:
+            ws_mode = await get_workspace_sandbox_mode(session, workspace_id)
+            target = resolve_target(ws_mode)
+            repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
+            row = await repo.get_active_by_scope(
+                scope_type=target.scope_type, scope_id=target.scope_id
+            )
+            if row is not None and row.status not in ("terminated", "failed"):
+                with suppress(UnknownSandboxProviderError):
+                    provider = self._provider_for_record(row)
+        workdir = self.resolve_scope_workdir(
+            provider=provider,
+            workspace_id=workspace_id,
+            scope_type=target.scope_type,
+            scope_id=target.scope_id,
+        )
+        return target, provider, workdir
+
     def _run_identity(self) -> RunIdentity:
         return RunIdentity(user=self._run_user, uid=self._run_uid, gid=self._run_gid)
 
@@ -439,11 +472,13 @@ class SandboxManager:
         provider: SandboxProvider,
         org_id: str,
         workspace_id: str,
-        user_id: str,
+        user_id: str | None,
+        scope_type: str | None = None,
     ) -> tuple[list[ResolvedEnv], EgressSignature, bool]:
         """Resolve env entries, decrypt plains, and drop secrets if unproxied."""
+        effective_user_id = None if scope_type == "workspace" or user_id is None else user_id
         resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
-        resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
+        resolved = await resolver.resolve(workspace_id=workspace_id, user_id=effective_user_id)
         await self._decrypt_env_values(session, org_id=org_id, resolved=resolved)
 
         can_proxy_secrets = bool(self._exchange_host) and provider.capabilities.egress_proxy
@@ -473,12 +508,14 @@ class SandboxManager:
         provider: SandboxProvider,
         org_id: str,
         workspace_id: str,
-        user_id: str,
+        user_id: str | None,
         sandbox_id: str,
+        scope_type: str | None = None,
         injection: InjectionResult | None = None,
         signature: EgressSignature | None = None,
     ) -> None:
         """Resolve vault secrets/plain env, set run env, and persist EgressRefs."""
+        effective_user_id = None if scope_type == "workspace" or user_id is None else user_id
         ref_repo = EgressRefRepository(session)
         expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl)
 
@@ -488,7 +525,8 @@ class SandboxManager:
                 provider=provider,
                 org_id=org_id,
                 workspace_id=workspace_id,
-                user_id=user_id,
+                user_id=effective_user_id,
+                scope_type=scope_type,
             )
 
             cached = self._egress_generations.get(sandbox_id)
@@ -512,7 +550,7 @@ class SandboxManager:
                     sandbox_id=sandbox_id,
                     org_id=org_id,
                     workspace_id=workspace_id,
-                    user_id=user_id,
+                    user_id=effective_user_id,
                     run_id=None,
                     bindings=[b],
                     expires_at=expires_at,
@@ -579,11 +617,12 @@ class SandboxManager:
         *,
         scope_type: str,
         scope_id: str,
-        user_id: str,
+        user_id: str | None,
         org_id: str,
         workspace_id: str,
     ) -> SandboxAttachment:
         """Get the active sandbox for this scope, or create/revive one."""
+        effective_user_id: str | None = None if scope_type == "workspace" else user_id
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             record = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
@@ -608,7 +647,7 @@ class SandboxManager:
                     record,
                     org_id=org_id,
                     workspace_id=workspace_id,
-                    user_id=user_id,
+                    user_id=effective_user_id,
                 )
                 if resumed is not None:
                     return SandboxAttachment(sandbox=resumed, user_sandbox_id=record.id)
@@ -625,20 +664,36 @@ class SandboxManager:
             if record is None:
                 provider = self.default_provider
                 policy = await self._resolve_policy(session, org_id=org_id, provider=provider)
-                reserved = await repo.reserve(
-                    user_id=user_id,
-                    image=policy.default_image,
-                    ttl_seconds=self._ttl,
-                    scope_type=scope_type,
-                    scope_id=scope_id,
-                    provider=provider.name,
-                )
+                try:
+                    reserved = await repo.reserve(
+                        user_id=effective_user_id,
+                        image=policy.default_image,
+                        ttl_seconds=self._ttl,
+                        scope_type=scope_type,
+                        scope_id=scope_id,
+                        provider=provider.name,
+                    )
+                except IntegrityError as exc:
+                    await session.rollback()
+                    winner = await self._await_provisioning_winner(repo, scope_type, scope_id)
+                    if winner is not None and winner.status == "running":
+                        backend = await self._connect_existing(
+                            session,
+                            repo,
+                            winner,
+                            provider=self._provider_for_record(winner),
+                            user_id=effective_user_id,
+                        )
+                        return SandboxAttachment(sandbox=backend, user_sandbox_id=winner.id)
+                    raise SandboxError(
+                        f"provisioning race lost for scope {scope_type}/{scope_id}"
+                    ) from exc
                 backend = await self._provision_new_container(
                     session,
                     reserved,
                     provider=provider,
                     policy=policy,
-                    user_id=user_id,
+                    user_id=effective_user_id,
                 )
                 return SandboxAttachment(sandbox=backend, user_sandbox_id=reserved.id)
 
@@ -662,7 +717,7 @@ class SandboxManager:
                         repo,
                         record,
                         provider=existing_provider,
-                        user_id=user_id,
+                        user_id=effective_user_id,
                     )
                     return SandboxAttachment(sandbox=backend, user_sandbox_id=record.id)
                 except SandboxError:
@@ -686,7 +741,7 @@ class SandboxManager:
                             repo,
                             winner,
                             provider=self._provider_for_record(winner),
-                            user_id=user_id,
+                            user_id=effective_user_id,
                         )
                         return SandboxAttachment(sandbox=backend, user_sandbox_id=winner.id)
                     raise SandboxError(f"provisioning race lost for scope {scope_type}/{scope_id}")
@@ -697,7 +752,7 @@ class SandboxManager:
                     record,
                     provider=provider,
                     policy=policy,
-                    user_id=user_id,
+                    user_id=effective_user_id,
                     is_revive=True,
                 )
                 return SandboxAttachment(sandbox=backend, user_sandbox_id=record.id)
@@ -710,7 +765,7 @@ class SandboxManager:
                         repo,
                         winner,
                         provider=self._provider_for_record(winner),
-                        user_id=user_id,
+                        user_id=effective_user_id,
                     )
                     return SandboxAttachment(sandbox=backend, user_sandbox_id=winner.id)
                 raise SandboxError(f"provisioning timed out for scope {scope_type}/{scope_id}")
@@ -763,7 +818,7 @@ class SandboxManager:
         *,
         provider: SandboxProvider,
         policy: EffectivePolicy,
-        user_id: str,
+        user_id: str | None,
         is_revive: bool = False,
     ) -> Sandbox:
         """Provision a fresh provider sandbox for an existing UserSandbox row."""
@@ -782,15 +837,20 @@ class SandboxManager:
                 scope_type=record.scope_type,
                 scope_id=record.scope_id,
             )
+            owner_desc = (
+                f"user {record.user_id}"
+                if record.user_id is not None
+                else f"scope {record.scope_type}/{record.scope_id}"
+            )
             if volume_key is not None:
                 logger.info(
-                    "Creating new {} sandbox for user {} with volume {}",
+                    "Creating new {} sandbox for {} with volume {}",
                     provider.name,
-                    record.user_id,
+                    owner_desc,
                     volume_key,
                 )
             else:
-                logger.info("Creating new {} sandbox for user {}", provider.name, record.user_id)
+                logger.info("Creating new {} sandbox for {}", provider.name, owner_desc)
 
             active_resolved, signature, can_proxy_secrets = await self._resolve_active_env(
                 session,
@@ -798,6 +858,7 @@ class SandboxManager:
                 org_id=record.org_id,
                 workspace_id=record.workspace_id,
                 user_id=user_id,
+                scope_type=record.scope_type,
             )
             injection = SandboxEnvInjector(
                 exchange_host=self._exchange_host if can_proxy_secrets else ""
@@ -901,6 +962,7 @@ class SandboxManager:
                 workspace_id=record.workspace_id,
                 user_id=user_id,
                 sandbox_id=sandbox_id,
+                scope_type=record.scope_type,
                 injection=injection,
                 signature=signature,
             )
@@ -932,13 +994,18 @@ class SandboxManager:
         record: UserSandbox,
         *,
         provider: SandboxProvider,
-        user_id: str,
+        user_id: str | None,
     ) -> Sandbox:
         """Connect + health-check an existing running sandbox, then refresh its env/refs."""
         sandbox_id = record.sandbox_id
         if sandbox_id is None:
             raise SandboxError(f"sandbox {record.id} has no sandbox_id; cannot connect")
-        logger.info("Found existing sandbox {} for user {}", sandbox_id, user_id)
+        owner_desc = (
+            f"user {user_id}"
+            if user_id is not None
+            else f"scope {record.scope_type}/{record.scope_id}"
+        )
+        logger.info("Found existing sandbox {} for {}", sandbox_id, owner_desc)
         backend: Sandbox | None = None
         healthy = False
         try:
@@ -969,6 +1036,7 @@ class SandboxManager:
                     workspace_id=record.workspace_id,
                     user_id=user_id,
                     sandbox_id=sandbox_id,
+                    scope_type=record.scope_type,
                 )
             except Exception:
                 with suppress(Exception):
@@ -1341,6 +1409,7 @@ class SandboxManager:
                             workspace_id=workspace_id,
                             user_id=user_id,
                             sandbox_id=sandbox_id,
+                            scope_type=scope_type,
                         )
                         await guest_session.commit()
                     await backend.write_terminal_env()
@@ -1518,7 +1587,7 @@ class SandboxManager:
         *,
         org_id: str,
         workspace_id: str,
-        user_id: str,
+        user_id: str | None,
     ) -> Sandbox | None:
         """Try to resume a paused row via atomic ``paused -> resuming`` claim."""
         assert record.sandbox_id, "paused row must have sandbox_id"
@@ -1598,6 +1667,7 @@ class SandboxManager:
                 workspace_id=workspace_id,
                 user_id=user_id,
                 sandbox_id=record.sandbox_id,
+                scope_type=record.scope_type,
             )
         except Exception:
             logger.error(
@@ -1663,7 +1733,7 @@ class SandboxManager:
         *,
         org_id: str,
         workspace_id: str,
-        user_id: str,
+        user_id: str | None,
     ) -> Sandbox | None:
         """Race loser: wait for winner's resume transition to settle."""
         row = await self._await_stable_status(record_id, org_id=org_id, workspace_id=workspace_id)
@@ -1705,6 +1775,7 @@ class SandboxManager:
                     workspace_id=workspace_id,
                     user_id=user_id,
                     sandbox_id=sandbox_id,
+                    scope_type=row.scope_type,
                 )
             except Exception:
                 logger.error(

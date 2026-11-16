@@ -15,6 +15,17 @@ class SandboxCleanupRequestedError(ValueError):
     """A provisioner lost the row to a committed cleanup request."""
 
 
+def _validate_scope_and_user_id(scope_type: str, user_id: str | None) -> None:
+    if scope_type == "workspace":
+        if user_id is not None:
+            raise ValueError("scope_type='workspace' requires user_id=None")
+    elif scope_type in ("user", "conversation", "topic"):
+        if user_id is None:
+            raise ValueError(f"scope_type={scope_type!r} requires a non-null user_id")
+    else:
+        raise ValueError(f"invalid scope_type: {scope_type!r}")
+
+
 class UserSandboxRepository(ScopedRepository[UserSandbox]):
     """Repository for UserSandbox CRUD operations."""
 
@@ -31,7 +42,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     async def create(
         self,
         *,
-        user_id: str,
+        user_id: str | None,
         scope_type: str,
         scope_id: str,
         sandbox_id: str,
@@ -46,6 +57,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         passes its configured value so ``sandbox.paused_ttl_seconds`` actually
         drives ``reap_paused`` instead of always taking the model default.
         """
+        _validate_scope_and_user_id(scope_type, user_id)
         fields: dict[str, Any] = {
             "user_id": user_id,
             "scope_type": scope_type,
@@ -62,7 +74,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     async def reserve(
         self,
         *,
-        user_id: str,
+        user_id: str | None,
         image: str,
         scope_type: str,
         scope_id: str,
@@ -78,13 +90,14 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         ``sandbox_id`` gets a unique ``pending-<row id>`` placeholder until
         promote overwrites it.
 
-        ``scope_type`` / ``scope_id`` is the polymorphic key: ``'user' +
-        user_id`` for personal sandboxes, ``'conversation' + conv_id`` for
-        standalone group chats, ``'topic' + topic_id`` for dedicated topic
-        sandboxes. The key feeds into the single
-        ``uq_user_sandbox_active_scope`` partial unique, ensuring at most
-        one active row per scope tuple.
+        ``scope_type`` / ``scope_id`` is the polymorphic key: ``'workspace' +
+        workspace_id`` for workspace-shared sandboxes, ``'user' + user_id``
+        for personal sandboxes, ``'conversation' + conv_id`` for standalone
+        group chats, ``'topic' + topic_id`` for dedicated topic sandboxes. The
+        key feeds into the single ``uq_user_sandbox_active_scope`` partial
+        unique, ensuring at most one active row per scope tuple.
         """
+        _validate_scope_and_user_id(scope_type, user_id)
         record = UserSandbox(
             user_id=user_id,
             sandbox_id="",  # set below once the row id is minted

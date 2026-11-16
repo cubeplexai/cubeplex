@@ -37,4 +37,38 @@ describe('workspaces API', () => {
     expect(url).toBe('/api/v1/workspaces')
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ name: 'Ops', org_id: 'o1' })
   })
+
+  it('createWorkspace includes sandbox_mode when provided', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'w4',
+          name: 'Shared Ops',
+          org_id: 'o1',
+          role: 'admin',
+          sandbox_mode: 'workspace',
+        }),
+        { status: 201 },
+      ),
+    )
+    const client = createApiClient('')
+    const ws = await createWorkspace(client, {
+      name: 'Shared Ops',
+      orgId: 'o1',
+      sandboxMode: 'workspace',
+    })
+    expect(ws).toMatchObject({
+      id: 'w4',
+      name: 'Shared Ops',
+      org_id: 'o1',
+      role: 'admin',
+      sandbox_mode: 'workspace',
+    })
+    const [, init] = fetchMock.mock.calls[0]
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      name: 'Shared Ops',
+      org_id: 'o1',
+      sandbox_mode: 'workspace',
+    })
+  })
 })

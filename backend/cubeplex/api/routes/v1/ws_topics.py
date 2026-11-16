@@ -36,6 +36,7 @@ from cubeplex.repositories.conversation_participant import (
 from cubeplex.repositories.topic import TopicRepository
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox.manager import get_sandbox_manager
+from cubeplex.sandbox.scope import get_workspace_sandbox_mode
 from cubeplex.services.avatar_store import resolve_avatar_url
 from cubeplex.services.conversation_execution import ConversationExecutionService
 from cubeplex.services.execution_signals import signal_stopped_runs
@@ -126,10 +127,12 @@ async def create_topic(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, Any]:
+    ws_mode = await get_workspace_sandbox_mode(session, ctx.workspace_id)
+    effective_sandbox_mode = None if ws_mode == "workspace" else body.sandbox_mode
     repo = _topic_repo(session, ctx)
     topic = await repo.create_topic(
         title=body.title,
-        sandbox_mode=body.sandbox_mode,
+        sandbox_mode=effective_sandbox_mode,
     )
 
     conv = Conversation(
@@ -566,7 +569,11 @@ async def get_topic_sandbox_status(
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
+    ws_mode = await get_workspace_sandbox_mode(session, workspace_id)
     manager = get_sandbox_manager()
     sandbox_repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    row = await sandbox_repo.get_active_by_scope(scope_type="topic", scope_id=topic_id)
+    if ws_mode == "workspace":
+        row = await sandbox_repo.get_active_by_scope(scope_type="workspace", scope_id=workspace_id)
+    else:
+        row = await sandbox_repo.get_active_by_scope(scope_type="topic", scope_id=topic_id)
     return build_sandbox_status_out(manager, row)

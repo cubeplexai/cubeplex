@@ -46,6 +46,7 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
   const cleanupPending = sandbox.status === 'kill_pending'
   const deletePending = cleanupPending && sandbox.cleanup_action === 'delete'
   const restartPending = cleanupPending && sandbox.cleanup_action === 'restart'
+  const canManage = sandbox.can_manage !== false
 
   // scope → human label (spec §7.4). conversation/topic fall back to
   // "(deleted)" when the backing row is gone (scope_title null). Empty
@@ -54,6 +55,9 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
   const deleted = t('scope.deleted')
   let label: string
   switch (sandbox.scope_type) {
+    case 'workspace':
+      label = t('scope.workspace')
+      break
     case 'user':
       label = t('scope.user')
       break
@@ -125,47 +129,55 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
           </p>
         ) : null}
       </div>
-      <div className="flex shrink-0 gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={deletePending || busy !== null}
-          onClick={() => setRestartOpen(true)}
-        >
-          {restartPending ? t('retryRestart') : t('restart')}
-        </Button>
-        <Button
-          variant="destructive"
-          size="sm"
-          disabled={busy !== null}
-          onClick={() => setDeleteOpen(true)}
-        >
-          {deletePending ? t('retryDelete') : t('delete')}
-        </Button>
-      </div>
+      {canManage ? (
+        <>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={deletePending || busy !== null}
+              onClick={() => setRestartOpen(true)}
+            >
+              {restartPending ? t('retryRestart') : t('restart')}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => setDeleteOpen(true)}
+            >
+              {deletePending ? t('retryDelete') : t('delete')}
+            </Button>
+          </div>
 
-      <ConfirmDialog
-        open={restartOpen}
-        onOpenChange={setRestartOpen}
-        title={t('restartConfirmTitle')}
-        body={t('restartConfirmBody')}
-        confirmLabel={busy === 'restart' ? t('restarting') : t('restartConfirm')}
-        confirmVariant="default"
-        cancelLabel={t('cancel')}
-        busy={busy !== null}
-        onConfirm={() => void onConfirmRestart()}
-      />
-      <ConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        title={t('deleteConfirmTitle')}
-        body={t('deleteConfirmBody')}
-        confirmLabel={busy === 'delete' ? t('deleting') : t('deleteConfirm')}
-        confirmVariant="destructive"
-        cancelLabel={t('cancel')}
-        busy={busy !== null}
-        onConfirm={() => void onConfirmDelete()}
-      />
+          <ConfirmDialog
+            open={restartOpen}
+            onOpenChange={setRestartOpen}
+            title={t('restartConfirmTitle')}
+            body={t('restartConfirmBody')}
+            confirmLabel={busy === 'restart' ? t('restarting') : t('restartConfirm')}
+            confirmVariant="default"
+            cancelLabel={t('cancel')}
+            busy={busy !== null}
+            onConfirm={() => void onConfirmRestart()}
+          />
+          <ConfirmDialog
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            title={t('deleteConfirmTitle')}
+            body={t('deleteConfirmBody')}
+            confirmLabel={busy === 'delete' ? t('deleting') : t('deleteConfirm')}
+            confirmVariant="destructive"
+            cancelLabel={t('cancel')}
+            busy={busy !== null}
+            onConfirm={() => void onConfirmDelete()}
+          />
+        </>
+      ) : (
+        <span className="shrink-0 rounded border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+          {t('adminOnlyHint')}
+        </span>
+      )}
     </li>
   )
 

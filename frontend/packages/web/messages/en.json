@@ -1508,7 +1508,11 @@
     "workspaceNameSaving": "Saving…",
     "general": {
       "title": "General",
-      "description": "Workspace name, agent persona, and workspace lifecycle settings."
+      "description": "Workspace name, agent persona, and workspace lifecycle settings.",
+      "sandboxModeLabel": "Sandbox mode",
+      "sandboxModePerUser": "Per-user isolated sandbox",
+      "sandboxModeWorkspace": "Workspace shared sandbox",
+      "sandboxModeImmutableHint": "Fixed when the workspace is created and cannot be changed."
     },
     "persona": {
       "title": "Agent Persona",
@@ -1696,7 +1700,9 @@
       "btnCancel": "Cancel",
       "btnSave": "Save",
       "btnAdd": "Add",
-      "btnSaving": "Saving…"
+      "btnSaving": "Saving…",
+      "sharedWorkspaceAdminDescription": "This workspace uses a shared sandbox. Workspace variables are injected into the shared sandbox for all members.",
+      "sharedWorkspaceMemberDescription": "This workspace uses a shared sandbox. Environment variables apply to the shared sandbox and are managed by workspace admins."
     }
   },
   "wsMembers": {
@@ -1938,13 +1944,20 @@
     "nameLabel": "New workspace name",
     "namePlaceholder": "e.g. Side project",
     "creating": "Creating…",
-    "submit": "Create workspace"
+    "submit": "Create workspace",
+    "sandboxModeLabel": "Sandbox mode",
+    "sandboxPerUserTitle": "Per-user isolated sandbox",
+    "sandboxPerUserDescription": "Each member gets their own private sandbox and storage.",
+    "sandboxWorkspaceTitle": "Workspace shared sandbox",
+    "sandboxWorkspaceDescription": "All members, topics, and automations share a single sandbox and storage. Cannot be changed after creation."
   },
   "workspaceList": {
     "empty": "You have no workspaces yet.",
     "open": "Open",
     "rolePrefix": "Role: {role}",
-    "unknownRole": "unknown"
+    "unknownRole": "unknown",
+    "sandboxModePerUser": "Per-user sandbox",
+    "sandboxModeWorkspace": "Shared sandbox"
   },
   "workspacesPage": {
     "title": "Workspaces"
@@ -2909,7 +2922,8 @@
           "sandbox": {
             "isolated": "The bot runs code and edits files in each IM user's own CubePlex sandbox — sandboxes are isolated between users.",
             "dedicated": "The bot runs code and edits files in a dedicated sandbox owned by this group conversation, isolated from any other work.",
-            "creator": "The bot runs code and edits files in the bot owner's personal sandbox, shared with that user's other CubePlex work."
+            "creator": "The bot runs code and edits files in the bot owner's personal sandbox, shared with that user's other CubePlex work.",
+            "workspaceShared": "The bot runs code and edits files in this workspace's shared sandbox, shared across all members, topics, and automations."
           }
         },
         "dm": {
@@ -2918,7 +2932,8 @@
           "topic": {
             "topic": "In CubePlex, each user's DM conversations are folded under their own topic folder named “{botName}” — visible only to that user.",
             "flat": "In CubePlex's chat history, DM conversations appear flat — no topic folder."
-          }
+          },
+          "baseWorkspaceShared": "The bot talks to each IM user privately and runs code in this workspace's shared sandbox."
         }
       },
       "action": {
@@ -2983,7 +2998,8 @@
       "conversation": "Group chat: {title}",
       "topic": "Topic: {title}",
       "deleted": "(deleted)",
-      "unknown": "Sandbox ({type})"
+      "unknown": "Sandbox ({type})",
+      "workspace": "Workspace shared sandbox"
     },
     "statusRunning": "Running",
     "statusPaused": "Paused",
@@ -2993,7 +3009,8 @@
     "statusOff": "Off",
     "statusFailed": "Failed",
     "statusStopping": "Stopping",
-    "statusUnknown": "Unknown"
+    "statusUnknown": "Unknown",
+    "adminOnlyHint": "Managed by workspace admins"
   },
   "onboarding": {
     "onboardingTitle": "Set up your workspace",
@@ -3004,6 +3021,11 @@
     "defaultWorkspaceName": "{name}'s Workspace",
     "createWorkspace": "Create workspace",
     "createOrgAndWorkspace": "Create organization and workspace",
-    "creating": "Creating…"
+    "creating": "Creating…",
+    "sandboxMode": "Sandbox mode",
+    "sandboxPerUserTitle": "Per-user isolated sandbox",
+    "sandboxPerUserDescription": "Each member gets their own private sandbox and storage.",
+    "sandboxWorkspaceTitle": "Workspace shared sandbox",
+    "sandboxWorkspaceDescription": "All members, topics, and automations share a single sandbox and storage. Cannot be changed after creation."
   }
 }

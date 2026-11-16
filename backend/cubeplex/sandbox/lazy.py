@@ -188,10 +188,11 @@ class LazySandbox(Sandbox):
 
     Args:
         manager: SandboxManager instance for get_or_create / release.
-        scope_type: Polymorphic scope discriminator (``'user'`` /
-            ``'conversation'`` / ``'topic'``).
+        scope_type: Polymorphic scope discriminator (``'workspace'`` /
+            ``'user'`` / ``'conversation'`` / ``'topic'``).
         scope_id: The corresponding scope id.
-        user_id: Audit + egress owner for the underlying sandbox row.
+        user_id: Audit + egress owner for the underlying sandbox row
+            (``None`` when ``scope_type == 'workspace'``).
         org_id: Active org scope for sandbox persistence.
         workspace_id: Active workspace scope for sandbox persistence.
         workdir: Working directory (used for prompt injection before sandbox exists).
@@ -203,7 +204,7 @@ class LazySandbox(Sandbox):
         manager: SandboxManager,
         scope_type: str,
         scope_id: str,
-        user_id: str,
+        user_id: str | None,
         org_id: str,
         workspace_id: str,
         workdir: str | None = None,
@@ -215,7 +216,7 @@ class LazySandbox(Sandbox):
         self._manager = manager
         self._scope_type = scope_type
         self._scope_id = scope_id
-        self._user_id = user_id
+        self._user_id: str | None = user_id
         self._org_id = org_id
         self._workspace_id = workspace_id
         if isinstance(provider, SandboxProvider):
@@ -304,6 +305,10 @@ class LazySandbox(Sandbox):
     @property
     def user_sandbox_id(self) -> str | None:
         return self._user_sandbox_id
+
+    @property
+    def owner_user_id(self) -> str | None:
+        return self._user_id
 
     async def ensure_created(self) -> None:
         """Create/connect the underlying sandbox so ``user_sandbox_id`` is set."""

@@ -17,6 +17,7 @@ from cubeplex.auth.jwt import auth_backend
 from cubeplex.config import config
 from cubeplex.models import User, Workspace
 from cubeplex.models.organization import Organization
+from cubeplex.sandbox.scope import WorkspaceSandboxMode
 
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
 _SLUG_DEDUP = re.compile(r"-{2,}")
@@ -97,6 +98,7 @@ async def _bootstrap_org_and_workspace(
     org_name: str,
     org_slug: str,
     workspace_name: str,
+    sandbox_mode: WorkspaceSandboxMode = "per_user",
 ) -> tuple[Organization, Workspace]:
     """Full first-owner bootstrap: org + workspace + memberships + AgentConfig + MCP + skills."""
     from cubeplex.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
@@ -113,7 +115,9 @@ async def _bootstrap_org_and_workspace(
     await OrganizationMembershipRepository(session).grant(
         user_id=user_id, org_id=org.id, role=OrgRole.OWNER
     )
-    ws = await WorkspaceRepository(session).create(org_id=org.id, name=workspace_name)
+    ws = await WorkspaceRepository(session).create(
+        org_id=org.id, name=workspace_name, sandbox_mode=sandbox_mode
+    )
     await MembershipRepository(session).grant(user_id=user_id, workspace_id=ws.id, role=Role.ADMIN)
     session.add(AgentConfig(org_id=org.id, workspace_id=ws.id))
     await enroll_workspace_in_org_wide_mcp(
@@ -130,6 +134,7 @@ async def _bootstrap_workspace_in_org(
     user_id: str,
     org_id: str,
     workspace_name: str,
+    sandbox_mode: WorkspaceSandboxMode = "per_user",
 ) -> Workspace:
     """Create a workspace in an existing org for a user who already has an org membership."""
     from cubeplex.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
@@ -137,7 +142,9 @@ async def _bootstrap_workspace_in_org(
     from cubeplex.models.agent_config import AgentConfig
     from cubeplex.repositories import MembershipRepository, WorkspaceRepository
 
-    ws = await WorkspaceRepository(session).create(org_id=org_id, name=workspace_name)
+    ws = await WorkspaceRepository(session).create(
+        org_id=org_id, name=workspace_name, sandbox_mode=sandbox_mode
+    )
     await MembershipRepository(session).grant(user_id=user_id, workspace_id=ws.id, role=Role.ADMIN)
     session.add(AgentConfig(org_id=org_id, workspace_id=ws.id))
     await enroll_workspace_in_org_wide_mcp(

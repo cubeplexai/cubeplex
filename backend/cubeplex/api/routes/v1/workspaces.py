@@ -20,6 +20,7 @@ from cubeplex.repositories import (
     OrganizationMembershipRepository,
     WorkspaceRepository,
 )
+from cubeplex.sandbox.scope import WorkspaceSandboxMode
 from cubeplex.services.conversation_execution import ConversationExecutionService
 from cubeplex.services.execution_cleanup import purge_workspace_execution_state
 from cubeplex.services.execution_signals import signal_stopped_runs
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 class WorkspaceCreate(BaseModel):
     name: str
     org_id: str
+    sandbox_mode: WorkspaceSandboxMode = "per_user"
 
 
 class WorkspaceUpdate(BaseModel):
@@ -80,6 +82,7 @@ async def list_my_workspaces(
                 "name": ws.name,
                 "org_id": ws.org_id,
                 "role": role,
+                "sandbox_mode": ws.sandbox_mode,
                 "last_activity_at": utc_isoformat(last_at) if last_at else None,
             }
         )
@@ -114,7 +117,7 @@ async def create_workspace(
 
     ws_repo = WorkspaceRepository(session)
     mem_repo = MembershipRepository(session)
-    ws = await ws_repo.create(org_id=org_id, name=body.name)
+    ws = await ws_repo.create(org_id=org_id, name=body.name, sandbox_mode=body.sandbox_mode)
     await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=Role.ADMIN)
     agent_cfg = AgentConfig(org_id=org_id, workspace_id=ws.id)
     session.add(agent_cfg)
@@ -122,7 +125,13 @@ async def create_workspace(
         session, org_id=org_id, workspace_id=ws.id, actor_user_id=user.id
     )
     await session.commit()
-    return {"id": ws.id, "name": ws.name, "org_id": ws.org_id}
+    return {
+        "id": ws.id,
+        "name": ws.name,
+        "org_id": ws.org_id,
+        "role": Role.ADMIN.value,
+        "sandbox_mode": ws.sandbox_mode,
+    }
 
 
 @router.patch("/{workspace_id}")
@@ -148,7 +157,13 @@ async def rename_workspace(
         ip=request.client.host if request.client else None,
         metadata={"new_name": body.name},
     )
-    return {"id": ws.id, "name": ws.name, "org_id": ws.org_id}
+    return {
+        "id": ws.id,
+        "name": ws.name,
+        "org_id": ws.org_id,
+        "role": ctx.role.value,
+        "sandbox_mode": ws.sandbox_mode,
+    }
 
 
 @router.post("/{workspace_id}/leave")

@@ -14,22 +14,28 @@ export function WorkspaceList() {
 
   return (
     <ul className="divide-y divide-border rounded-md border border-border">
-      {workspaces.map((w) => (
-        <li key={w.id} className="flex items-center justify-between px-4 py-3">
-          <div>
-            <div className="text-sm font-medium">{w.name}</div>
-            <div className="text-xs text-foreground/50">
-              {t('rolePrefix', { role: w.role ?? t('unknownRole') })}
+      {workspaces.map((w) => {
+        const modeLabel =
+          (w.sandbox_mode ?? 'per_user') === 'workspace'
+            ? t('sandboxModeWorkspace')
+            : t('sandboxModePerUser')
+        return (
+          <li key={w.id} className="flex items-center justify-between px-4 py-3">
+            <div>
+              <div className="text-sm font-medium">{w.name}</div>
+              <div className="text-xs text-muted-foreground">
+                {t('rolePrefix', { role: w.role ?? t('unknownRole') })} · {modeLabel}
+              </div>
             </div>
-          </div>
-          <Link
-            href={`/w/${w.id}`}
-            className="text-sm underline text-foreground/80 hover:text-foreground"
-          >
-            {t('open')}
-          </Link>
-        </li>
-      ))}
+            <Link
+              href={`/w/${w.id}`}
+              className="text-sm underline text-foreground/80 hover:text-foreground"
+            >
+              {t('open')}
+            </Link>
+          </li>
+        )
+      })}
     </ul>
   )
 }

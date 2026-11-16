@@ -18,7 +18,11 @@ A workspace is where your team collaborates with AI. This guide walks you throug
 ## Create a workspace
 
 1. Open the **workspace switcher** at the top of the sidebar and click **New workspace** (this opens the **Workspaces** page).
-2. Fill in the **Create workspace** form with a name and confirm.
+2. Enter a workspace name, choose a **sandbox mode**, and confirm:
+   - **Per-user isolated sandbox** (default) — each member gets their own private sandbox and storage.
+   - **Workspace shared sandbox** — all members, topics, and automations in the workspace share a single sandbox and `/workspace` storage.
+
+The same sandbox mode choice is available when creating your first workspace during onboarding. Sandbox mode is fixed when the workspace is created and cannot be changed afterward (you can check a workspace's mode at any time in **Settings → General**; see [Managing Sandboxes](../guides/conversations/sandboxes.md) for how each mode behaves).
 
 You are automatically assigned the **workspace admin** role in the new workspace.
 

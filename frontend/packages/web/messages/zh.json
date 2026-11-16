@@ -1508,7 +1508,11 @@
     "workspaceNameSaving": "保存中…",
     "general": {
       "title": "通用",
-      "description": "工作区名称、Agent 人设与工作区生命周期设置。"
+      "description": "工作区名称、Agent 人设与工作区生命周期设置。",
+      "sandboxModeLabel": "沙箱模式",
+      "sandboxModePerUser": "按成员隔离沙箱",
+      "sandboxModeWorkspace": "工作区共享沙箱",
+      "sandboxModeImmutableHint": "在创建工作区时确定，创建后无法更改。"
     },
     "persona": {
       "title": "Agent 人设",
@@ -1696,7 +1700,9 @@
       "btnCancel": "取消",
       "btnSave": "保存",
       "btnAdd": "添加",
-      "btnSaving": "保存中…"
+      "btnSaving": "保存中…",
+      "sharedWorkspaceAdminDescription": "此工作区使用共享沙盒，工作区变量会注入所有成员共用的共享沙盒。",
+      "sharedWorkspaceMemberDescription": "此工作区使用共享沙盒，环境变量作用于共享沙盒，由工作区管理员统一管理。"
     }
   },
   "wsMembers": {
@@ -1938,13 +1944,20 @@
     "nameLabel": "新工作区名称",
     "namePlaceholder": "例如：副业项目",
     "creating": "创建中…",
-    "submit": "创建工作区"
+    "submit": "创建工作区",
+    "sandboxModeLabel": "沙箱模式",
+    "sandboxPerUserTitle": "按成员隔离沙箱",
+    "sandboxPerUserDescription": "每位成员拥有独立的私有沙箱与存储空间。",
+    "sandboxWorkspaceTitle": "工作区共享沙箱",
+    "sandboxWorkspaceDescription": "所有成员、话题与自动化共享同一个沙箱与存储空间，创建后无法更改。"
   },
   "workspaceList": {
     "empty": "你还没有工作区。",
     "open": "打开",
     "rolePrefix": "角色：{role}",
-    "unknownRole": "未知"
+    "unknownRole": "未知",
+    "sandboxModePerUser": "按成员隔离沙箱",
+    "sandboxModeWorkspace": "工作区共享沙箱"
   },
   "workspacesPage": {
     "title": "工作区"
@@ -2909,7 +2922,8 @@
           "sandbox": {
             "isolated": "Bot 在每个 IM 用户对应的 CubePlex 沙盒里跑代码、改文件——不同用户之间互相隔离。",
             "dedicated": "Bot 在这段群会话的专属沙盒里跑代码、改文件，跟其他工作完全隔离。",
-            "creator": "Bot 在 bot 所属用户的个人沙盒里跑代码、改文件，跟该用户在 CubePlex 里其他工作共享文件和状态。"
+            "creator": "Bot 在 bot 所属用户的个人沙盒里跑代码、改文件，跟该用户在 CubePlex 里其他工作共享文件和状态。",
+            "workspaceShared": "Bot 在此工作区的共享沙盒里跑代码、改文件，与工作区内所有成员、话题和自动化共享文件与状态。"
           }
         },
         "dm": {
@@ -2918,7 +2932,8 @@
           "topic": {
             "topic": "在 CubePlex 里，每位 IM 用户跟 bot 的私信会话都收纳在他自己的「{botName}」话题文件夹下——这个话题只对该用户可见。",
             "flat": "在 CubePlex 的聊天历史里，私信会话直接平铺、不收纳到话题文件夹。"
-          }
+          },
+          "baseWorkspaceShared": "Bot 跟每位 IM 用户一对一对话，在此工作区的共享沙盒里跑代码、改文件。"
         }
       },
       "action": {
@@ -2983,7 +2998,8 @@
       "conversation": "群聊：{title}",
       "topic": "话题：{title}",
       "deleted": "（已删除）",
-      "unknown": "沙箱（{type}）"
+      "unknown": "沙箱（{type}）",
+      "workspace": "工作区共享沙箱"
     },
     "statusRunning": "运行中",
     "statusPaused": "已暂停",
@@ -2993,7 +3009,8 @@
     "statusOff": "已关闭",
     "statusFailed": "失败",
     "statusStopping": "停止中",
-    "statusUnknown": "未知"
+    "statusUnknown": "未知",
+    "adminOnlyHint": "仅工作区管理员可操作"
   },
   "onboarding": {
     "onboardingTitle": "设置你的工作区",
@@ -3004,6 +3021,11 @@
     "defaultWorkspaceName": "{name}的工作区",
     "createWorkspace": "创建工作区",
     "createOrgAndWorkspace": "创建组织和空间",
-    "creating": "创建中…"
+    "creating": "创建中…",
+    "sandboxMode": "沙箱模式",
+    "sandboxPerUserTitle": "按成员隔离沙箱",
+    "sandboxPerUserDescription": "每位成员拥有独立的私有沙箱与存储空间。",
+    "sandboxWorkspaceTitle": "工作区共享沙箱",
+    "sandboxWorkspaceDescription": "所有成员、话题与自动化共享同一个沙箱与存储空间，创建后无法更改。"
   }
 }

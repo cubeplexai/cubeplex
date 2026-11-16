@@ -9,7 +9,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { WarningCell } from './WarningCell'
 
-export type TableMode = 'org' | 'workspace-admin' | 'workspace-member'
+export type TableMode = 'org' | 'workspace-admin' | 'workspace-member' | 'workspace-readonly'
 
 interface Props {
   mode: TableMode
@@ -38,6 +38,7 @@ function ScopeBadge({ scope }: { scope: 'workspace' | 'user' }) {
 export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Props) {
   const t = useTranslations('wsSettings.sandboxEnv')
   const showScope = mode !== 'org'
+  const showActions = mode !== 'workspace-readonly'
 
   if (loading) {
     return (
@@ -56,7 +57,15 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
   }
 
   if (entries.length === 0) {
-    return <EmptyState icon={Variable} title={t('emptyTitle')} description={t('emptyHint')} />
+    return (
+      <EmptyState
+        icon={Variable}
+        title={t('emptyTitle')}
+        description={
+          mode === 'workspace-readonly' ? t('sharedWorkspaceMemberDescription') : t('emptyHint')
+        }
+      />
+    )
   }
 
   return (
@@ -82,9 +91,11 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
               <th className="px-4 py-2.5 text-left font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
                 {t('colWarnings')}
               </th>
-              <th className="px-4 py-2.5 text-right font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
-                {t('colActions')}
-              </th>
+              {showActions && (
+                <th className="px-4 py-2.5 text-right font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
+                  {t('colActions')}
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -111,26 +122,28 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
                 <td className="px-4 py-2.5">
                   <WarningCell warnings={entry.warnings} />
                 </td>
-                <td className="px-4 py-2.5 text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => onEdit(entry)}
-                    >
-                      {t('actionEdit')}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                      onClick={() => onDelete(entry)}
-                    >
-                      {t('actionDelete')}
-                    </Button>
-                  </div>
-                </td>
+                {showActions && (
+                  <td className="px-4 py-2.5 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => onEdit(entry)}
+                      >
+                        {t('actionEdit')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                        onClick={() => onDelete(entry)}
+                      >
+                        {t('actionDelete')}
+                      </Button>
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

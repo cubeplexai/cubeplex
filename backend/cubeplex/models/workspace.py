@@ -18,6 +18,11 @@ class Workspace(CubeplexBase, table=True):
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20)
     name: str = Field(max_length=255)
+    sandbox_mode: str = Field(
+        default="per_user",
+        max_length=20,
+        sa_column_kwargs={"server_default": "per_user"},
+    )
     archived_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

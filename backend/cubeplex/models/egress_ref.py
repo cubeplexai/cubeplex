@@ -22,7 +22,7 @@ class EgressRef(CubeplexBase, table=True):
     sandbox_id: str = Field(max_length=64)
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     workspace_id: str = Field(foreign_key="workspaces.id", max_length=20)
-    user_id: str = Field(foreign_key="users.id", max_length=20)
+    user_id: str | None = Field(default=None, foreign_key="users.id", max_length=20, nullable=True)
     run_id: str | None = Field(default=None, max_length=64, nullable=True)
     bindings: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     status: str = Field(default="valid", max_length=16)

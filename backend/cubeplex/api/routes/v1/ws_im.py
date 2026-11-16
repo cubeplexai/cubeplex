@@ -40,6 +40,7 @@ from cubeplex.models.membership import Role
 from cubeplex.models.user import User
 from cubeplex.repositories.membership import MembershipRepository
 from cubeplex.repositories.organization_membership import OrganizationMembershipRepository
+from cubeplex.sandbox.scope import get_workspace_sandbox_mode
 from cubeplex.services.im_connector import IMConnectorService
 from cubeplex.utils.time import utc_isoformat
 
@@ -553,11 +554,16 @@ async def update_bot_settings(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="workspace admin required",
         )
-    if body.routing_mode == "shared" and body.sandbox_mode is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="sandbox_mode is required when routing_mode is shared",
-        )
+    ws_mode = await get_workspace_sandbox_mode(session, ctx.workspace_id)
+    if ws_mode == "workspace":
+        effective_settings = body.model_copy(update={"sandbox_mode": None})
+    else:
+        if body.routing_mode == "shared" and body.sandbox_mode is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="sandbox_mode is required when routing_mode is shared",
+            )
+        effective_settings = body
     svc = _service(session, backend, ctx)
     account = await svc.get(account_id=account_id, workspace_id=ctx.workspace_id)
     if account is None:
@@ -565,13 +571,13 @@ async def update_bot_settings(
     # Teams' connector only emits per-sender scopes, so shared routing would
     # silently make one group conversation per sender. Reject it on the API
     # too, not just in the UI.
-    if body.routing_mode == "shared" and account.platform == "teams":
+    if effective_settings.routing_mode == "shared" and account.platform == "teams":
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="shared routing is not supported for this platform",
         )
     updated = await svc.update_bot_settings(
-        account_id=account_id, settings=body, workspace_id=ctx.workspace_id
+        account_id=account_id, settings=effective_settings, workspace_id=ctx.workspace_id
     )
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")

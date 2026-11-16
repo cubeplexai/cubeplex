@@ -10,6 +10,7 @@ import {
   unarchiveWorkspace,
   deleteWorkspace,
   type Workspace,
+  type WorkspaceSandboxMode,
 } from '../api/workspaces'
 
 export interface WorkspaceStore {
@@ -18,7 +19,7 @@ export interface WorkspaceStore {
   isLoading: boolean
   error: string | null
   fetchList(client: ApiClient): Promise<void>
-  create(client: ApiClient, name: string): Promise<Workspace>
+  create(client: ApiClient, name: string, sandboxMode?: WorkspaceSandboxMode): Promise<Workspace>
   rename(client: ApiClient, wsId: string, name: string): Promise<void>
   leave(client: ApiClient, wsId: string): Promise<LeaveWorkspaceResult>
   archive(client: ApiClient, wsId: string): Promise<void>
@@ -51,15 +52,20 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
   },
 
-  async create(client, name) {
+  async create(client, name, sandboxMode) {
     const { workspaces, lastOrgId } = get()
     const orgId = workspaces.length > 0 ? workspaces[0].org_id : lastOrgId
     if (!orgId) {
       throw new Error('Cannot create workspace: load workspaces first to determine org_id')
     }
-    const ws = await createWorkspace(client, { name, orgId })
-    set((s) => ({ workspaces: [ws, ...s.workspaces] }))
-    return ws
+    const ws = await createWorkspace(client, { name, orgId, sandboxMode })
+    const normalized: Workspace = {
+      ...ws,
+      role: ws.role ?? 'admin',
+      sandbox_mode: ws.sandbox_mode ?? sandboxMode ?? 'per_user',
+    }
+    set((s) => ({ workspaces: [normalized, ...s.workspaces] }))
+    return normalized
   },
 
   async rename(client, wsId, name) {

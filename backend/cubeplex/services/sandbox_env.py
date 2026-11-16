@@ -216,7 +216,7 @@ class SandboxEnvResolver:
     def __init__(self, repo: SandboxEnvRepository) -> None:
         self._repo = repo
 
-    async def resolve(self, *, workspace_id: str, user_id: str) -> list[ResolvedEnv]:
+    async def resolve(self, *, workspace_id: str, user_id: str | None) -> list[ResolvedEnv]:
         rows = await self._repo.list_for_resolution(workspace_id=workspace_id, user_id=user_id)
         best: dict[str, SandboxEnvVar] = {}
         for row in rows:
