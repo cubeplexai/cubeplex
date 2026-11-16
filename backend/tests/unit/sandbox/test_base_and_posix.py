@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -78,12 +79,14 @@ class _StubPosixSandbox(PosixSandboxMixin):
         run_user: str | None = "cubeplex",
         run_uid: int | None = 1000,
         run_gid: int | None = 1000,
+        workdir: str = "/workspace",
     ) -> None:
         self._caps = caps or SandboxCapabilities(terminal=True, browser=True)
         self._exit_code = exit_code
         self._run_user = run_user
         self._run_uid = run_uid
         self._run_gid = run_gid
+        self._workdir = workdir
         self.commands: list[tuple[str, bool]] = []
 
     @property
@@ -92,7 +95,7 @@ class _StubPosixSandbox(PosixSandboxMixin):
 
     @property
     def workdir(self) -> str:
-        return "/workspace"
+        return self._workdir
 
     @property
     def provider_name(self) -> str:
@@ -293,6 +296,37 @@ async def test_posix_start_terminal_clamps_nofile_and_waits_listen() -> None:
     raw_cmd, as_root = sb.commands[1]
     assert as_root is True
     assert raw_cmd.startswith("ulimit -n 65536 ")
+    assert "/proc/1/environ" in raw_cmd
     assert "/usr/bin/ttyd" in raw_cmd
     assert "/proc/net/tcp" in raw_cmd
     assert f":{Sandbox.TERMINAL_PORT:04X}" in raw_cmd
+
+
+def test_posix_terminal_shell_command_preserves_custom_home(tmp_path: Path) -> None:
+    import os
+    import shlex
+    import subprocess
+
+    sb = _StubPosixSandbox(
+        SandboxCapabilities(terminal=True),
+        run_uid=os.getuid(),
+        run_gid=os.getgid(),
+        workdir=str(tmp_path),
+    )
+    shell_cmd = sb._terminal_shell_command()  # noqa: SLF001
+    inner_script = shlex.split(shell_cmd)[-1].replace("exec bash -i", 'printf "%s" "$HOME"')
+
+    out_preserved = subprocess.check_output(
+        ["/bin/sh", "-c", inner_script],
+        env={"PATH": os.environ["PATH"], "HOME": "/workspace"},
+        text=True,
+    )
+    assert out_preserved == "/workspace"
+
+    if os.getuid() != 0:
+        out_fallback = subprocess.check_output(
+            ["/bin/sh", "-c", inner_script],
+            env={"PATH": os.environ["PATH"], "HOME": "/root"},
+            text=True,
+        )
+        assert out_fallback not in ("", "/", "/root")
