@@ -1,13 +1,22 @@
 import { toApiError, type ApiClient } from './client'
 import type { HardDeleteResult, LeaveWorkspaceResult } from './execution'
 
+export type WorkspaceSandboxMode = 'per_user' | 'workspace'
+
 export interface Workspace {
   id: string
   name: string
   org_id: string
   role?: 'admin' | 'member'
+  sandbox_mode?: WorkspaceSandboxMode
   /** ISO-8601 with UTC offset, or null if the workspace has no conversations yet. */
   last_activity_at?: string | null
+}
+
+export interface CreateWorkspaceInput {
+  name: string
+  orgId: string
+  sandboxMode?: WorkspaceSandboxMode
 }
 
 export async function listWorkspaces(client: ApiClient): Promise<Workspace[]> {
@@ -18,9 +27,16 @@ export async function listWorkspaces(client: ApiClient): Promise<Workspace[]> {
 
 export async function createWorkspace(
   client: ApiClient,
-  input: { name: string; orgId: string },
+  input: CreateWorkspaceInput,
 ): Promise<Workspace> {
-  const res = await client.post('/api/v1/workspaces', { name: input.name, org_id: input.orgId })
+  const body: { name: string; org_id: string; sandbox_mode?: WorkspaceSandboxMode } = {
+    name: input.name,
+    org_id: input.orgId,
+  }
+  if (input.sandboxMode !== undefined) {
+    body.sandbox_mode = input.sandboxMode
+  }
+  const res = await client.post('/api/v1/workspaces', body)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as Workspace
 }

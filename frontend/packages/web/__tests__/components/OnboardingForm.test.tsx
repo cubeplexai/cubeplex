@@ -89,7 +89,14 @@ describe('OnboardingForm', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'createOrgAndWorkspace' }))
 
-    await waitFor(() => expect(mocks.completeOnboarding).toHaveBeenCalledOnce())
+    await waitFor(() =>
+      expect(mocks.completeOnboarding).toHaveBeenCalledWith(mocks.client, {
+        org_name: 'Example Org',
+        org_slug: 'example-org',
+        workspace_name: 'Personal',
+        sandbox_mode: 'per_user',
+      }),
+    )
     expect(mocks.replace).not.toHaveBeenCalled()
 
     await waitFor(() => expect(mocks.loadMe).toHaveBeenCalledWith(mocks.client))
@@ -205,5 +212,33 @@ describe('OnboardingForm', () => {
 
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/login?next=%2Fonboarding'))
     expect(mocks.replace).not.toHaveBeenCalledWith('/w/ws-new')
+  })
+
+  it('submits sandbox_mode=workspace when workspace shared sandbox is selected', async () => {
+    mocks.completeOnboarding.mockResolvedValue({ workspace_id: 'ws-shared' })
+    mocks.loadMe.mockImplementation(async () => {
+      useAuthStore.setState({ user: { ...pendingUser, needs_onboarding: false } })
+    })
+
+    render(<OnboardingForm client={createApiClient('')} />)
+    fireEvent.change(screen.getByLabelText('orgName'), { target: { value: 'Example Org' } })
+    fireEvent.change(screen.getByLabelText('orgSlug'), { target: { value: 'example-org' } })
+    fireEvent.change(screen.getByLabelText('workspaceName'), {
+      target: { value: 'Shared Team' },
+    })
+    const radios = screen.getAllByRole('radio')
+    const sharedRadio = radios.find((r) => (r as HTMLInputElement).value === 'workspace')!
+    fireEvent.click(sharedRadio)
+    fireEvent.click(screen.getByRole('button', { name: 'createOrgAndWorkspace' }))
+
+    await waitFor(() =>
+      expect(mocks.completeOnboarding).toHaveBeenCalledWith(mocks.client, {
+        org_name: 'Example Org',
+        org_slug: 'example-org',
+        workspace_name: 'Shared Team',
+        sandbox_mode: 'workspace',
+      }),
+    )
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/w/ws-shared'))
   })
 })

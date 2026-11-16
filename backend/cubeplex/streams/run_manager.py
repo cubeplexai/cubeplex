@@ -10,7 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any, ClassVar, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict
 
 from cubeloop.providers.base import ReasoningControl
 from cubeloop.providers.fallback import FallbackBoundModel
@@ -4868,6 +4868,7 @@ class RunManager:
                     ]
 
                 from cubeplex.config import config as _sb_cfg
+                from cubeplex.sandbox.lazy import LazySandbox as _LazySandbox
                 from cubeplex.sandbox.provider import resolve_default_image
                 from cubeplex.sandbox.registry import (
                     UnknownSandboxProviderError,
@@ -4886,11 +4887,14 @@ class RunManager:
                     bool(str(_sb_cfg.get("sandbox.egress_exchange_host", "") or "").strip())
                     and _sb_provider.capabilities.egress_proxy
                 )
+                _sb_env_user_id = (
+                    sandbox.owner_user_id if isinstance(sandbox, _LazySandbox) else ctx.user_id
+                )
                 _sb_config_loader = make_session_loader(
                     session_factory=async_session_maker,
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
-                    user_id=ctx.user_id,
+                    user_id=_sb_env_user_id,
                     default_image=_sb_default_image,
                     egress_proxy_supported=_sb_egress_ok,
                 )
@@ -5273,40 +5277,29 @@ class RunManager:
                 pass
 
     @staticmethod
-    def _resolve_sandbox_target(ctx: RunContext) -> tuple[str, str, str]:
+    def _resolve_sandbox_target(
+        ctx: RunContext,
+        workspace_sandbox_mode: Literal["per_user", "workspace"] = "per_user",
+    ) -> tuple[str, str, str | None]:
         """Resolve ``(scope_type, scope_id, owner_user_id)`` for sandbox lookup.
 
-        Gated on ``sandbox_mode``, NOT participant count: a solo topic
-        with ``sandbox_mode='dedicated'`` must still resolve to the
-        topic-keyed sandbox, otherwise the sandbox flips identity the
-        instant a second participant joins and earlier files are
-        stranded in the creator's personal sandbox.
-
-        The third element is the user id that owns the underlying PVC
-        + acts as the audit subject on ``user_sandboxes.user_id`` — for
-        shared sandboxes (conversation/topic/creator-mode) this is the
-        creator, NOT the requesting actor, so a non-creator participant's
-        ops do not land in their own personal PVC.
+        Delegates to ``cubeplex.sandbox.scope.resolve_sandbox_target_pure`` so
+        agent runs, HTTP panels, and background task checks agree.
         """
-        if ctx.topic_id is None:
-            if ctx.is_group_chat:
-                # Standalone group chat: shared sandbox owned by the
-                # conversation creator (not the message sender). Fall back
-                # to ctx.user_id if the creator id wasn't plumbed through
-                # so legacy callers keep working.
-                owner = ctx.conversation_creator_user_id or ctx.user_id
-                return "conversation", ctx.conversation_id, owner
-            return "user", ctx.user_id, ctx.user_id
-        # Default an unspecified mode to "creator" so upgraded-from-1:1
-        # topics (sandbox_mode left null at upgrade time) still share one
-        # sandbox across participants. The matching default lives in
-        # ws_sandbox._resolve_sandbox_scope so panel and run agree.
-        effective_mode = ctx.sandbox_mode or "creator"
-        topic_owner = ctx.topic_creator_user_id or ctx.user_id
-        if effective_mode == "dedicated":
-            return "topic", ctx.topic_id, topic_owner
-        # creator-mode (and the implicit default): topic creator's user scope.
-        return "user", topic_owner, topic_owner
+        from cubeplex.sandbox.scope import resolve_sandbox_target_pure
+
+        target = resolve_sandbox_target_pure(
+            workspace_id=ctx.workspace_id,
+            workspace_sandbox_mode=workspace_sandbox_mode,
+            caller_user_id=ctx.user_id,
+            conversation_id=ctx.conversation_id,
+            is_group_chat=ctx.is_group_chat,
+            conversation_creator_user_id=ctx.conversation_creator_user_id,
+            topic_id=ctx.topic_id,
+            topic_sandbox_mode=ctx.sandbox_mode,
+            topic_creator_user_id=ctx.topic_creator_user_id,
+        )
+        return target.scope_type, target.scope_id, target.owner_user_id
 
     @classmethod
     async def _build_lazy_sandbox(
@@ -5319,16 +5312,41 @@ class RunManager:
         from cubeplex.db.engine import async_session_maker as _sb_session_maker
         from cubeplex.sandbox.lazy import LazySandbox
         from cubeplex.sandbox.manager import get_sandbox_manager
+        from cubeplex.sandbox.scope import resolve_sandbox_target_pure
         from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
 
         sandbox_manager = get_sandbox_manager()
-        scope_type, scope_id, owner_user_id = cls._resolve_sandbox_target(ctx)
-        provider, workdir = await sandbox_manager.resolve_scope_runtime(
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
-        )
+        scope_type: str
+        scope_id: str
+        owner_user_id: str | None
+        resolve_run_fn = getattr(sandbox_manager, "resolve_run_sandbox_runtime", None)
+        if callable(resolve_run_fn):
+            target, provider, workdir = await sandbox_manager.resolve_run_sandbox_runtime(
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                resolve_target=lambda ws_mode: resolve_sandbox_target_pure(
+                    workspace_id=ctx.workspace_id,
+                    workspace_sandbox_mode=ws_mode,
+                    caller_user_id=ctx.user_id,
+                    conversation_id=ctx.conversation_id,
+                    is_group_chat=ctx.is_group_chat,
+                    conversation_creator_user_id=ctx.conversation_creator_user_id,
+                    topic_id=ctx.topic_id,
+                    topic_sandbox_mode=ctx.sandbox_mode,
+                    topic_creator_user_id=ctx.topic_creator_user_id,
+                ),
+            )
+            scope_type = target.scope_type
+            scope_id = target.scope_id
+            owner_user_id = target.owner_user_id
+        else:
+            scope_type, scope_id, owner_user_id = cls._resolve_sandbox_target(ctx)
+            provider, workdir = await sandbox_manager.resolve_scope_runtime(
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+            )
         return LazySandbox(
             manager=sandbox_manager,
             scope_type=scope_type,

@@ -14,4 +14,5 @@ export interface MySandboxOut {
   image: string
   last_activity_at: string | null
   created_at: string
+  can_manage?: boolean
 }

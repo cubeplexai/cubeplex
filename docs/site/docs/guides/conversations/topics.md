@@ -24,7 +24,7 @@ There are three ways a topic comes into being. However it is created, the creato
 
 ### New Topic
 
-Click **New Topic** in the sidebar. Give it a title, invite workspace members, and choose the [sandbox mode](#the-shared-sandbox). CubePlex creates the topic with a first conversation and opens it.
+Click **New Topic** in the sidebar. Give it a title, invite workspace members, and (in per-user sandbox workspaces) choose the [sandbox mode](#the-shared-sandbox). CubePlex creates the topic with a first conversation and opens it.
 
 ![New Topic dialog with the sandbox choice visible](/img/conversations/topic-create-dialog.png)
 
@@ -68,7 +68,7 @@ The default participant limit is **20**. Topics created from a shared IM channel
 
 ## The shared sandbox
 
-A topic has one shared [code-execution sandbox](../../admin/sandbox.md), selected at creation time and not changeable afterward:
+In a workspace configured with **Per-user isolated sandboxes** (default), a topic has one shared [code-execution sandbox](../../admin/sandbox.md), selected at creation time and not changeable afterward:
 
 - **Dedicated topic sandbox** — a fresh, topic-owned sandbox with isolated storage. Files from the conversation you started in are not carried over. This is the default for **New Topic**.
 - **Reuse the creator's sandbox** — the topic runs in the owner's personal sandbox, preserving its files and environment. Every participant's code then runs in that environment. This is the default when upgrading an existing conversation.
@@ -77,7 +77,9 @@ A topic has one shared [code-execution sandbox](../../admin/sandbox.md), selecte
 In reuse mode, other members' actions execute inside the owner's personal sandbox. Use it only with people you trust with that environment.
 :::
 
-You can manage topic sandboxes from the workspace [Sandboxes](./sandboxes.md) settings tab.
+In a workspace configured with a **Workspace shared sandbox**, all conversations and topics already share the workspace's single sandbox and `/workspace` storage. Neither **New Topic** nor **Upgrade to topic** prompts for a topic sandbox mode; the topic automatically uses the workspace sandbox.
+
+You can view and manage sandboxes from the workspace [Sandboxes](./sandboxes.md) settings tab.
 
 ## Conversations inside a topic
 
@@ -98,6 +100,6 @@ A scheduled task can target a topic so recurring results post into a shared work
 
 ## Tips
 
-- Choose the sandbox mode deliberately; it cannot be changed later.
+- In per-user workspaces, choose the topic sandbox mode deliberately; it cannot be changed later.
 - Upgrade an existing 1:1 conversation when you need to preserve its history.
 - Use separate conversations for parallel workstreams. Use a [group chat](./group-chats.md) when everyone should stay in one thread.

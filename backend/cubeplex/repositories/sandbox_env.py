@@ -37,10 +37,13 @@ class SandboxEnvRepository:
             stmt = stmt.where(SandboxEnvVar.user_id == user_id)  # type: ignore[arg-type]
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def list_for_resolution(self, *, workspace_id: str, user_id: str) -> list[SandboxEnvVar]:
+    async def list_for_resolution(
+        self, *, workspace_id: str, user_id: str | None
+    ) -> list[SandboxEnvVar]:
         """All entries in this org that could apply to (workspace_id, user_id):
-        org-scope (any), workspace-scope for this workspace, user-scope for this
-        (workspace, user). Precedence is applied by the resolver, not here."""
+        org-scope (any), workspace-scope for this workspace, and (when user_id
+        is not None) user-scope for this (workspace, user). Precedence is
+        applied by the resolver, not here."""
         stmt = select(SandboxEnvVar).where(
             SandboxEnvVar.org_id == self.org_id,  # type: ignore[arg-type]
             SandboxEnvVar.status == "valid",  # type: ignore[arg-type]
@@ -51,7 +54,12 @@ class SandboxEnvRepository:
             for r in rows
             if (r.scope == "org")
             or (r.scope == "workspace" and r.workspace_id == workspace_id)
-            or (r.scope == "user" and r.workspace_id == workspace_id and r.user_id == user_id)
+            or (
+                user_id is not None
+                and r.scope == "user"
+                and r.workspace_id == workspace_id
+                and r.user_id == user_id
+            )
         ]
 
     async def get_in_scope(

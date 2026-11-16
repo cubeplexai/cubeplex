@@ -47,6 +47,7 @@ from cubeplex.models.conversation_participant import ConversationParticipant
 from cubeplex.models.im_connector import IMConnectorAccount, IMThreadLink
 from cubeplex.models.topic import Topic, TopicParticipant
 from cubeplex.repositories.im_connector import get_or_create_thread_link
+from cubeplex.sandbox.scope import get_workspace_sandbox_mode
 
 
 @dataclass(frozen=True)
@@ -85,13 +86,14 @@ async def resolve_im_conversation(
     """
     del origin  # currently unused; reserved for future observability.
 
+    ws_mode = await get_workspace_sandbox_mode(session, account.workspace_id)
     settings = load_bot_settings(account.config)
     # A DM is always 1:1 — never a shared/group conversation, even on a bot
     # configured for shared routing (the topic is the sender's, personal
     # memory applies, HITL binds to the one user).
     is_shared = settings.routing_mode == "shared" and scope_kind != "dm"
     should_topic = wants_topic(settings)
-    sandbox_mode: str | None = settings.sandbox_mode
+    sandbox_mode: str | None = None if ws_mode == "workspace" else settings.sandbox_mode
 
     # Source metadata stamped on both the Topic and the Conversation. Its
     # presence under "im" is the IM-origin marker read by worker/resume.
@@ -190,7 +192,7 @@ async def resolve_im_conversation(
             workspace_id=account.workspace_id,
             creator_user_id=account.acting_user_id if is_shared else effective_user_id,
             title=title,
-            sandbox_mode=sandbox_mode or "dedicated",
+            sandbox_mode=None if ws_mode == "workspace" else (sandbox_mode or "dedicated"),
             attributes=dict(im_attrs),
             max_participants=100 if is_shared else 20,
         )

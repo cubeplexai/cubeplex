@@ -25,3 +25,4 @@ class MySandboxOut(BaseModel):
     image: str
     last_activity_at: datetime | None
     created_at: datetime
+    can_manage: bool = True

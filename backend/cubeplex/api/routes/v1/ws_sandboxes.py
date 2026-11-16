@@ -21,9 +21,10 @@ from cubeplex.api.schemas.ws_sandbox import MySandboxOut
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import current_active_user, require_member
 from cubeplex.db import get_session
-from cubeplex.models import Conversation, Topic, User, UserSandbox
+from cubeplex.models import Conversation, Role, Topic, User, UserSandbox
 from cubeplex.sandbox.base import SandboxConflictError
 from cubeplex.sandbox.manager import get_sandbox_manager
+from cubeplex.sandbox.scope import get_workspace_sandbox_mode
 
 router = APIRouter(prefix="/ws/{workspace_id}/sandboxes", tags=["ws-sandboxes"])
 
@@ -34,20 +35,33 @@ async def list_my_sandboxes(
     actor: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[MySandboxOut]:
-    """List the caller's own sandbox entities in this workspace.
+    """List sandbox entities visible to the caller in this workspace.
 
-    Returns all live entities (``deleted_at IS NULL``), regardless of runtime
-    status — a terminated sandbox (container off, row alive) still shows up so
-    the user can restart or delete it.
+    In ``workspace`` shared-sandbox mode, lists the workspace-shared sandbox
+    to all workspace members with ``can_manage=(ctx.role == Role.ADMIN)``.
+    In ``per_user`` mode, lists live entities owned by ``actor.id``.
     """
-    stmt = (
-        select(UserSandbox)
-        .where(UserSandbox.org_id == ctx.org_id)  # type: ignore[arg-type]
-        .where(UserSandbox.workspace_id == ctx.workspace_id)  # type: ignore[arg-type]
-        .where(UserSandbox.user_id == actor.id)  # type: ignore[arg-type]
-        .where(UserSandbox.deleted_at.is_(None))  # type: ignore[union-attr]
-        .order_by(desc(UserSandbox.last_activity_at))  # type: ignore[arg-type]
-    )
+    ws_mode = await get_workspace_sandbox_mode(session, ctx.workspace_id)
+    if ws_mode == "workspace":
+        stmt = (
+            select(UserSandbox)
+            .where(UserSandbox.org_id == ctx.org_id)  # type: ignore[arg-type]
+            .where(UserSandbox.workspace_id == ctx.workspace_id)  # type: ignore[arg-type]
+            .where(UserSandbox.scope_type == "workspace")  # type: ignore[arg-type]
+            .where(UserSandbox.deleted_at.is_(None))  # type: ignore[union-attr]
+            .order_by(desc(UserSandbox.last_activity_at))  # type: ignore[arg-type]
+        )
+        can_manage = ctx.role == Role.ADMIN
+    else:
+        stmt = (
+            select(UserSandbox)
+            .where(UserSandbox.org_id == ctx.org_id)  # type: ignore[arg-type]
+            .where(UserSandbox.workspace_id == ctx.workspace_id)  # type: ignore[arg-type]
+            .where(UserSandbox.user_id == actor.id)  # type: ignore[arg-type]
+            .where(UserSandbox.deleted_at.is_(None))  # type: ignore[union-attr]
+            .order_by(desc(UserSandbox.last_activity_at))  # type: ignore[arg-type]
+        )
+        can_manage = True
     rows = list((await session.execute(stmt)).scalars().all())
 
     # Batch-resolve scope_title (avoid N+1). user-scope rows get None; a
@@ -95,6 +109,7 @@ async def list_my_sandboxes(
             image=r.image,
             last_activity_at=r.last_activity_at,
             created_at=r.created_at,
+            can_manage=can_manage,
         )
         for r in rows
     ]
@@ -138,11 +153,12 @@ async def _verify_ownership(
     user_sandbox_id: str,
     session: AsyncSession,
 ) -> UserSandbox:
-    """404 (not 403) if the sandbox doesn't exist OR belongs to another user.
+    """Verify sandbox lifecycle mutation permissions.
 
-    ``user_id == actor.id`` is the self-service boundary — don't leak
-    cross-user existence. Workspace admins wanting to inspect another user's
-    sandbox go through ``/api/v1/admin/sandboxes/*`` (require_org_admin).
+    - Missing / soft-deleted / wrong workspace -> 404.
+    - ``scope_type == 'workspace'`` -> requires workspace admin (403 otherwise).
+    - Personal / conversation / topic scope -> requires ``row.user_id == actor.id``
+      (404 otherwise so cross-user existence is never leaked).
     """
     row = (
         await session.execute(
@@ -150,10 +166,18 @@ async def _verify_ownership(
             .where(UserSandbox.id == user_sandbox_id)  # type: ignore[arg-type]
             .where(UserSandbox.org_id == ctx.org_id)  # type: ignore[arg-type]
             .where(UserSandbox.workspace_id == ctx.workspace_id)  # type: ignore[arg-type]
-            .where(UserSandbox.user_id == actor.id)  # type: ignore[arg-type]
             .where(UserSandbox.deleted_at.is_(None))  # type: ignore[union-attr]
         )
     ).scalar_one_or_none()
     if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sandbox not found")
+    if row.scope_type == "workspace":
+        if ctx.role != Role.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="workspace admin required",
+            )
+        return row
+    if row.user_id != actor.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sandbox not found")
     return row

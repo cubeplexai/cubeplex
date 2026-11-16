@@ -17,9 +17,11 @@ from cubeplex.auth.dependencies import require_admin, require_member
 from cubeplex.credentials.dependencies import get_encryption_backend
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.db.session import get_session
+from cubeplex.models.membership import Role
 from cubeplex.repositories.credential import CredentialRepository
 from cubeplex.repositories.sandbox_env import SandboxEnvRepository
 from cubeplex.repositories.sandbox_policy import SandboxPolicyRepository
+from cubeplex.sandbox.scope import get_workspace_sandbox_mode
 from cubeplex.sandbox_env.host_rules import HostPatternError
 from cubeplex.services.credential import CredentialService
 from cubeplex.services.sandbox_env import (
@@ -30,6 +32,10 @@ from cubeplex.services.sandbox_env import (
 from cubeplex.services.sandbox_policy_conflicts import deny_targets_for_cred
 
 router = APIRouter(prefix="/ws/{workspace_id}/sandbox-env", tags=["ws-sandbox-env"])
+
+_SHARED_WS_PERSONAL_ENV_DETAIL = (
+    "personal sandbox env vars are disabled in shared-sandbox workspaces"
+)
 
 
 async def _entry_with_warnings(session: AsyncSession, *, org_id: str, row: object) -> EnvEntryOut:
@@ -99,6 +105,9 @@ async def create_user_env(
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> EnvEntryOut:
+    ws_mode = await get_workspace_sandbox_mode(session, workspace_id)
+    if ws_mode == "workspace":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, _SHARED_WS_PERSONAL_ENV_DETAIL)
     try:
         entry_id = await _service(session, backend, ctx).create_entry(
             env_name=body.env_name,
@@ -123,8 +132,11 @@ async def create_user_env(
 async def list_workspace_env(
     workspace_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    ctx: Annotated[RequestContext, Depends(require_admin)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> EnvEntryListOut:
+    ws_mode = await get_workspace_sandbox_mode(session, workspace_id)
+    if ws_mode != "workspace" and ctx.role != Role.ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin role required")
     rows = await SandboxEnvRepository(session, org_id=ctx.org_id).list_scope(
         scope="workspace", workspace_id=workspace_id
     )
@@ -139,6 +151,9 @@ async def list_user_env(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> EnvEntryListOut:
+    ws_mode = await get_workspace_sandbox_mode(session, workspace_id)
+    if ws_mode == "workspace":
+        return EnvEntryListOut(entries=[])
     rows = await SandboxEnvRepository(session, org_id=ctx.org_id).list_scope(
         scope="user", workspace_id=workspace_id, user_id=ctx.user.id
     )
@@ -174,6 +189,9 @@ async def delete_user_env(
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> None:
+    ws_mode = await get_workspace_sandbox_mode(session, workspace_id)
+    if ws_mode == "workspace":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, _SHARED_WS_PERSONAL_ENV_DETAIL)
     row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     if not (
         row is not None
@@ -226,6 +244,9 @@ async def update_user_env(
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> EnvEntryOut:
+    ws_mode = await get_workspace_sandbox_mode(session, workspace_id)
+    if ws_mode == "workspace":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, _SHARED_WS_PERSONAL_ENV_DETAIL)
     row = await SandboxEnvRepository(session, org_id=ctx.org_id).get(entry_id)
     if not (
         row is not None

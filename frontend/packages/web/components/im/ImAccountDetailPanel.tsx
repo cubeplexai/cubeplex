@@ -7,6 +7,7 @@ import { Info } from 'lucide-react'
 import type { ImAccount, ImBotSettings, ImIdentityLink } from '@cubeplex/core'
 import {
   createApiClient,
+  useWorkspaceStore,
   wsGetImBotSettings,
   wsListIdentityLinks,
   wsUpdateImBotSettings,
@@ -48,6 +49,10 @@ export function ImAccountDetailPanel({
 }: Props): React.ReactElement {
   const t = useTranslations('im')
   const client = useMemo(() => createApiClient(''), [])
+  const workspaceSandboxMode = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === account.workspace_id)?.sandbox_mode ?? 'per_user',
+  )
+  const isWorkspaceSharedSandbox = workspaceSandboxMode === 'workspace'
   const [links, setLinks] = useState<ImIdentityLink[]>([])
   const [settings, setSettings] = useState<ImBotSettings | null>(null)
   const [savedSettings, setSavedSettings] = useState<ImBotSettings | null>(null)
@@ -128,11 +133,14 @@ export function ImAccountDetailPanel({
     try {
       const payload: ImBotSettings = {
         ...settings,
-        // Shared requires a sandbox_mode (default it); outside shared the
-        // field is hidden, so clear it — otherwise a stale value would still
-        // apply to isolated topics.
-        sandbox_mode:
-          settings.routing_mode === 'shared' ? settings.sandbox_mode || 'dedicated' : null,
+        // Shared requires a sandbox_mode in per_user workspaces (default it);
+        // in workspace-shared sandboxes or outside shared routing the field is
+        // hidden and cleared so stale values never apply.
+        sandbox_mode: isWorkspaceSharedSandbox
+          ? null
+          : settings.routing_mode === 'shared'
+            ? settings.sandbox_mode || 'dedicated'
+            : null,
       }
       const res = await wsUpdateImBotSettings(client, account.workspace_id, account.id, payload)
       // Drop the response if the panel has since switched accounts.
@@ -145,7 +153,7 @@ export function ImAccountDetailPanel({
     } finally {
       if (currentAccountId.current === savingAccountId) setSaving(false)
     }
-  }, [client, account.workspace_id, account.id, settings, t])
+  }, [client, account.workspace_id, account.id, isWorkspaceSharedSandbox, settings, t])
 
   const behaviorSummary = useMemo(() => {
     if (settings === null) return null
@@ -164,7 +172,9 @@ export function ImAccountDetailPanel({
     } else {
       group.push(t('botSettings.summary.group.topic.isolatedTopic'))
     }
-    if (shared) {
+    if (isWorkspaceSharedSandbox) {
+      group.push(t('botSettings.summary.group.sandbox.workspaceShared'))
+    } else if (shared) {
       group.push(
         settings.sandbox_mode === 'creator'
           ? t('botSettings.summary.group.sandbox.creator')
@@ -177,14 +187,16 @@ export function ImAccountDetailPanel({
     }
 
     const dm: string[] = [
-      t('botSettings.summary.dm.base'),
+      isWorkspaceSharedSandbox
+        ? t('botSettings.summary.dm.baseWorkspaceShared')
+        : t('botSettings.summary.dm.base'),
       flat
         ? t('botSettings.summary.dm.topic.flat')
         : t('botSettings.summary.dm.topic.topic', { botName }),
     ]
 
     return { group, dm }
-  }, [settings, botName, t])
+  }, [settings, botName, isWorkspaceSharedSandbox, t])
 
   return (
     <DetailPanel
@@ -286,10 +298,12 @@ export function ImAccountDetailPanel({
                           setSettings({
                             ...settings,
                             routing_mode,
-                            // Give shared a valid sandbox up front; clear it
+                            // Give shared a valid sandbox up front in per_user
+                            // workspaces; clear it in workspace-shared mode or
                             // when leaving shared (the field is hidden).
-                            sandbox_mode:
-                              routing_mode === 'shared'
+                            sandbox_mode: isWorkspaceSharedSandbox
+                              ? null
+                              : routing_mode === 'shared'
                                 ? settings.sandbox_mode || 'dedicated'
                                 : null,
                           })
@@ -317,7 +331,7 @@ export function ImAccountDetailPanel({
                         </>
                       )}
 
-                      {settings.routing_mode === 'shared' && (
+                      {settings.routing_mode === 'shared' && !isWorkspaceSharedSandbox && (
                         <>
                           <FieldLabel
                             htmlFor="im-sandbox-mode"

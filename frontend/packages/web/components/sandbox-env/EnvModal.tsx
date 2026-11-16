@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 
 export type ModalMode =
   | { kind: 'add-org' }
-  | { kind: 'add-workspace'; defaultScope: 'workspace' | 'user' }
+  | { kind: 'add-workspace'; defaultScope: 'workspace' | 'user'; allowPersonalScope?: boolean }
   | { kind: 'edit'; entry: EnvEntryOut }
 
 interface Props {
@@ -187,7 +187,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
           </div>
 
           {/* SCOPE */}
-          {mode.kind === 'add-workspace' && (
+          {mode.kind === 'add-workspace' && mode.allowPersonalScope !== false && (
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-medium">{t('fieldScope')}</Label>
               <div className="flex gap-3">

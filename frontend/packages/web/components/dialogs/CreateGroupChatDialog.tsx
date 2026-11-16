@@ -10,6 +10,7 @@ import {
   useAuthStore,
   useMemberStore,
   useTopicStore,
+  useWorkspaceStore,
   type WsMember,
 } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
@@ -41,6 +42,10 @@ export function CreateGroupChatDialog({
     return c
   }, [wsId])
   const currentUserId = useAuthStore((s) => s.user?.id ?? null)
+  const workspaceSandboxMode = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === wsId)?.sandbox_mode ?? 'per_user',
+  )
+  const isWorkspaceSharedSandbox = workspaceSandboxMode === 'workspace'
   const { wsMembers, loadWsMembers } = useMemberStore()
   const createTopic = useTopicStore((s) => s.create)
 
@@ -86,7 +91,7 @@ export function CreateGroupChatDialog({
     try {
       const { conversationId } = await createTopic(client, {
         title: title.trim(),
-        sandbox_mode: sandboxMode,
+        ...(isWorkspaceSharedSandbox ? {} : { sandbox_mode: sandboxMode }),
         member_user_ids: Array.from(selected),
       })
       onOpenChange(false)
@@ -175,33 +180,35 @@ export function CreateGroupChatDialog({
               />
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label>{tDialog('sandboxLabel')}</Label>
-              <RadioGroup
-                value={sandboxMode}
-                onValueChange={(v) => setSandboxMode((v as SandboxMode) ?? 'dedicated')}
-              >
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <RadioGroupItem value="dedicated" />
-                  <span>{t('sandboxDedicated')}</span>
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <RadioGroupItem value="creator" />
-                  <span>{t('sandboxCreator')}</span>
-                </label>
-              </RadioGroup>
-              {sandboxMode === 'creator' && (
-                <div
-                  className={cn(
-                    'flex items-start gap-2 rounded-md border border-warning-border',
-                    'bg-warning-surface px-2.5 py-2 text-xs text-warning-fg',
-                  )}
+            {!isWorkspaceSharedSandbox && (
+              <div className="flex flex-col gap-2">
+                <Label>{tDialog('sandboxLabel')}</Label>
+                <RadioGroup
+                  value={sandboxMode}
+                  onValueChange={(v) => setSandboxMode((v as SandboxMode) ?? 'dedicated')}
                 >
-                  <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-                  <span>{t('sandboxWarning')}</span>
-                </div>
-              )}
-            </div>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <RadioGroupItem value="dedicated" />
+                    <span>{t('sandboxDedicated')}</span>
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <RadioGroupItem value="creator" />
+                    <span>{t('sandboxCreator')}</span>
+                  </label>
+                </RadioGroup>
+                {sandboxMode === 'creator' && (
+                  <div
+                    className={cn(
+                      'flex items-start gap-2 rounded-md border border-warning-border',
+                      'bg-warning-surface px-2.5 py-2 text-xs text-warning-fg',
+                    )}
+                  >
+                    <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+                    <span>{t('sandboxWarning')}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {error && (
               <div

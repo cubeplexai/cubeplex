@@ -25,9 +25,9 @@ export function PersonaEditor({ wsId }: PersonaEditorProps) {
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const workspaceName = useWorkspaceStore(
-    (s) => s.workspaces.find((w) => w.id === wsId)?.name ?? '',
-  )
+  const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId))
+  const workspaceName = workspace?.name ?? ''
+  const sandboxMode = workspace?.sandbox_mode ?? 'per_user'
   const renameWorkspace = useWorkspaceStore((s) => s.rename)
   const [nameDraft, setNameDraft] = useState('')
   const [nameSaving, setNameSaving] = useState(false)
@@ -128,6 +128,18 @@ export function PersonaEditor({ wsId }: PersonaEditorProps) {
                 {nameSaving ? t('workspaceNameSaving') : t('workspaceNameSave')}
               </Button>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <h3 className="text-sm font-medium">{tGeneral('sandboxModeLabel')}</h3>
+            <div className="max-w-sm rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
+              {!workspace
+                ? '—'
+                : sandboxMode === 'workspace'
+                  ? tGeneral('sandboxModeWorkspace')
+                  : tGeneral('sandboxModePerUser')}
+            </div>
+            <p className="text-xs text-muted-foreground">{tGeneral('sandboxModeImmutableHint')}</p>
           </div>
 
           <div className="flex flex-col gap-3">

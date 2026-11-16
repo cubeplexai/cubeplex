@@ -142,7 +142,7 @@ async def resolve_env_inventory(
     *,
     org_id: str,
     workspace_id: str,
-    user_id: str,
+    user_id: str | None,
     egress_proxy_supported: bool | None = None,
 ) -> list[EnvInventoryItem]:
     """Winning valid rows only (same inject set as SandboxEnvResolver)."""
@@ -183,7 +183,7 @@ async def load_agent_view(
     *,
     org_id: str,
     workspace_id: str,
-    user_id: str,
+    user_id: str | None,
     default_image: str,
     max_rules: int = DEFAULT_MAX_RULES,
     max_env: int = DEFAULT_MAX_ENV,

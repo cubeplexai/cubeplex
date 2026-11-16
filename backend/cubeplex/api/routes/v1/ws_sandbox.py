@@ -37,6 +37,7 @@ from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
 from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.db.session import get_session
+from cubeplex.models.membership import Role
 from cubeplex.models.user_sandbox import UserSandbox
 from cubeplex.repositories.user_sandbox import UserSandboxRepository
 from cubeplex.sandbox import (
@@ -52,6 +53,7 @@ from cubeplex.sandbox import (
 from cubeplex.sandbox.manager import SandboxManager, get_sandbox_manager
 from cubeplex.sandbox.provider import SandboxProvider
 from cubeplex.sandbox.registry import UnknownSandboxProviderError
+from cubeplex.sandbox.scope import get_workspace_sandbox_mode, resolve_sandbox_target_pure
 from cubeplex.utils.http import content_disposition
 from cubeplex.utils.time import utc_isoformat
 
@@ -190,29 +192,31 @@ async def _assert_topic_access(
 
 
 async def _resolve_sandbox_scope(
-    session: AsyncSession, ctx: RequestContext, conversation_id: str | None
-) -> tuple[str, str, str]:
+    session: AsyncSession | None, ctx: RequestContext, conversation_id: str | None
+) -> tuple[str, str, str | None]:
     """Resolve ``(scope_type, scope_id, owner_user_id)`` for a sandbox lookup.
 
-    The third element is the user id that owns the underlying PVC + acts as
-    the audit subject for ``user_sandboxes.user_id`` — this is NOT
-    ``ctx.user.id`` when the caller is a non-creator participant in a
-    creator-mode topic or standalone group chat (otherwise their ops would
-    land in their own personal PVC instead of the shared sandbox owner's).
-
-    Mapping:
-    - no conversation: caller's personal sandbox owned by caller
-    - personal conv where caller is creator: caller-owned personal sandbox
-    - standalone group chat (no topic, is_group_chat=True): conversation-
-      keyed sandbox owned by the conversation creator
-    - dedicated-mode topic: topic-keyed sandbox owned by topic creator
-    - creator-mode topic: topic creator's personal sandbox owned by topic
-      creator
-
-    Raises 404 when the caller has no access to the conversation.
+    Conversation/topic ACL checks always run FIRST when ``conversation_id`` is
+    supplied so non-participants consistently receive 404 even in workspaces
+    with ``sandbox_mode == 'workspace'``. When ``session is None`` and
+    ``conversation_id is None`` (pure unit tests), treats the workspace as
+    ``'per_user'``.
     """
     if conversation_id is None:
-        return "user", ctx.user.id, ctx.user.id
+        try:
+            ws_mode = await get_workspace_sandbox_mode(session, ctx.workspace_id)
+        except LookupError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found") from exc
+        target = resolve_sandbox_target_pure(
+            workspace_id=ctx.workspace_id,
+            workspace_sandbox_mode=ws_mode,
+            caller_user_id=ctx.user.id,
+        )
+        return target.scope_type, target.scope_id, target.owner_user_id
+
+    if session is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
+
     from cubeplex.models.conversation import Conversation
     from cubeplex.models.topic import Topic
 
@@ -231,9 +235,19 @@ async def _resolve_sandbox_scope(
     creator_user_id_s = str(creator_user_id)
     if topic_id is None:
         await _assert_personal_or_conv_access(session, ctx, conversation_id, creator_user_id_s)
-        if is_group_chat:
-            return "conversation", conversation_id, creator_user_id_s
-        return "user", ctx.user.id, ctx.user.id
+        try:
+            ws_mode = await get_workspace_sandbox_mode(session, ctx.workspace_id)
+        except LookupError as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found") from exc
+        target = resolve_sandbox_target_pure(
+            workspace_id=ctx.workspace_id,
+            workspace_sandbox_mode=ws_mode,
+            caller_user_id=ctx.user.id,
+            conversation_id=conversation_id,
+            is_group_chat=bool(is_group_chat),
+            conversation_creator_user_id=creator_user_id_s,
+        )
+        return target.scope_type, target.scope_id, target.owner_user_id
 
     await _assert_topic_access(session, ctx, str(topic_id), conversation_id)
     topic_stmt = select(
@@ -249,10 +263,20 @@ async def _resolve_sandbox_scope(
     mode, topic_creator_user_id = topic_row
     topic_creator_user_id_s = str(topic_creator_user_id or ctx.user.id)
 
-    effective_mode = mode or "creator"
-    if effective_mode == "dedicated":
-        return "topic", str(topic_id), topic_creator_user_id_s
-    return "user", topic_creator_user_id_s, topic_creator_user_id_s
+    try:
+        ws_mode = await get_workspace_sandbox_mode(session, ctx.workspace_id)
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found") from exc
+    target = resolve_sandbox_target_pure(
+        workspace_id=ctx.workspace_id,
+        workspace_sandbox_mode=ws_mode,
+        caller_user_id=ctx.user.id,
+        conversation_id=conversation_id,
+        topic_id=str(topic_id),
+        topic_sandbox_mode=mode,
+        topic_creator_user_id=topic_creator_user_id_s,
+    )
+    return target.scope_type, target.scope_id, target.owner_user_id
 
 
 @router.get("/status", response_model=SandboxStatusOut)
@@ -780,6 +804,11 @@ async def reset_sandbox_rootfs(
     scope_type, scope_id, _owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
+    if scope_type == "workspace" and ctx.role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace admin required",
+        )
     repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
     row = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
     if row is None or row.status in ("terminated", "failed"):

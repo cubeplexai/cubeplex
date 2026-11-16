@@ -1,9 +1,11 @@
 import { toApiError, type ApiClient } from './client'
+import type { WorkspaceSandboxMode } from './workspaces'
 
 export interface OnboardingRequest {
   org_name?: string
   org_slug?: string
   workspace_name: string
+  sandbox_mode?: WorkspaceSandboxMode
 }
 
 export interface OnboardingResponse {

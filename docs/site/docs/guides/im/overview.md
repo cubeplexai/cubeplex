@@ -90,7 +90,7 @@ See each platform's setup guide for the exact command form.
 In a group chat, you can choose whether everyone shares one conversation or each person gets their own:
 
 - **Isolated** (default) — each sender in a group gets their own private conversation with the bot. This is the default for any channel without an explicit binding.
-- **Shared** — everyone in the channel talks to one shared conversation. Shared mode requires choosing a sandbox mode for the channel.
+- **Shared** — everyone in the channel talks to one shared conversation. In per-user sandbox workspaces, Shared mode requires choosing a sandbox mode (**Dedicated** or **Creator's sandbox**) for the channel. In workspaces configured with a **Workspace shared sandbox**, both Shared and Isolated conversations automatically run in the workspace's shared sandbox, so IM bot settings do not prompt for a sandbox mode.
 
 Bindings are managed per account from the workspace IM settings.
 

@@ -44,6 +44,8 @@ When a 1:1 conversation becomes a group chat:
 
 This is a conversation-level change. It does not create a topic, and it does not create additional conversations. If the team needs a fresh isolated environment and multiple workstreams, create a topic instead.
 
+In workspaces configured with a **Workspace shared sandbox**, 1:1 conversations and group chats already share the workspace's single sandbox and `/workspace` storage across all members, so inviting participants continues using that workspace sandbox (while still turning off personal memory injection for the shared thread).
+
 :::caution
 Invite only people you trust with the conversation's current sandbox. Existing files and environment settings remain available to the group.
 :::

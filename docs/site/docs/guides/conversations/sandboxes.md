@@ -9,22 +9,30 @@ A sandbox is the isolated environment where the agent runs code for a conversati
 
 ![Workspace settings Sandboxes tab showing a running sandbox with Restart and Delete actions](/img/conversations/sandboxes-panel.png)
 
+## Workspace sandbox modes
+
+Each workspace permanently chooses one of two sandbox modes when it is created (see [Workspace Setup](../../getting-started/workspace-setup.md)):
+
+- **Per-user isolated sandbox** (default) — each member gets their own personal sandbox, plus separate sandboxes for group chats or dedicated topics they create. In **Settings → Sandboxes**, you see and manage only the sandboxes you own.
+- **Workspace shared sandbox** — every member, conversation, group chat, topic, and automation in the workspace shares a single sandbox and `/workspace` storage. All workspace members can see this sandbox in **Settings → Sandboxes** and use its files, terminal, and browser, while **Restart** and **Delete** require the **workspace admin** role (non-admin members see a **Managed by workspace admins** note instead of action buttons).
+
 ## Opening the Sandboxes tab
 
-Go to your workspace and open **Settings** → **Sandboxes**. The list shows only sandboxes that belong to you in this workspace. To see every member's sandboxes, an org admin uses the admin-level sandbox observability view instead (see [Sandbox administration](../../admin/sandbox.md)).
+Go to your workspace and open **Settings** → **Sandboxes**. In a per-user workspace, the list shows only sandboxes that belong to you; in a shared-sandbox workspace, it shows the workspace's shared sandbox to every member. To see sandboxes across all workspaces and members, an org admin uses the admin-level sandbox observability view instead (see [Sandbox administration](../../admin/sandbox.md)).
 
 ## What each row shows
 
-Every active sandbox you own gets one row, regardless of whether its container is currently running:
+Every active sandbox visible to you gets one row, regardless of whether its container is currently running:
 
 - **Status** — a badge showing the sandbox's runtime state (see below).
-- **Scope label** — which conversation or topic the sandbox belongs to:
+- **Scope label** — what the sandbox belongs to:
+  - **Workspace shared sandbox** — the single sandbox shared across everyone in a shared-sandbox workspace.
   - **Your workspace sandbox** — your personal sandbox, used by 1:1 conversations that aren't part of a topic.
   - **Group chat: `{title}`** — a standalone group conversation (not in a topic).
   - **Topic: `{title}`** — a sandbox belonging to a [topic](./topics.md).
   - **(deleted)** — the conversation or topic that owned this sandbox has been deleted. The sandbox row remains so you can clean it up.
 - **Last active** — when the agent last ran code in it.
-- **Restart** and **Delete** — the two actions (see below).
+- **Restart** and **Delete** — the two lifecycle actions (see below). On a **Workspace shared sandbox**, only workspace admins can trigger **Restart** or **Delete**.
 
 A sandbox with status **Off** (container stopped) still appears in the list. That is intentional: the sandbox's files are still on disk, and it will start back up the next time you send a message in its conversation. You do not need to restart it manually before chatting.
 
@@ -82,7 +90,9 @@ Restart and Delete first block new work on the recorded sandbox instance and req
 
 ## Storage isolation
 
-Each sandbox gets its own isolated storage — files in one sandbox are never visible to another. This holds for the [shared sandboxes in topics](./topics.md) too: a topic with the **Dedicated topic sandbox** mode gets a fresh sandbox with its own storage, separate from the creator's personal sandbox and from every other topic. Files from the conversation you upgraded are **not** carried over into a dedicated topic sandbox.
+In a **per-user** workspace, each sandbox gets its own isolated storage — files in one sandbox are never visible to another. This holds for the [shared sandboxes in topics](./topics.md) too: a topic with the **Dedicated topic sandbox** mode gets a fresh sandbox with its own storage, separate from the creator's personal sandbox and from every other topic. Files from the conversation you upgraded are **not** carried over into a dedicated topic sandbox.
+
+In a **workspace shared sandbox** workspace, the entire workspace intentionally shares one `/workspace` volume across all members, conversations, topics, and automations, while still remaining isolated from every other workspace.
 
 ## When sandboxes appear and disappear
 
@@ -114,4 +124,4 @@ The agent will not silently overwrite an existing file (replacing one has to be 
 
 - **Restart before Delete.** If a sandbox is misbehaving but you want to keep its files, Restart it. Reach for Delete only when you genuinely want a clean slate.
 - **Clean up orphaned rows.** If a row shows **(deleted)** as its scope, the conversation or topic that owned it is gone. Delete the row to stop paying for an idle container.
-- **You can only manage your own.** Each member sees only their own sandboxes. To audit sandbox usage across the workspace, an org admin uses the admin observability view (see [Sandbox administration](../../admin/sandbox.md)).
+- **Permissions follow the sandbox mode.** In per-user workspaces, each member sees and manages only their own sandboxes. In workspace-shared workspaces, all members can view and use the shared sandbox, while workspace admins manage **Restart** and **Delete**. To audit sandbox usage across the organization, an org admin uses the admin observability view (see [Sandbox administration](../../admin/sandbox.md)).

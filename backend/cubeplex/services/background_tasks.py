@@ -27,6 +27,7 @@ from cubeplex.repositories.background_task import (
 )
 from cubeplex.repositories.conversation import ConversationRepository
 from cubeplex.repositories.sandbox_command import MAX_INFLIGHT_COMMANDS, SandboxCommandCapError
+from cubeplex.sandbox.scope import get_workspace_sandbox_mode, resolve_sandbox_target_pure
 from cubeplex.services.background_task_lifecycle import BackgroundTaskLifecycle
 
 
@@ -346,12 +347,9 @@ class BackgroundTaskService(BackgroundTaskLifecycle):
     async def _validate_sandbox_scope(
         self, conversation: Conversation, sandbox: UserSandbox, actor_user_id: str
     ) -> None:
-        if conversation.topic_id is None:
-            if conversation.is_group_chat:
-                expected = ("conversation", conversation.id, conversation.creator_user_id)
-            else:
-                expected = ("user", actor_user_id, actor_user_id)
-        else:
+        ws_mode = await get_workspace_sandbox_mode(self.session, self.workspace_id)
+        topic: Topic | None = None
+        if conversation.topic_id is not None:
             topic = (
                 await self.session.execute(
                     select(Topic).where(
@@ -364,10 +362,17 @@ class BackgroundTaskService(BackgroundTaskLifecycle):
             ).scalar_one_or_none()
             if topic is None:
                 raise LookupError("sandbox topic not found")
-            expected = (
-                ("topic", topic.id, topic.creator_user_id)
-                if topic.sandbox_mode == "dedicated"
-                else ("user", topic.creator_user_id, topic.creator_user_id)
-            )
+        target = resolve_sandbox_target_pure(
+            workspace_id=self.workspace_id,
+            workspace_sandbox_mode=ws_mode,
+            caller_user_id=actor_user_id,
+            conversation_id=conversation.id,
+            is_group_chat=conversation.is_group_chat,
+            conversation_creator_user_id=conversation.creator_user_id,
+            topic_id=topic.id if topic is not None else None,
+            topic_sandbox_mode=topic.sandbox_mode if topic is not None else None,
+            topic_creator_user_id=topic.creator_user_id if topic is not None else None,
+        )
+        expected = (target.scope_type, target.scope_id, target.owner_user_id)
         if (sandbox.scope_type, sandbox.scope_id, sandbox.user_id) != expected:
             raise LookupError("sandbox not found for this conversation")
