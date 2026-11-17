@@ -107,4 +107,172 @@ describe('commit on injected_message', () => {
     useMessageStore.getState().clearStream()
     expect(useMessageStore.getState().pendingSteers).toEqual({})
   })
+
+  it('preserves subagent tool_result when child subagent stream bucket is absent', () => {
+    const apply = useMessageStore.getState().__applyEvent
+    useMessageStore.setState({
+      streamAgents: {},
+      toolStartedMap: {},
+      toolResultMap: {},
+      currentRunId: 'run-1',
+      isStreaming: true,
+      streamingConversationId: 'c1',
+    })
+    apply({
+      type: 'tool_call',
+      timestamp: '2026-11-17T12:00:00.000Z',
+      data: {
+        tool_call_id: 'call_sub_1',
+        name: 'subagent',
+        arguments: { role: 'Researcher', task: 'check logs' },
+      },
+      agent_id: null,
+      agent_name: null,
+    })
+    apply({
+      type: 'tool_result',
+      timestamp: '2026-11-17T12:00:01.000Z',
+      data: {
+        tool_call_id: 'call_sub_1',
+        name: 'subagent',
+        content: '[error: invalid subagent arguments]',
+        details: { subagent_events: [] },
+      } as never,
+      agent_id: null,
+      agent_name: null,
+    })
+
+    applyInjected('c1', 'retry differently', 's-sub-fallback')
+
+    const toolMsgs = useMessageStore.getState().messages.c1.filter((m) => m.role === 'tool_result')
+    expect(toolMsgs).toHaveLength(1)
+    expect(toolMsgs[0]).toMatchObject({
+      tool_call_id: 'call_sub_1',
+      tool_name: 'subagent',
+      run_id: 'run-1',
+      content: [{ type: 'text', text: '[error: invalid subagent arguments]' }],
+    })
+  })
+
+  it('dedupes subagent tool_result and ignores late subagent events after steer commit', () => {
+    const apply = useMessageStore.getState().__applyEvent
+    useMessageStore.setState({
+      streamAgents: {},
+      toolStartedMap: {},
+      toolResultMap: {},
+      currentRunId: 'run-1',
+      isStreaming: true,
+      streamingConversationId: 'c1',
+    })
+    apply({
+      type: 'tool_call',
+      timestamp: '2026-11-17T12:00:00.000Z',
+      data: {
+        tool_call_id: 'call_sub_2',
+        name: 'subagent',
+        arguments: { role: 'Reviewer', task: 'inspect diff' },
+      },
+      agent_id: null,
+      agent_name: null,
+    })
+    apply({
+      type: 'text_delta',
+      timestamp: '2026-11-17T12:00:00.500Z',
+      data: { content: 'subagent report' },
+      agent_id: 'subagent:call_sub_2',
+      agent_name: 'Reviewer',
+    })
+    apply({
+      type: 'tool_result',
+      timestamp: '2026-11-17T12:00:00.600Z',
+      data: {
+        tool_call_id: 'inner_tc_1',
+        name: 'execute',
+        content: 'running...',
+      } as never,
+      agent_id: 'subagent:call_sub_2',
+      agent_name: 'Reviewer',
+    })
+    apply({
+      type: 'tool_result',
+      timestamp: '2026-11-17T12:00:00.800Z',
+      data: {
+        tool_call_id: 'inner_tc_1',
+        name: 'execute',
+        content: 'exit 0',
+      } as never,
+      agent_id: 'subagent:call_sub_2',
+      agent_name: 'Reviewer',
+    })
+    apply({
+      type: 'tool_result',
+      timestamp: '2026-11-17T12:00:01.000Z',
+      data: {
+        tool_call_id: 'call_sub_2',
+        name: 'subagent',
+        content: 'subagent report',
+      } as never,
+      agent_id: null,
+      agent_name: null,
+    })
+
+    applyInjected('c1', 'continue', 's-sub-live')
+
+    const preSteerTools = useMessageStore
+      .getState()
+      .messages.c1.filter((m) => m.role === 'tool_result')
+    expect(preSteerTools).toHaveLength(1)
+    expect(preSteerTools[0].metadata?.subagent_events?.tool_results).toEqual([
+      expect.objectContaining({
+        tool_call_id: 'inner_tc_1',
+        tool_name: 'execute',
+        content: 'exit 0',
+      }),
+    ])
+
+    // Late async drain from _drain_subagent_citation_queue lands after steer commit.
+    apply({
+      type: 'text_delta',
+      timestamp: '2026-11-17T12:00:01.200Z',
+      data: { content: ' trailing' },
+      agent_id: 'subagent:call_sub_2',
+      agent_name: 'Reviewer',
+    })
+    apply({
+      type: 'text_delta',
+      timestamp: '2026-11-17T12:00:01.500Z',
+      data: { content: 'post-steer text' },
+      agent_id: null,
+      agent_name: null,
+    })
+    applyInjected('c1', 'second steer', 's-sub-live-2')
+
+    const allSubTools = useMessageStore
+      .getState()
+      .messages.c1.filter((m) => m.role === 'tool_result' && m.tool_call_id === 'call_sub_2')
+    expect(allSubTools).toHaveLength(1)
+  })
+
+  it('does not steal or wipe another conversation stream when called off-owner', () => {
+    useMessageStore.setState({
+      streamingConversationId: 'other-conv',
+      currentRunId: 'run-other',
+      streamAgents: {
+        main: {
+          text: 'other conv text',
+          toolCalls: [],
+          toolResults: [],
+          thinking: '',
+          blocks: [{ type: 'text', text: 'other conv text' }],
+          name: null,
+        },
+      },
+    })
+
+    applyInjected('c1', 'do X', 's-off-owner')
+
+    const s = useMessageStore.getState()
+    expect(s.messages.c1.map((m) => m.role)).toEqual(['user', 'user'])
+    expect(s.streamAgents.main.text).toBe('other conv text')
+  })
 })
