@@ -269,4 +269,165 @@ describe('conversation baseline refresh', () => {
     const ids = useMessageStore.getState().messages[conversationId].map((message) => message.id)
     expect(ids).toEqual(['message-1', 'history-notice'])
   })
+
+  it('replaces pre-steer assistant/tool turns instead of sorting duplicates to the bottom', async () => {
+    fetchMock.mockResolvedValueOnce(response('W/"one"'))
+    await useMessageStore.getState().loadMessages(client, conversationId)
+
+    // Simulate a live run that emits text + a tool call (with a running update
+    // followed by completion), drains a steer via __commitTurnAndInject, then
+    // emits the final answer and completes.
+    useMessageStore.setState({
+      isStreaming: true,
+      streamingConversationId: conversationId,
+      currentRunId: 'run-steered',
+      streamAgents: {},
+      toolStartedMap: {},
+      toolResultMap: {},
+      turnUsage: { [conversationId]: null },
+    })
+    const apply = useMessageStore.getState().__applyEvent
+    apply({
+      type: 'text_delta',
+      timestamp: '2026-11-17T12:14:00.000Z',
+      data: { content: 'Preparing file before secret arrives.' },
+      agent_id: null,
+      agent_name: null,
+    })
+    apply({
+      type: 'tool_call',
+      timestamp: '2026-11-17T12:14:08.625Z',
+      data: {
+        tool_call_id: 'call_write_1',
+        name: 'write',
+        arguments: { file_path: '/workspace/tmp/report_stage4.md', content: '# Report' },
+      },
+      agent_id: null,
+      agent_name: null,
+    })
+    apply({
+      type: 'tool_result',
+      timestamp: '2026-11-17T12:14:08.700Z',
+      data: {
+        tool_call_id: 'call_write_1',
+        name: 'write',
+        content: 'writing...',
+        details: { status: 'running' },
+      } as never,
+      agent_id: null,
+      agent_name: null,
+    })
+    apply({
+      type: 'tool_result',
+      timestamp: '2026-11-17T12:14:08.931Z',
+      data: {
+        tool_call_id: 'call_write_1',
+        name: 'write',
+        content: 'Successfully wrote /workspace/tmp/report_stage4.md',
+        details: {
+          status: 'exited',
+          tool_started_at: '2026-11-17T12:14:08.702Z',
+          tool_ended_at: '2026-11-17T12:14:08.929Z',
+        },
+      } as never,
+      agent_id: null,
+      agent_name: null,
+    })
+
+    useMessageStore.getState().__commitTurnAndInject(conversationId, {
+      content: 'secret-value',
+      steer_id: 'steer-1',
+    })
+
+    // Post-steer final answer finalized at the end of the run.
+    useMessageStore.setState((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: [
+          ...(s.messages[conversationId] ?? []),
+          {
+            id: 'local-final-assistant',
+            role: 'assistant',
+            run_id: 'run-steered',
+            timestamp: 1794918005,
+            content: [{ type: 'text', text: 'Sent and verified.' }],
+          },
+        ],
+      },
+      streamAgents: {},
+      isStreaming: false,
+      streamingConversationId: null,
+      currentRunId: null,
+    }))
+
+    // Baseline refresh returns persisted rows; cubeloop steer UserMessages have
+    // timestamp: null, which previously pushed unsequenced orphans to the tail.
+    fetchMock.mockResolvedValueOnce(
+      response('W/"two"', {
+        messages: [
+          ...payload.messages,
+          {
+            id: 'persisted-pre-assistant',
+            seq: 2,
+            role: 'assistant',
+            run_id: 'run-steered',
+            timestamp: 1794917545,
+            content: [
+              { type: 'text', text: 'Preparing file before secret arrives.' },
+              {
+                type: 'tool_call',
+                id: 'call_write_1',
+                name: 'write',
+                arguments: { file_path: '/workspace/tmp/report_stage4.md', content: '# Report' },
+              },
+            ],
+          },
+          {
+            id: 'persisted-pre-tool',
+            seq: 3,
+            role: 'tool_result',
+            run_id: 'run-steered',
+            tool_call_id: 'call_write_1',
+            tool_name: 'write',
+            timestamp: 1794917648,
+            content: [{ type: 'text', text: 'Successfully wrote /workspace/tmp/report_stage4.md' }],
+            details: {
+              status: 'exited',
+              tool_started_at: '2026-11-17T12:14:08.702Z',
+              tool_ended_at: '2026-11-17T12:14:08.929Z',
+            },
+          },
+          {
+            id: 'persisted-steer',
+            seq: 4,
+            role: 'user',
+            run_id: 'run-steered',
+            timestamp: null,
+            content: [{ type: 'text', text: 'secret-value' }],
+            metadata: { steer_id: 'steer-1' },
+          },
+          {
+            id: 'persisted-final-assistant',
+            seq: 5,
+            role: 'assistant',
+            run_id: 'run-steered',
+            timestamp: 1794917978,
+            content: [{ type: 'text', text: 'Sent and verified.' }],
+          },
+        ],
+      }),
+    )
+
+    await useMessageStore.getState().loadMessages(client, conversationId, refreshOptions)
+
+    const after = useMessageStore.getState()
+    expect(after.messages[conversationId].map((m) => m.id)).toEqual([
+      'message-1',
+      'persisted-pre-assistant',
+      'persisted-pre-tool',
+      'persisted-steer',
+      'persisted-final-assistant',
+    ])
+    expect(after.toolResultMap.call_write_1?.details).toMatchObject({ status: 'exited' })
+  })
 })

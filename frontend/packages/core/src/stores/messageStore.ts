@@ -1461,11 +1461,19 @@ function buildTurnMessages(
   }
 
   // Persist main-agent tool results into history so the just-finished message
-  // remains interactive after streamingConversationId clears. Skip subagent
-  // tool results — those get richer messages from the loop below.
+  // remains interactive after streamingConversationId clears. Deduplicate by
+  // tool_call_id so streaming ToolExecutionUpdateEvent chunks collapse to the
+  // single persisted checkpoint row, and skip subagent tool results — those
+  // get richer messages from the loop below.
+  const latestToolResults = new Map<string, ToolResultEvent>()
   for (const tr of mainStream.toolResults) {
     const tcId = tr.data.tool_call_id
-    if (!tcId || tr.data.tool_name === 'subagent') continue
+    const toolName = tr.data.tool_name ?? (tr.data as unknown as { name?: string }).name ?? ''
+    if (!tcId || toolName === 'subagent') continue
+    latestToolResults.set(tcId, tr)
+  }
+  for (const [tcId, tr] of latestToolResults) {
+    const toolName = tr.data.tool_name ?? (tr.data as unknown as { name?: string }).name ?? ''
     const mapEntry = toolResultMap[tcId]
     const receivedAtMs =
       mapEntry?.receivedAt ?? (tr.timestamp ? new Date(tr.timestamp).getTime() : Date.now())
@@ -1474,7 +1482,7 @@ function buildTurnMessages(
       role: 'tool_result',
       content: [{ type: 'text', text: tr.data.content ?? mapEntry?.content ?? '' }],
       tool_call_id: tcId,
-      tool_name: tr.data.tool_name ?? '',
+      tool_name: toolName,
       timestamp: receivedAtMs / 1000,
       run_id: runId,
       metadata: {},
@@ -2965,16 +2973,25 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     //   - backfill `run_id` on the optimistic user message we appended
     //     above, so the user message is forkable too.
     const handleRunId = (runId: string) => {
-      set((s) => ({
-        currentRunId: runId,
-        stopAllStatus: { ...s.stopAllStatus, [conversationId]: null },
-        messages: {
-          ...s.messages,
-          [conversationId]: (s.messages[conversationId] ?? []).map((m) =>
-            m.id === userMessage.id ? { ...m, run_id: runId } : m,
-          ),
-        },
-      }))
+      set((s) => {
+        const list = s.messages[conversationId] ?? []
+        const startIdx = list.findIndex((m) => m.id === userMessage.id)
+        return {
+          currentRunId: runId,
+          stopAllStatus: { ...s.stopAllStatus, [conversationId]: null },
+          messages: {
+            ...s.messages,
+            [conversationId]:
+              startIdx < 0
+                ? list
+                : list.map((m, idx) =>
+                    idx >= startIdx && m.seq === undefined && !m.run_id
+                      ? { ...m, run_id: runId }
+                      : m,
+                  ),
+          },
+        }
+      })
     }
     const streamOptions = {
       ...(options ?? {}),
@@ -3428,10 +3445,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       return
     }
 
+    const runId = state.streamingConversationId === conversationId ? state.currentRunId : null
     const { assistantMessage, toolMessages } = buildTurnMessages(
       state.streamAgents,
       state.toolResultMap,
       state.turnUsage[conversationId] ?? null,
+      'stop',
+      runId,
     )
     const mainHasContent = !!assistantMessage && assistantMessage.content.length > 0
 
@@ -3440,6 +3460,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       role: 'user',
       content: [{ type: 'text', text: data.content }],
       timestamp: Date.now() / 1000,
+      ...(runId ? { run_id: runId } : {}),
       metadata: {
         steer_id: data.steer_id,
         // Group-chat sender identity (present only for group chats) so the

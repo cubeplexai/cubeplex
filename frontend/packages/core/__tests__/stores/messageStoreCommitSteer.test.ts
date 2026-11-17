@@ -35,6 +35,7 @@ describe('commit on injected_message', () => {
       pendingSteers: { c1: [{ steerId: 's1', text: 'do X' }] },
       toolResultMap: {},
       turnUsage: { c1: null },
+      currentRunId: 'run-1',
       isStreaming: true,
       streamingConversationId: 'c1',
     })
@@ -45,6 +46,8 @@ describe('commit on injected_message', () => {
     const s = useMessageStore.getState()
     const roles = s.messages.c1.map((m) => m.role)
     expect(roles).toEqual(['user', 'assistant', 'user'])
+    expect(s.messages.c1[1].run_id).toBe('run-1')
+    expect(s.messages.c1[2].run_id).toBe('run-1')
     expect(s.messages.c1[2].content[0]).toMatchObject({ type: 'text', text: 'do X' })
     expect(s.messages.c1[2].metadata?.steer_id).toBe('s1')
     expect(s.streamAgents.main.text).toBe('')
