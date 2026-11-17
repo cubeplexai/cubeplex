@@ -171,3 +171,31 @@ async def test_cancelled_wait_only_closes_a_prior_valid_binding(
     assert first_declaration.status == "invalid"
     assert recheck.status == "cancelled"
     assert "stopped" in recheck.reason
+
+
+async def test_background_task_wait_validate_tasks(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+) -> None:
+    task_id = await _background_task(db_session, reservation_context)
+    validator = await _validator(session_factory, db_session, reservation_context)
+
+    empty = await validator.validate_tasks([])
+    assert empty.status == "invalid"
+
+    missing = await validator.validate_tasks(["bgt-nonexistent"])
+    assert missing.status == "invalid"
+
+    valid = await validator.validate_tasks([task_id])
+    assert valid.status == "valid", valid.reason
+
+    await service(db_session).request_task_stop(
+        task_id=task_id,
+        reason=TaskStopReason.user_stop,
+        now=NOW + timedelta(seconds=1),
+    )
+    await db_session.commit()
+
+    stopped = await validator.validate_tasks([task_id])
+    assert stopped.status == "invalid"

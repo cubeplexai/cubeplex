@@ -28,9 +28,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from cubeloop.agent.types import (
+    AfterToolCallContext,
+    AfterToolCallResult,
     AgentContext,
     AgentTool,
     AgentToolResult,
@@ -39,9 +41,11 @@ from cubeloop.agent.types import (
 )
 from cubeloop.hitl import HitlCancelled, HitlChannel, HitlTimedOut
 from cubeloop.middleware.base import Middleware
+from cubeloop.middleware.todo import TaskWaitValidation
 from cubeloop.providers.base import (
     AssistantMessage,
     TextContent,
+    ToolCall,
     ToolResultMessage,
     UserMessage,
 )
@@ -1750,8 +1754,12 @@ def _make_kill_execute_tool(
     )
 
 
+class _TaskWaitValidator(Protocol):
+    async def validate_tasks(self, task_ids: list[str]) -> TaskWaitValidation: ...
+
+
 def _make_wait_for_tasks_tool(
-    validate_task_wait: Any | None = None,
+    validate_task_wait: _TaskWaitValidator | None = None,
 ) -> AgentTool[_WaitForTasksArgs]:
     async def _wait(
         tool_call_id: str,
@@ -1761,6 +1769,11 @@ def _make_wait_for_tasks_tool(
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
+        if validate_task_wait is None:
+            return AgentToolResult(
+                content=[TextContent(text="Error: Task waiting is not configured by the host.")],
+                is_error=True,
+            )
         ids = [task_id.strip() for task_id in args.task_ids]
         if any(not task_id for task_id in ids) or len(ids) != len(set(ids)):
             return AgentToolResult(
@@ -1769,20 +1782,19 @@ def _make_wait_for_tasks_tool(
                 ],
                 is_error=True,
             )
-        if validate_task_wait is not None:
-            try:
-                validation = await validate_task_wait.validate_tasks(ids)
-            except Exception:
-                logger.exception("wait_for_tasks validation failed for {}", ids)
-                return AgentToolResult(
-                    content=[TextContent(text="Error: The host could not validate task waiting.")],
-                    is_error=True,
-                )
-            if validation.status != "valid":
-                return AgentToolResult(
-                    content=[TextContent(text=f"Error: Cannot wait on tasks. {validation.reason}")],
-                    is_error=True,
-                )
+        try:
+            validation = await validate_task_wait.validate_tasks(ids)
+        except Exception:
+            logger.exception("wait_for_tasks validation failed for {}", ids)
+            return AgentToolResult(
+                content=[TextContent(text="Error: The host could not validate task waiting.")],
+                is_error=True,
+            )
+        if validation.status != "valid":
+            return AgentToolResult(
+                content=[TextContent(text=f"Error: Cannot wait on tasks. {validation.reason}")],
+                is_error=True,
+            )
         return AgentToolResult(
             content=[
                 TextContent(
@@ -2316,7 +2328,7 @@ class SandboxMiddleware(Middleware):
         admission_id: str | None = None,
         owner_token: str | None = None,
         session_factory: Any | None = None,
-        validate_task_wait: Any | None = None,
+        validate_task_wait: _TaskWaitValidator | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
@@ -3163,6 +3175,34 @@ class SandboxMiddleware(Middleware):
                 hitl_trace={"decision": "human_deny", "reason": answer.reason},
             )
         raise ValueError("edit decision not supported for sandbox confirm v1")
+
+    async def after_tool_call(
+        self,
+        ctx: AfterToolCallContext,
+        *,
+        signal: asyncio.Event | None = None,
+    ) -> AfterToolCallResult | None:
+        """Reject parallel calls to ``wait_for_tasks`` so it never fails silently to suspend."""
+        del signal
+        if ctx.tool_call.name != "wait_for_tasks":
+            return None
+        tool_calls = [
+            block for block in ctx.assistant_message.content if isinstance(block, ToolCall)
+        ]
+        if len(tool_calls) <= 1:
+            return None
+        return AfterToolCallResult(
+            content=[
+                TextContent(
+                    text=(
+                        "Error: wait_for_tasks cannot be called in parallel with other tools. "
+                        "Finish or wait for the other tool results, then call wait_for_tasks alone."
+                    )
+                )
+            ],
+            is_error=True,
+            terminate=False,
+        )
 
     async def transform_system_prompt(
         self,

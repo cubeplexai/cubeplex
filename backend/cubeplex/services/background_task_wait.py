@@ -28,7 +28,7 @@ class _WaitFact:
 
 
 class BackgroundTaskWaitValidator:
-    """Fail-closed host callback for ``write_todos.wait_for_tasks``."""
+    """Fail-closed host validator for background-task wait declarations."""
 
     def __init__(
         self,
@@ -49,6 +49,8 @@ class BackgroundTaskWaitValidator:
 
     async def validate_tasks(self, task_ids: list[str]) -> TaskWaitValidation:
         """Validate that ``task_ids`` are deliverable background tasks in this generation."""
+        if not task_ids:
+            return self._invalid("no task IDs provided")
         facts = await self._load_facts(task_ids)
         if len(facts) != len(task_ids):
             return self._invalid("one or more background tasks were not found")
