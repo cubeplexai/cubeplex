@@ -7,6 +7,7 @@ decodes it and checks the email against the logged-in cubeplex user.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -14,6 +15,20 @@ import jwt
 
 _ISS = "cubeplex:im-link"
 _TTL = timedelta(hours=24)
+_EMAIL_SHAPE_RE = re.compile(r"^[^\s@:]+@[^\s@]+\.[^\s@]+$")
+
+
+def resolve_mailto_email(label: str | None, target: str) -> str:
+    """Return the visible link label when it looks like an email; else the target.
+
+    IM clients auto-linkify typed emails into ``[label](mailto:target)`` or
+    ``<mailto:target|label>``. Editing the visible text can leave the ``mailto:``
+    target stale, so an email-shaped label is the user's actual input.
+    """
+    cleaned_label = (label or "").strip()
+    if cleaned_label and _EMAIL_SHAPE_RE.match(cleaned_label):
+        return cleaned_label
+    return target.strip()
 
 
 @dataclass(frozen=True, slots=True)

@@ -35,5 +35,13 @@ class TestParseLinkCommand:
         result = parse_link_command("/link <mailto:chris@example.com>")
         assert result == "chris@example.com"
 
+    def test_slack_edited_mailto_prefers_visible_email(self) -> None:
+        result = parse_link_command("/link <mailto:typo@example.com|correct@example.com>")
+        assert result == "correct@example.com"
+
+    def test_slack_non_email_label_falls_back_to_mailto_target(self) -> None:
+        result = parse_link_command("/link <mailto:chris@example.com|Chris>")
+        assert result == "chris@example.com"
+
     def test_case_normalized(self) -> None:
         assert parse_link_command("/link Chris@Example.COM") == "chris@example.com"

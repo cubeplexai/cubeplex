@@ -12,11 +12,13 @@ from typing import Any
 
 from loguru import logger
 
+from cubeplex.im.link import resolve_mailto_email
+
 # Slack auto-linkifies bare emails as ``<mailto:user@host|user@host>``
 # (or just ``<mailto:user@host>``). Unwrap before matching so typed and
 # auto-linked forms both work.
 _SLACK_MAILTO_RE = re.compile(
-    r"<mailto:([^|>]+)(?:\|[^>]*)?>",
+    r"<mailto:([^|>]+)(?:\|([^>]*))?>",
     re.IGNORECASE,
 )
 _LINK_RE = re.compile(
@@ -26,7 +28,10 @@ _LINK_RE = re.compile(
 
 
 def _unwrap_slack_mailto(text: str) -> str:
-    return _SLACK_MAILTO_RE.sub(r"\1", text)
+    return _SLACK_MAILTO_RE.sub(
+        lambda m: resolve_mailto_email(m.group(2), m.group(1)),
+        text,
+    )
 
 
 def parse_link_command(text: str) -> str | None:
