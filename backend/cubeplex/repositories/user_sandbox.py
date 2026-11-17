@@ -375,6 +375,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             "status": "terminated",
             "cleanup_action": None,
             "cleanup_requested_at": None,
+            "in_use_until": None,
         }
         if clear_sandbox_id:
             values["sandbox_id"] = None
@@ -391,6 +392,54 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         await self.session.execute(stmt)
         await self.session.commit()
 
+    async def mark_terminated_from_restart(self, record_id: str) -> bool:
+        """Atomically settle ``kill_pending`` (restart) -> ``terminated`` without clobbering delete."""
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
+                UserSandbox.status == "kill_pending",  # type: ignore[arg-type]
+                UserSandbox.cleanup_action == "restart",  # type: ignore[arg-type]
+            )
+            .values(
+                status="terminated",
+                sandbox_id=None,
+                cleanup_action=None,
+                cleanup_requested_at=None,
+                in_use_until=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
+
+    async def mark_terminated_from_resuming(self, record_id: str) -> bool:
+        """Atomically settle ``resuming`` -> ``terminated`` when remote instance is gone."""
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
+                UserSandbox.status == "resuming",  # type: ignore[arg-type]
+                col(UserSandbox.cleanup_action).is_(None),
+            )
+            .values(
+                status="terminated",
+                sandbox_id=None,
+                in_use_until=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
+
     async def mark_kill_pending(self, record_id: str) -> None:
         """Mark a sandbox as kill_pending (provider kill failed, retry later)."""
         stmt = (
@@ -399,8 +448,10 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.id == record_id,  # type: ignore[arg-type]
                 UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
+                UserSandbox.status != "terminated",  # type: ignore[arg-type]
             )
-            .values(status="kill_pending")
+            .values(status="kill_pending", in_use_until=None)
             .execution_options(synchronize_session=False)
         )
         await self.session.execute(stmt)
@@ -461,12 +512,11 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
                 UserSandbox.status == "paused",  # type: ignore[arg-type]
                 UserSandbox.paused_at.is_not(None),  # type: ignore[union-attr]
-                col(UserSandbox.paused_ttl_seconds) > 0,
                 text("paused_at + :ttl * INTERVAL '1 second' <= NOW()").bindparams(
                     ttl=paused_ttl_seconds
                 ),
             )
-            .values(status="terminated")
+            .values(status="terminated", in_use_until=None)
         )
         result = cast(CursorResult[Any], await self.session.execute(stmt))
         await self.session.commit()
@@ -516,30 +566,45 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         await self.session.commit()
         return bool(result.rowcount == 1)
 
-    async def mark_paused(self, record_id: str, *, paused_at: datetime | None = None) -> bool:
+    async def mark_paused(
+        self,
+        record_id: str,
+        *,
+        paused_at: datetime | None = None,
+        paused_ttl_seconds: int | None = None,
+    ) -> bool:
         """Move to ``paused`` from ``pausing``, ``resuming``, or ``kill_pending`` (restart).
 
         Clears ``cleanup_action`` and ``cleanup_requested_at`` when settling a
         pause-based restart, without overwriting a concurrent ``delete`` request.
         """
+        values: dict[str, Any] = {
+            "status": "paused",
+            "paused_at": paused_at or datetime.now(UTC),
+            "cleanup_action": None,
+            "cleanup_requested_at": None,
+            "in_use_until": None,
+        }
+        if paused_ttl_seconds is not None:
+            values["paused_ttl_seconds"] = paused_ttl_seconds
         stmt = (
             update(UserSandbox)
             .where(
                 UserSandbox.id == record_id,  # type: ignore[arg-type]
                 UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
                 or_(
-                    UserSandbox.status.in_(("pausing", "resuming")),  # type: ignore[attr-defined]
+                    UserSandbox.status.in_(("pausing", "resuming"))  # type: ignore[attr-defined]
+                    & or_(
+                        col(UserSandbox.cleanup_action).is_(None),
+                        UserSandbox.cleanup_action == "restart",  # type: ignore[arg-type]
+                    ),
                     (UserSandbox.status == "kill_pending")  # type: ignore[arg-type]
                     & (UserSandbox.cleanup_action == "restart"),
                 ),
             )
-            .values(
-                status="paused",
-                paused_at=paused_at or datetime.now(UTC),
-                cleanup_action=None,
-                cleanup_requested_at=None,
-            )
+            .values(**values)
             .execution_options(synchronize_session=False)
         )
         result = cast(CursorResult[Any], await self.session.execute(stmt))
@@ -547,20 +612,20 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         return bool(result.rowcount == 1)
 
     async def mark_pausing_from_restart(self, record_id: str) -> bool:
-        """Move ``kill_pending`` (restart) -> ``pausing`` for async-pause providers."""
+        """Move ``kill_pending`` (restart) -> ``pausing`` while preserving ``cleanup_action``."""
         stmt = (
             update(UserSandbox)
             .where(
                 UserSandbox.id == record_id,  # type: ignore[arg-type]
                 UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
                 UserSandbox.status == "kill_pending",  # type: ignore[arg-type]
                 UserSandbox.cleanup_action == "restart",  # type: ignore[arg-type]
             )
             .values(
                 status="pausing",
-                cleanup_action=None,
-                cleanup_requested_at=None,
+                in_use_until=None,
             )
             .execution_options(synchronize_session=False)
         )
@@ -701,6 +766,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             .values(
                 status="kill_pending",
                 cleanup_action=action,
+                in_use_until=None,
                 cleanup_requested_at=case(
                     (
                         col(UserSandbox.cleanup_action) == action,
@@ -735,27 +801,32 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         Sweeps ``running``, ``provisioning``, and ``kill_pending`` rows so
         neither a crash mid-create nor a failed kill can orphan a sandbox.
         """
-        stmt = (
-            self._scoped_select()
-            .where(UserSandbox.status.in_(self._REAPABLE_STATUSES))  # type: ignore[attr-defined]
-            .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
+        stmt = self._scoped_select().where(
+            or_(
+                UserSandbox.status == "kill_pending",  # type: ignore[arg-type]
+                UserSandbox.status.in_(("provisioning", "running"))  # type: ignore[attr-defined]
+                & text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"),
+            )
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     @classmethod
     async def list_expired_system(cls, session: AsyncSession) -> list[UserSandbox]:
-        """System-scope query: find expired sandboxes across all workspaces.
+        """System-scope query: find expired or ``kill_pending`` sandboxes across all workspaces.
 
         Only for background reapers — never expose to user-facing code. Sweeps
-        ``provisioning`` rows (crashed reserve) and ``kill_pending`` rows
-        (failed provider kill) in addition to ``running``.
+        ``kill_pending`` rows immediately without waiting for idle TTL, plus
+        idle ``provisioning`` (crashed reserve) and ``running`` rows.
         """
-        stmt = (
-            select(UserSandbox)
-            .where(UserSandbox.status.in_(cls._REAPABLE_STATUSES))  # type: ignore[attr-defined]
-            .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
-            .where(text("(in_use_until IS NULL OR in_use_until < NOW())"))
+        stmt = select(UserSandbox).where(
+            col(UserSandbox.deleted_at).is_(None),
+            or_(
+                UserSandbox.status == "kill_pending",  # type: ignore[arg-type]
+                UserSandbox.status.in_(("provisioning", "running"))  # type: ignore[attr-defined]
+                & text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()")
+                & text("(in_use_until IS NULL OR in_use_until < NOW())"),
+            ),
         )
         result = await session.execute(stmt.execution_options(populate_existing=True))
         return list(result.scalars().all())
@@ -830,18 +901,35 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         await self.session.commit()
 
     @classmethod
-    async def list_paused_expired_system(cls, session: AsyncSession) -> list[UserSandbox]:
+    async def list_paused_expired_system(
+        cls,
+        session: AsyncSession,
+        *,
+        paused_ttl_seconds: int | None = None,
+    ) -> list[UserSandbox]:
         """System-scope query: ``paused`` rows past their paused-TTL.
 
         Used by the reap-paused background loop to terminate stale paused
-        sandboxes.
+        sandboxes. When ``paused_ttl_seconds`` is supplied, uses the manager's
+        configured TTL uniformly; otherwise falls back to each row's column.
         """
+        if paused_ttl_seconds is not None and paused_ttl_seconds <= 0:
+            return []
         stmt = (
             select(UserSandbox)
+            .where(col(UserSandbox.deleted_at).is_(None))
             .where(UserSandbox.status == "paused")  # type: ignore[arg-type]
             .where(UserSandbox.paused_at.is_not(None))  # type: ignore[union-attr]
-            .where(col(UserSandbox.paused_ttl_seconds) > 0)
-            .where(text("paused_at + paused_ttl_seconds * INTERVAL '1 second' <= NOW()"))
         )
+        if paused_ttl_seconds is not None:
+            stmt = stmt.where(
+                text("paused_at + :ttl * INTERVAL '1 second' <= NOW()").bindparams(
+                    ttl=paused_ttl_seconds
+                )
+            )
+        else:
+            stmt = stmt.where(col(UserSandbox.paused_ttl_seconds) > 0).where(
+                text("paused_at + paused_ttl_seconds * INTERVAL '1 second' <= NOW()")
+            )
         result = await session.execute(stmt.execution_options(populate_existing=True))
         return list(result.scalars().all())

@@ -658,3 +658,70 @@ async def test_cleanup_expired_skips_pause_capable_running_rows_when_pause_on_id
 
     pause_provider.terminate.assert_not_awaited()
     nopause_provider.terminate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resume_record_instance_gone_marks_terminated_and_aborts_on_concurrent_restart(
+    mock_encryption_backend: Any,
+) -> None:
+    """_resume_record must settle gone instances to terminated and refuse to clobber restarts."""
+    from datetime import UTC, timedelta
+
+    from cubeplex.sandbox.base import SandboxInstanceGoneError
+    from cubeplex.sandbox.provider import ProviderInstanceState
+
+    factory, session = _make_session_factory()
+    registry, provider = _make_registry(pause_supported=True)
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
+    mgr._exchange_host = "egress.internal"
+    mgr._revoke_egress = AsyncMock()  # type: ignore[method-assign]
+
+    initial_ts = datetime.now(UTC) - timedelta(minutes=10)
+    record = _make_record()
+    record.status = "paused"
+    record.paused_at = initial_ts
+
+    # 1. SandboxInstanceGoneError -> mark_terminated_from_resuming + revoke_egress
+    repo = MagicMock()
+    repo.mark_resuming = AsyncMock(return_value=True)
+    repo.mark_terminated_from_resuming = AsyncMock(return_value=True)
+    provider.resume = AsyncMock(side_effect=SandboxInstanceGoneError(record.sandbox_id))
+    res = await mgr._resume_record(
+        session,
+        repo,
+        record,
+        org_id=record.org_id,
+        workspace_id=record.workspace_id,
+        user_id=record.user_id,
+    )
+    assert res is None
+    repo.mark_terminated_from_resuming.assert_awaited_once_with(record.id)
+    mgr._revoke_egress.assert_awaited_once_with(session, record.sandbox_id)
+
+    # 2. Concurrent restart paused the provider while resume was in flight -> abort without mark_resuming
+    backend = MagicMock()
+    backend.close = AsyncMock()
+    provider.resume = AsyncMock(return_value=backend)
+    provider.inspect_state = AsyncMock(return_value=ProviderInstanceState.PAUSED)
+    repo2 = MagicMock()
+    repo2.mark_resuming = AsyncMock(return_value=True)
+    repo2.mark_running = AsyncMock(return_value=False)
+
+    restarted_row = _make_record()
+    restarted_row.status = "paused"
+    restarted_row.deleted_at = None
+    restarted_row.cleanup_action = None
+    probe_repo = MagicMock()
+    probe_repo.get = AsyncMock(return_value=restarted_row)
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository", return_value=probe_repo):
+        res2 = await mgr._resume_record(
+            session,
+            repo2,
+            record,
+            org_id=record.org_id,
+            workspace_id=record.workspace_id,
+            user_id=record.user_id,
+        )
+    assert res2 is None
+    backend.close.assert_awaited_once()
+    assert repo2.mark_resuming.await_count == 1

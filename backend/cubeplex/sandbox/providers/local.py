@@ -454,13 +454,27 @@ class LocalSandboxProvider(SandboxProvider):
             return ProviderInstanceState.RUNNING
         return None
 
+    def _remove_workdir(self, raw_target: Path) -> None:
+        base_dir = Path(self.default_workdir).resolve()
+        if raw_target.is_symlink():
+            if raw_target.parent.resolve() == base_dir:
+                raw_target.unlink(missing_ok=True)
+            return
+        if not raw_target.exists():
+            return
+        target_dir = raw_target.resolve()
+        if target_dir != base_dir and target_dir.is_relative_to(base_dir):
+            shutil.rmtree(target_dir, ignore_errors=True)
+
     async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
         existing = self._instances.pop(sandbox_id, None)
         if delete_volumes and existing is not None:
-            base_dir = Path(self.default_workdir).resolve()
-            target_dir = Path(existing.workdir).resolve()
-            if target_dir != base_dir and target_dir.is_relative_to(base_dir):
-                shutil.rmtree(target_dir, ignore_errors=True)
+            self._remove_workdir(Path(existing.workdir))
+
+    async def delete_volume(self, volume_key: str) -> None:
+        if not volume_key:
+            return
+        self._remove_workdir(Path(self.resolve_workdir(volume_key=volume_key)))
 
     async def aclose(self) -> None:
         self._instances.clear()

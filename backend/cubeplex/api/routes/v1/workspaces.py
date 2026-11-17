@@ -353,13 +353,27 @@ async def delete_workspace(
     if closed.cleanup_pending:
         return HardDeleteResponse(deleted=False, cleanup_pending=True)
 
+    from sqlmodel import col as sm_col
+
+    from cubeplex.config import config as app_config
     from cubeplex.sandbox.manager import get_sandbox_manager_or_none
 
     sandbox_manager = get_sandbox_manager_or_none()
-    if sandbox_manager is not None and await sandbox_manager.delete_workspace_sandboxes(
-        workspace_id, session=session
-    ):
-        return HardDeleteResponse(deleted=False, cleanup_pending=True)
+    if sandbox_manager is not None:
+        if await sandbox_manager.delete_workspace_sandboxes(workspace_id, session=session):
+            return HardDeleteResponse(deleted=False, cleanup_pending=True)
+    elif bool(app_config.get("sandbox.enabled", True)):
+        has_live_sandbox = await session.scalar(
+            sa_select(sm_col(UserSandbox.id))
+            .where(
+                sm_col(UserSandbox.workspace_id) == workspace_id,
+                sm_col(UserSandbox.deleted_at).is_(None),
+                sm_col(UserSandbox.sandbox_id).is_not(None),
+            )
+            .limit(1)
+        )
+        if has_live_sandbox is not None:
+            return HardDeleteResponse(deleted=False, cleanup_pending=True)
 
     # Collect vault credential ids from workspace-scoped grants and sandbox env
     # vars before those rows are deleted, so we can remove the backing secrets.

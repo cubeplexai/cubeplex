@@ -230,8 +230,12 @@ class BackgroundTaskLifecycle:
         if owner_until <= now:
             raise ValueError("owner lease must end after now")
         task.owner_until = owner_until
-        if sandbox.sandbox_id == command.sandbox_instance_id and (
-            sandbox.in_use_until is None or sandbox.in_use_until < owner_until
+        if (
+            sandbox.status == "running"
+            and sandbox.cleanup_action is None
+            and sandbox.deleted_at is None
+            and sandbox.sandbox_id == command.sandbox_instance_id
+            and (sandbox.in_use_until is None or sandbox.in_use_until < owner_until)
         ):
             sandbox.in_use_until = owner_until
         await self.session.flush()
@@ -395,6 +399,36 @@ class BackgroundTaskLifecycle:
             task.result_unavailable_reason = (
                 "original sandbox was destroyed before final output could be collected"
             )
+        task.last_observed_at = now
+        task.revision += 1
+        await self._ensure_completion(conversation, task, command, now)
+        await self.session.flush()
+
+    async def finalize_task_environment_reset(
+        self,
+        *,
+        task_id: str,
+        sandbox_instance_id: str,
+        now: datetime,
+    ) -> None:
+        require_aware(now)
+        conversation, _, task, command = await self._lock_command_task(task_id)
+        if not sandbox_instance_id or command.sandbox_instance_id != sandbox_instance_id:
+            return
+        if task.state not in TERMINAL_TASK_STATES:
+            task.state = "cancelled" if task.stop_requested_at is not None else "failed"
+            task.finished_at = command.finished_at = now
+            command.status = "killed"
+            task.result_ref = command.log_path or None
+            if command.monitor_outcome is None:
+                task.result_summary = "sandbox compute was restarted; process exit code is unknown"
+        if command.log_state != "complete":
+            command.log_state = "unavailable"
+            task.result_unavailable_reason = (
+                "sandbox compute was restarted before final output could be collected"
+            )
+        task.owner_token = None
+        task.owner_until = None
         task.last_observed_at = now
         task.revision += 1
         await self._ensure_completion(conversation, task, command, now)
