@@ -46,7 +46,15 @@ from cubeplex.sandbox.base import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-_EXPECTED_TOOL_NAMES = {"execute", "kill_execute", "monitor", "write", "edit", "read"}
+_EXPECTED_TOOL_NAMES = {
+    "execute",
+    "kill_execute",
+    "monitor",
+    "wait_for_tasks",
+    "write",
+    "edit",
+    "read",
+}
 
 
 def _make_sandbox(workdir: str = "/sandbox/work") -> MagicMock:
@@ -1091,10 +1099,10 @@ async def test_execute_background_hands_off_before_returning_task_identity() -> 
     assert result.details["command_id"] == "scmd-durable"
     assert result.details["notification"] == "once"
     assert result.details["result_pending"] is True
-    assert 'wait_for_tasks=["task-durable"]' in _text(result)
+    assert 'wait_for_tasks(task_ids=["task-durable"])' in _text(result)
     assert "Continue independent work" in _text(result)
-    assert "Do not create a todo solely to wait" in _text(result)
-    assert "do not start polling commands" in _text(result).lower()
+    assert "suspend this turn" in _text(result)
+    assert "one-off status checks" in _text(result).lower()
     assert live == {}
 
 
@@ -1473,7 +1481,7 @@ async def test_auto_background_hands_off_instead_of_waiting_at_run_end(
 
     assert handed_off == ["scmd-auto"]
     assert result.details["task_id"] == "task-auto"  # type: ignore[index]
-    assert 'wait_for_tasks=["task-auto"]' in _text(result)
+    assert 'wait_for_tasks(task_ids=["task-auto"])' in _text(result)
     assert live == {}
 
 
@@ -3304,6 +3312,50 @@ def test_constructor_without_optional_ids() -> None:
     """SandboxMiddleware with only sandbox= should work fine."""
     sandbox = _make_sandbox()
     mw = SandboxMiddleware(sandbox=sandbox)
-    assert len(mw.tools) == 6
+    assert len(mw.tools) == len(_EXPECTED_TOOL_NAMES)
     names = {t.name for t in mw.tools}
     assert names == _EXPECTED_TOOL_NAMES
+
+
+@pytest.mark.asyncio
+async def test_wait_for_tasks_terminates_turn_when_valid() -> None:
+    from cubeloop.middleware.todo import TaskWaitValidation
+
+    from cubeplex.middleware.sandbox import _make_wait_for_tasks_tool, _WaitForTasksArgs
+
+    validator = MagicMock()
+    validator.validate_tasks = AsyncMock(
+        return_value=TaskWaitValidation(status="valid", validation={"task_revisions": {"bgt-1": 1}})
+    )
+    tool = _make_wait_for_tasks_tool(validate_task_wait=validator)
+
+    result = await tool.execute("tc-wait-1", _WaitForTasksArgs(task_ids=[" bgt-1 "]))
+
+    validator.validate_tasks.assert_awaited_once_with(["bgt-1"])
+    assert result.terminate is True
+    assert result.is_error is not True
+    assert result.details == {"status": "waiting", "task_ids": ["bgt-1"]}
+    assert "bgt-1" in _text(result)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_tasks_rejects_invalid_or_undeliverable_tasks() -> None:
+    from cubeloop.middleware.todo import TaskWaitValidation
+
+    from cubeplex.middleware.sandbox import _make_wait_for_tasks_tool, _WaitForTasksArgs
+
+    validator = MagicMock()
+    validator.validate_tasks = AsyncMock(
+        return_value=TaskWaitValidation(status="invalid", reason="task already finished")
+    )
+    tool = _make_wait_for_tasks_tool(validate_task_wait=validator)
+
+    dup_result = await tool.execute("tc-dup", _WaitForTasksArgs(task_ids=["bgt-1", "bgt-1"]))
+    assert dup_result.is_error is True
+    assert dup_result.terminate is not True
+    validator.validate_tasks.assert_not_awaited()
+
+    bad_result = await tool.execute("tc-bad", _WaitForTasksArgs(task_ids=["bgt-1"]))
+    assert bad_result.is_error is True
+    assert bad_result.terminate is not True
+    assert "task already finished" in _text(bad_result)

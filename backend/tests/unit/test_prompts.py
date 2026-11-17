@@ -72,6 +72,7 @@ def test_sandbox_prompt_does_not_recommend_ampersand_background():
     assert "background=true" in rendered
     assert "kill_execute" in rendered
     assert "monitor" in rendered
+    assert "wait_for_tasks" in rendered
 
 
 def test_sandbox_prompt_includes_workdir():

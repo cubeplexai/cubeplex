@@ -47,6 +47,22 @@ class BackgroundTaskWaitValidator:
         self._execution_generation = execution_generation
         self._run_id = run_id
 
+    async def validate_tasks(self, task_ids: list[str]) -> TaskWaitValidation:
+        """Validate that ``task_ids`` are deliverable background tasks in this generation."""
+        facts = await self._load_facts(task_ids)
+        if len(facts) != len(task_ids):
+            return self._invalid("one or more background tasks were not found")
+        if any(
+            fact.task.conversation_id != self._conversation_id
+            or fact.task.execution_generation != self._execution_generation
+            for fact in facts
+        ):
+            return self._invalid("background tasks belong to another conversation generation")
+        reason = self._undeliverable_reason(facts)
+        if reason is not None:
+            return self._invalid(reason)
+        return TaskWaitValidation(status="valid", validation=self._validation(facts))
+
     async def __call__(
         self,
         task_ids: list[str],

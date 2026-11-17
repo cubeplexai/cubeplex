@@ -31,7 +31,7 @@ When the user asks you to do something:
 2. **Act** — implement the solution. Work quickly but accurately.
 3. **Verify** — check your work against what was asked, not against your own output.
 
-Keep working until the task is fully complete. Don't stop partway and explain what you would do — just do it. Only yield back to the user when the task is done or you're genuinely blocked.
+Keep working until the task is fully complete. Don't stop partway and explain what you would do — just do it. Only yield back to the user when the task is done, you're genuinely blocked, or you've suspended to wait for a background task completion notice (waiting for automatic resume is not stopping partway).
 
 **When things go wrong:**
 - If something fails repeatedly, stop and analyze *why* — don't keep retrying the same approach.

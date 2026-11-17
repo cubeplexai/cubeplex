@@ -381,15 +381,16 @@ def _background_wait_guidance(task_id: str | None, notify_on_complete: bool) -> 
     if not notify_on_complete:
         return ""
     if task_id is None:
-        return " Completion notice pending; do not start polling commands."
+        return (
+            " Completion notice pending; do not run status checks, sleep loops, "
+            "or another monitor for this task."
+        )
     return (
-        " Result pending. Continue independent work. When remaining work depends "
-        "on this task, use write_todos with "
-        f'wait_for_tasks=["{task_id}"] only if you already have unfinished todos '
-        "and write_todos is available. "
-        "Do not create a todo solely to wait. Otherwise report the pending task ID "
-        "to your caller or the user. End this turn normally when no independent "
-        "work remains; do not start polling commands."
+        " Result pending. Continue independent work while it runs. When no "
+        f'independent work remains, call wait_for_tasks(task_ids=["{task_id}"]) '
+        "to suspend this turn and wait for automatic resume when the completion "
+        "notice arrives. Do not run one-off status checks (ls, ps, pgrep, log "
+        "reads), sleep loops, or another monitor for this task."
     )
 
 
@@ -1396,6 +1397,16 @@ class _KillExecuteArgs(BaseModel):
     command_id: str = Field(description="CubePlex command id returned by background execute.")
 
 
+class _WaitForTasksArgs(BaseModel):
+    task_ids: list[str] = Field(
+        min_length=1,
+        description=(
+            "Pending background task IDs (e.g. 'bgt-...') returned by execute or "
+            "monitor with status=running and result_pending=true."
+        ),
+    )
+
+
 class _MonitorArgs(BaseModel):
     description: str = Field(description="Short summary of what this monitor watches.")
     command: str
@@ -1736,6 +1747,66 @@ def _make_kill_execute_tool(
         description="Stop a background sandbox command started with execute(background=true).",
         parameters=_KillExecuteArgs,
         execute=_kill,
+    )
+
+
+def _make_wait_for_tasks_tool(
+    validate_task_wait: Any | None = None,
+) -> AgentTool[_WaitForTasksArgs]:
+    async def _wait(
+        tool_call_id: str,
+        args: _WaitForTasksArgs,
+        *,
+        signal: asyncio.Event | None = None,
+        on_update: Callable[[StructuredValue], None] | None = None,
+    ) -> AgentToolResult:
+        del tool_call_id, signal, on_update
+        ids = [task_id.strip() for task_id in args.task_ids]
+        if any(not task_id for task_id in ids) or len(ids) != len(set(ids)):
+            return AgentToolResult(
+                content=[
+                    TextContent(text="Error: task_ids must contain distinct nonempty task IDs.")
+                ],
+                is_error=True,
+            )
+        if validate_task_wait is not None:
+            try:
+                validation = await validate_task_wait.validate_tasks(ids)
+            except Exception:
+                logger.exception("wait_for_tasks validation failed for {}", ids)
+                return AgentToolResult(
+                    content=[TextContent(text="Error: The host could not validate task waiting.")],
+                    is_error=True,
+                )
+            if validation.status != "valid":
+                return AgentToolResult(
+                    content=[TextContent(text=f"Error: Cannot wait on tasks. {validation.reason}")],
+                    is_error=True,
+                )
+        return AgentToolResult(
+            content=[
+                TextContent(
+                    text=(
+                        f"Waiting for background task(s): {', '.join(ids)}. "
+                        "This turn is suspended and will resume automatically when a "
+                        "completion notice arrives."
+                    )
+                )
+            ],
+            details={"status": "waiting", "task_ids": ids},
+            terminate=True,
+        )
+
+    return AgentTool(
+        name="wait_for_tasks",
+        description=(
+            "Suspend the current turn and wait for pending background tasks to finish. "
+            "Call this only when no independent work remains; the system resumes "
+            "automatically when a completion notice arrives. Do not call in parallel "
+            "with other tools."
+        ),
+        parameters=_WaitForTasksArgs,
+        execute=_wait,
     )
 
 
@@ -2245,6 +2316,7 @@ class SandboxMiddleware(Middleware):
         admission_id: str | None = None,
         owner_token: str | None = None,
         session_factory: Any | None = None,
+        validate_task_wait: Any | None = None,
     ) -> None:
         self.sandbox = sandbox
         self.conversation_id = conversation_id
@@ -2320,6 +2392,7 @@ class SandboxMiddleware(Middleware):
                     on_live=self._ensure_lease_task,
                     handoff=self._handoff_conversation_command,
                 ),
+                _make_wait_for_tasks_tool(validate_task_wait=validate_task_wait),
                 *file_tools,
             ]
         else:
@@ -2342,7 +2415,7 @@ class SandboxMiddleware(Middleware):
             *(
                 tool
                 for tool in self._tools
-                if tool.name not in {"execute", "monitor", "kill_execute"}
+                if tool.name not in {"execute", "monitor", "kill_execute", "wait_for_tasks"}
             ),
         ]
 

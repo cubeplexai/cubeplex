@@ -4834,6 +4834,21 @@ class RunManager:
         except Exception as _exc:
             logger.warning("persona tools unavailable for cubeloop run: {}", _exc)
 
+        from cubeplex.services.background_task_wait import BackgroundTaskWaitValidator
+
+        validate_task_wait = (
+            BackgroundTaskWaitValidator(
+                async_session_maker,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                conversation_id=conversation_id,
+                execution_generation=ctx.execution.execution_generation,
+                run_id=run_id,
+            )
+            if ctx.execution is not None
+            else None
+        )
+
         # 6b. SandboxMiddleware — needs sandbox. Shares the channel built above
         # so the confirm-gate writes to the same pending row the agent sees.
         if sandbox is not None:
@@ -4914,6 +4929,7 @@ class RunManager:
                     ),
                     owner_token=(ctx.execution.attempt_id if ctx.execution is not None else None),
                     session_factory=async_session_maker,
+                    validate_task_wait=validate_task_wait,
                 )
                 extra_ref_holder["sandbox_middleware"] = sandbox_mw
                 cubeloop_middleware.append(sandbox_mw)
@@ -5024,20 +5040,6 @@ class RunManager:
         try:
             from cubeloop.middleware.todo import TodoListMiddleware
 
-            from cubeplex.services.background_task_wait import BackgroundTaskWaitValidator
-
-            validate_task_wait = (
-                BackgroundTaskWaitValidator(
-                    async_session_maker,
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    conversation_id=conversation_id,
-                    execution_generation=ctx.execution.execution_generation,
-                    run_id=run_id,
-                )
-                if ctx.execution is not None
-                else None
-            )
             todo_mw = TodoListMiddleware(
                 extra_ref=_extra_ref,
                 validate_task_wait=validate_task_wait,
