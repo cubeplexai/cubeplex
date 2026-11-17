@@ -282,7 +282,8 @@ class _ResettableEgressProvider(SandboxProvider):
         self.instances[sandbox_id] = inst
         return inst
 
-    async def terminate(self, sandbox_id: str) -> None:
+    async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
+        del delete_volumes
         self.terminated_ids.append(sandbox_id)
         self.instances.pop(sandbox_id, None)
 

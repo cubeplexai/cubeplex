@@ -80,6 +80,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         scope_id: str,
         volumes_config: dict[str, Any] | None = None,
         ttl_seconds: int = 3600,
+        paused_ttl_seconds: int | None = None,
         provider: str = "opensandbox",
     ) -> UserSandbox:
         """Insert a provisioning placeholder row BEFORE provider create.
@@ -98,17 +99,20 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         unique, ensuring at most one active row per scope tuple.
         """
         _validate_scope_and_user_id(scope_type, user_id)
-        record = UserSandbox(
-            user_id=user_id,
-            sandbox_id="",  # set below once the row id is minted
-            status="provisioning",
-            provider=provider,
-            image=image,
-            volumes_config=volumes_config,
-            ttl_seconds=ttl_seconds,
-            scope_type=scope_type,
-            scope_id=scope_id,
-        )
+        fields: dict[str, Any] = {
+            "user_id": user_id,
+            "sandbox_id": "",  # set below once the row id is minted
+            "status": "provisioning",
+            "provider": provider,
+            "image": image,
+            "volumes_config": volumes_config,
+            "ttl_seconds": ttl_seconds,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+        }
+        if paused_ttl_seconds is not None:
+            fields["paused_ttl_seconds"] = paused_ttl_seconds
+        record = UserSandbox(**fields)
         record.sandbox_id = f"pending-{record.id}"
         return await self.add(record)
 
@@ -155,6 +159,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         sandbox_id: str,
         image: str | None = None,
         provider: str | None = None,
+        paused_ttl_seconds: int | None = None,
     ) -> None:
         values: dict[str, Any] = {
             "sandbox_id": sandbox_id,
@@ -165,6 +170,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             values["image"] = image
         if provider is not None:
             values["provider"] = provider
+        if paused_ttl_seconds is not None:
+            values["paused_ttl_seconds"] = paused_ttl_seconds
         stmt = (
             update(UserSandbox)
             .where(
@@ -444,6 +451,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         was just refreshed (e.g. via the reconciler bumping ``paused_at``)
         from being killed.
         """
+        if paused_ttl_seconds <= 0:
+            return False
         stmt = (
             update(UserSandbox)
             .where(
@@ -452,6 +461,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
                 UserSandbox.status == "paused",  # type: ignore[arg-type]
                 UserSandbox.paused_at.is_not(None),  # type: ignore[union-attr]
+                col(UserSandbox.paused_ttl_seconds) > 0,
                 text("paused_at + :ttl * INTERVAL '1 second' <= NOW()").bindparams(
                     ttl=paused_ttl_seconds
                 ),
@@ -507,9 +517,10 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         return bool(result.rowcount == 1)
 
     async def mark_paused(self, record_id: str, *, paused_at: datetime | None = None) -> bool:
-        """Move to ``paused`` from ``pausing`` (pause succeeded) OR ``resuming``
-        (resume aborted mid-flight and provider still reports ``Paused``).
-        Stamps ``paused_at``.
+        """Move to ``paused`` from ``pausing``, ``resuming``, or ``kill_pending`` (restart).
+
+        Clears ``cleanup_action`` and ``cleanup_requested_at`` when settling a
+        pause-based restart, without overwriting a concurrent ``delete`` request.
         """
         stmt = (
             update(UserSandbox)
@@ -517,9 +528,41 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.id == record_id,  # type: ignore[arg-type]
                 UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
-                UserSandbox.status.in_(("pausing", "resuming")),  # type: ignore[attr-defined]
+                or_(
+                    UserSandbox.status.in_(("pausing", "resuming")),  # type: ignore[attr-defined]
+                    (UserSandbox.status == "kill_pending")  # type: ignore[arg-type]
+                    & (UserSandbox.cleanup_action == "restart"),
+                ),
             )
-            .values(status="paused", paused_at=paused_at or datetime.now(UTC))
+            .values(
+                status="paused",
+                paused_at=paused_at or datetime.now(UTC),
+                cleanup_action=None,
+                cleanup_requested_at=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
+
+    async def mark_pausing_from_restart(self, record_id: str) -> bool:
+        """Move ``kill_pending`` (restart) -> ``pausing`` for async-pause providers."""
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status == "kill_pending",  # type: ignore[arg-type]
+                UserSandbox.cleanup_action == "restart",  # type: ignore[arg-type]
+            )
+            .values(
+                status="pausing",
+                cleanup_action=None,
+                cleanup_requested_at=None,
+            )
+            .execution_options(synchronize_session=False)
         )
         result = cast(CursorResult[Any], await self.session.execute(stmt))
         await self.session.commit()
@@ -797,6 +840,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             select(UserSandbox)
             .where(UserSandbox.status == "paused")  # type: ignore[arg-type]
             .where(UserSandbox.paused_at.is_not(None))  # type: ignore[union-attr]
+            .where(col(UserSandbox.paused_ttl_seconds) > 0)
             .where(text("paused_at + paused_ttl_seconds * INTERVAL '1 second' <= NOW()"))
         )
         result = await session.execute(stmt.execution_options(populate_existing=True))

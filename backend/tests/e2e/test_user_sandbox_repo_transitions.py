@@ -283,6 +283,24 @@ async def test_claim_terminated_from_paused_atomic(
     await db_session.commit()
     assert await repo.claim_terminated_from_paused(resuming_row.id, paused_ttl_seconds=60) is False
 
+    # (d) A paused row with paused_ttl_seconds <= 0 (permanent retention) is never
+    # returned by list_paused_expired_system or claimed by claim_terminated_from_paused.
+    permanent_paused = await _mk(
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="paused",
+        idle_secs=0,
+        ttl_seconds=3600,
+        paused_ttl_seconds=0,
+        paused_at=datetime.now(UTC) - timedelta(days=30),
+    )
+    expired_rows = await UserSandboxRepository.list_paused_expired_system(db_session)
+    assert all(r.id != permanent_paused.id for r in expired_rows)
+    assert (
+        await repo.claim_terminated_from_paused(permanent_paused.id, paused_ttl_seconds=0) is False
+    )
+
 
 async def test_mark_failed_from_transient_atomic(
     db_session: AsyncSession, scope: dict[str, str]

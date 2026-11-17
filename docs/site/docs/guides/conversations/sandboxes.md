@@ -38,16 +38,16 @@ A sandbox with status **Off** (container stopped) still appears in the list. Tha
 
 ## Restart
 
-**Restart** stops the sandbox's container but keeps the sandbox row and all of its files. The status flips to **Off**, and the next time the agent needs to run code in that conversation a fresh container starts up on the same storage, with all your files intact.
+**Restart** stops the running sandbox instance while keeping the sandbox row, its installed environment, and all of its files. On pause-capable runtimes (such as CubePod), the status flips to **Paused** (and **Off** on non-pausing runtimes); the next time the agent needs to run code in that conversation, the sandbox resumes cleanly with your environment and `/workspace` files intact.
 
-Use Restart when the container is in a bad state — a hung process, a broken shell, or a runaway command you want to cut short — but you want to keep the working files.
+Use Restart when the sandbox is in a bad state — a hung process, a broken shell, or a runaway command you want to cut short — while keeping your environment and working files.
 
 ## Delete
 
-**Delete** permanently removes the sandbox. The row is soft-deleted, the container is stopped, and the sandbox will not start again for that conversation or topic. The next time you send a message there, CubePlex provisions a brand-new sandbox with empty storage.
+**Delete** permanently removes the sandbox and its persistent volumes (on OpenSandbox deployments, external Kubernetes PVCs remain on disk for operator reclamation). The row is soft-deleted, the sandbox is stopped, and the next time you send a message there, CubePlex provisions a brand-new sandbox with empty storage.
 
 :::caution
-Delete cannot be undone. Stored files are left on disk for your operator to reclaim (CubePlex cannot delete the underlying storage directly). If you only want a fresh container while keeping your files, use **Restart** instead.
+Delete cannot be undone and permanently deletes stored files in the sandbox. If you only want to stop running processes while keeping your environment and files, use **Restart** instead.
 :::
 
 ## Sandbox statuses

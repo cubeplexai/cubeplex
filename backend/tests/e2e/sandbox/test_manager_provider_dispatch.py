@@ -194,7 +194,8 @@ class _FakeProvider(SandboxProvider):
     async def pause(self, sandbox_id: str) -> None:
         self.paused_ids.append(sandbox_id)
 
-    async def terminate(self, sandbox_id: str) -> None:
+    async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
+        del delete_volumes
         self.terminated_ids.append(sandbox_id)
 
     async def renew_ttl(self, sandbox_id: str, ttl_seconds: int) -> None:

@@ -763,6 +763,7 @@ async def test_cleanup_expired_revokes_refs(
 
     manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
+    manager._pause_on_idle = False
 
     with (
         patch(

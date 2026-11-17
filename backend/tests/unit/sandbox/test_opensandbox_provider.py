@@ -437,7 +437,8 @@ async def test_base_provider_connect_observer_requires_reconnect_capability() ->
         async def inspect_state(self, sandbox_id: str) -> ProviderInstanceState | None:
             return None
 
-        async def terminate(self, sandbox_id: str) -> None:
+        async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
+            del delete_volumes
             return None
 
     provider = _NoReconnectProvider()

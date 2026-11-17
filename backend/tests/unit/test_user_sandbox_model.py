@@ -12,4 +12,4 @@ def test_new_lifecycle_columns_default():
     assert row.paused_at is None
     assert row.last_resumed_at is None
     assert row.in_use_until is None
-    assert row.paused_ttl_seconds == 24 * 60
+    assert row.paused_ttl_seconds == 0

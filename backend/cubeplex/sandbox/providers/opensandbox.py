@@ -849,7 +849,8 @@ class OpenSandboxProvider(SandboxProvider):
         except Exception as exc:
             raise _translate_lifecycle_error(exc, sandbox_id) from exc
 
-    async def terminate(self, sandbox_id: str) -> None:
+    async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
+        del delete_volumes
         try:
             async with self._manager_client(timeout_seconds=30.0) as mgr:
                 await mgr.kill_sandbox(sandbox_id)

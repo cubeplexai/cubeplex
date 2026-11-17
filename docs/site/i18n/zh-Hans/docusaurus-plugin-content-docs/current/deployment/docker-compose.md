@@ -395,7 +395,7 @@ CubePlex 会发送 `secureAccess: false`，Docker runtime 就会接受请求。
 | 密钥注入 / env 替换（`cbxref_…` 占位符） | – | ❌ 不可用。它需要后端的 mTLS 凭证交换监听器 + egress CA/客户端证书，这些由 Kubernetes chart 部署（`gen-egress-certs.sh` + egress webhook）。compose overlay 不包含这些，`sandbox.egress_exchange_host` 保持为空，所以注入被禁用。 |
 | server-proxy 模式（`use_server_proxy: true`） | Kubernetes 上的 release-1.1.1 会把目标端口留在代理 URL 的路径里（`/proxy/<port>`）。已在本地 1.1.1 server 上核对过。 | compose 仍然设置 `use_server_proxy: false`。overlay 通过主机映射的 bridge 端口访问沙箱：`extra_hosts` 在 backend 和 opensandbox-server 上都配置了 `host.docker.internal`。 |
 | `pvc.claimName` 数据卷 | 可以——但被当作 Docker 命名卷处理 | 没有 CSI 特性，不支持 ReadWriteMany |
-| 暂停 / 恢复（`POST /sandboxes/{id}/pause` 等） | 调用 Docker 的 `pause`/`unpause`（cgroup freezer） | 没有落盘的 checkpoint——主机 Docker 重启后暂停状态会丢失。因此 CubePlex 默认 `pause_on_idle: false`。 |
+| 暂停 / 恢复（`POST /sandboxes/{id}/pause` 等） | 调用 Docker 的 `pause`/`unpause`（cgroup freezer） | 没有落盘的 checkpoint——主机 Docker 重启后暂停状态会丢失（下次使用时 CubePlex 会基于 `/workspace` 自动重建）。若希望空闲时直接销毁而非冻结 Docker 容器，可将 `sandbox.pause_on_idle` 设为 `false`。 |
 
 **一句话总结：** 在 Docker 模式的 OpenSandbox 下，agent 可以在沙箱里*执行*
 命令、读写文件、浏览文件树，还能打开交互式**终端**和**实时浏览器**面板——

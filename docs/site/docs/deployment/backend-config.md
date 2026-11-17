@@ -257,7 +257,10 @@ sandbox:
 | `sandbox.cubepod.api_key` | `""` | Optional Bearer token for the CubePod gateway (placeholder values are rejected if set). Environment override: `CUBEPLEX_SANDBOX__CUBEPOD__API_KEY`. |
 | `sandbox.cubepod.default_template` | `cubeplex-ubuntu24-desktop` | Default CubePod template name. Required when `sandbox.provider` is `cubepod`. Environment override: `CUBEPLEX_SANDBOX__CUBEPOD__DEFAULT_TEMPLATE`. |
 | `sandbox.cubepod.warm_pool` | `""` | Optional CubePod `PodWarmPool` name used when creating sandboxes. Environment override: `CUBEPLEX_SANDBOX__CUBEPOD__WARM_POOL`. |
-| `sandbox.ttl` | `1800` | Idle sandbox is reaped after 30 min. |
+| `sandbox.ttl` | `1800` | Idle timeout (seconds) before a running sandbox is killed when `pause_on_idle` is `false` or the provider does not support `pause`. |
+| `sandbox.pause_on_idle` | `true` | Pause idle sandboxes instead of killing them on providers that support `pause` (such as CubePod). Environment override: `CUBEPLEX_SANDBOX__PAUSE_ON_IDLE`. |
+| `sandbox.idle_ttl_seconds` | `1800` | Idle duration (seconds) before `pause_on_idle` suspends a running sandbox. Environment override: `CUBEPLEX_SANDBOX__IDLE_TTL_SECONDS`. |
+| `sandbox.paused_ttl_seconds` | `0` | Seconds before a paused sandbox is terminated (`<= 0` disables automatic termination so paused sandboxes keep their RootFS and `/workspace` until explicitly deleted). Environment override: `CUBEPLEX_SANDBOX__PAUSED_TTL_SECONDS`. |
 | `sandbox.ready_timeout` | `300` | Seconds to wait for a newly created sandbox to become ready (covers a cold pull). |
 | `sandbox.command_default_timeout_seconds` | `3600` | Positive integer seconds, at most `2147483647` (the technical 32-bit seconds limit). The backend rejects out-of-range values, non-integers, booleans, and null at startup. Environment override: `CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS`. |
 | `sandbox.run_user` / `run_uid` / `run_gid` | `cubeplex` / `1000` / `1000` | Agent commands and uploaded files run as this user. Match the sandbox image. Set `run_uid` to `null` to keep the previous root default. Browser stack still starts as root. |

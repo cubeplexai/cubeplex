@@ -824,10 +824,10 @@ class CubePodProvider(SandboxProvider):
         except Exception as exc:
             raise _translate_lifecycle_error(exc, sandbox_id) from exc
 
-    async def terminate(self, sandbox_id: str) -> None:
+    async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
         client = await self._get_client()
         try:
-            await client.delete(sandbox_id, delete_volumes=False)
+            await client.delete(sandbox_id, delete_volumes=delete_volumes)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 return

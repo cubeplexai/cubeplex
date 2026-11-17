@@ -539,6 +539,14 @@ async def delete_account(
     if cleanup_pending:
         return HardDeleteResponse(deleted=False, cleanup_pending=True)
 
+    from cubeplex.sandbox.manager import get_sandbox_manager_or_none
+
+    sandbox_manager = get_sandbox_manager_or_none()
+    if sandbox_manager is not None and await sandbox_manager.delete_user_sandboxes(
+        user.id, session=session
+    ):
+        return HardDeleteResponse(deleted=False, cleanup_pending=True)
+
     from cubeplex.plugins.audit import audit_log
 
     await audit_log(
@@ -754,11 +762,24 @@ async def delete_account(
 
     await purge_user_execution_state(session, user_id=user.id)
 
+    # Break bidirectional FK between user_sandboxes and user_sandbox_sync_events
+    # before deleting UserSandbox rows.
+    from cubeplex.models.user_sandbox_sync_event import UserSandboxSyncEvent
+
+    user_sbx_tbl = UserSandbox.__table__  # type: ignore[attr-defined]
+    user_sbx_ids = select(user_sbx_tbl.c.id).where(user_sbx_tbl.c.user_id == user.id)
+    await session.execute(
+        sa_update(UserSandbox)
+        .where(UserSandbox.user_id == user.id)  # type: ignore[arg-type]
+        .values(last_skill_sync_event_id=None)
+    )
+    await session.execute(
+        sa_delete(UserSandboxSyncEvent).where(
+            UserSandboxSyncEvent.user_sandbox_id.in_(user_sbx_ids)  # type: ignore[attr-defined]
+        )
+    )
+
     # Delete user-owned rows (deepest FK dependents first).
-    # NOTE: UserSandbox rows are deleted directly without calling the sandbox
-    # manager's kill path. Provider sandboxes tied to these rows will be reaped
-    # by the sandbox cleanup loop (cleanup_expired). A public sandbox-manager
-    # kill-by-user API is the proper fix — tracked for follow-up.
     for model, user_col in [
         (EgressRef, EgressRef.user_id),
         (MemoryItem, MemoryItem.owner_user_id),
