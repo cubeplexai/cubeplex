@@ -3791,7 +3791,7 @@ class RunManager:
                 extra_ref_holder=extra_ref_holder,
                 publish_stream_event=publish_stream_event,
                 # Preserve original run trigger so resume does not re-enable
-                # interactive-only writes (e.g. persona_update) for schedule/IM.
+                # interactive/IM-only writes (e.g. persona_update) for scheduled runs.
                 trigger=ctx.trigger,
             )
             extra_ref_holder["steering_agent"] = agent
@@ -4818,7 +4818,7 @@ class RunManager:
         _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
 
         # persona tools: always registered (stable tool schema / prompt cache).
-        # Writes gated by trigger at execute time — interactive only.
+        # Writes gated by trigger at execute time — interactive and IM only.
         # Same HITL channel as ask_user so overwrite confirms are durable.
         try:
             from cubeplex.tools.builtin.persona import create_persona_tools
@@ -4828,7 +4828,7 @@ class RunManager:
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
                     channel=sandbox_hitl_channel,
-                    allow_write=(trigger == "interactive"),
+                    allow_write=(trigger in ("interactive", "im")),
                 )
             )
         except Exception as _exc:

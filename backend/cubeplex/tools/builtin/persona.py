@@ -77,7 +77,7 @@ def create_persona_tools(
 
     Both tools are always registered so the tool schema stays stable across
     interactive and automated turns (prompt-cache / replay). Writes are gated
-    by ``allow_write`` (True only for interactive member-originated chat).
+    by ``allow_write`` (True for interactive and IM member-originated chat).
     ``channel`` is required for HITL on non-empty overwrite when writes are
     allowed; may be None when ``allow_write`` is False.
     """
@@ -130,8 +130,8 @@ def create_persona_tools(
                     "updated": False,
                     "reason": "not_allowed",
                     "error": (
-                        "persona_update is only available on interactive chat runs; "
-                        "scheduled/IM/automation cannot change workspace persona"
+                        "persona_update is only available on interactive and IM chat runs; "
+                        "scheduled/automated runs cannot change workspace persona"
                     ),
                 },
                 is_error=True,

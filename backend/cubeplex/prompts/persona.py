@@ -7,7 +7,7 @@ This workspace has an **Agent Persona** (Settings → Agent Persona): standing
 system instructions for every conversation here. Tools:
 
 - `persona_get` — read the current persona text.
-- `persona_update` — full replace of the persona (interactive runs only).
+- `persona_update` — full replace of the persona (interactive and IM runs only).
 
 **Use persona when** the user wants a durable role / standing policy for the
 whole workspace agent ("always answer in formal Chinese", "you are a staff
