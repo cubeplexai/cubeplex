@@ -3359,3 +3359,62 @@ async def test_wait_for_tasks_rejects_invalid_or_undeliverable_tasks() -> None:
     assert bad_result.is_error is True
     assert bad_result.terminate is not True
     assert "task already finished" in _text(bad_result)
+
+    ws_result = await tool.execute("tc-ws", _WaitForTasksArgs(task_ids=["   "]))
+    assert ws_result.is_error is True
+    assert ws_result.terminate is not True
+
+    padded_dup = await tool.execute("tc-pdup", _WaitForTasksArgs(task_ids=["bgt-1", " bgt-1 "]))
+    assert padded_dup.is_error is True
+    assert padded_dup.terminate is not True
+
+    unconfigured = _make_wait_for_tasks_tool(validate_task_wait=None)
+    unconf_result = await unconfigured.execute("tc-none", _WaitForTasksArgs(task_ids=["bgt-1"]))
+    assert unconf_result.is_error is True
+    assert unconf_result.terminate is not True
+    assert "not configured" in _text(unconf_result)
+
+    raising_validator = MagicMock()
+    raising_validator.validate_tasks = AsyncMock(side_effect=RuntimeError("db down"))
+    raising_tool = _make_wait_for_tasks_tool(validate_task_wait=raising_validator)
+    err_result = await raising_tool.execute("tc-err", _WaitForTasksArgs(task_ids=["bgt-1"]))
+    assert err_result.is_error is True
+    assert err_result.terminate is not True
+    assert "could not validate" in _text(err_result)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_tasks_rejects_parallel_tool_calls() -> None:
+    from cubeloop.agent.types import AfterToolCallContext, AgentContext, AgentToolResult
+    from cubeloop.providers.base import AssistantMessage, TextContent, ToolCall
+
+    sandbox = _make_sandbox()
+    mw = SandboxMiddleware(sandbox=sandbox)
+    wait_call = ToolCall(id="tc-wait", name="wait_for_tasks", arguments={"task_ids": ["bgt-1"]})
+    other_call = ToolCall(id="tc-read", name="read", arguments={"path": "/tmp/a"})
+    agent_ctx = AgentContext(system_prompt="", messages=[])
+    ok_res = AgentToolResult(content=[TextContent(text="waiting")], terminate=True)
+
+    single_ctx = AfterToolCallContext(
+        assistant_message=AssistantMessage(content=[wait_call]),
+        tool_call=wait_call,
+        args={"task_ids": ["bgt-1"]},
+        result=ok_res,
+        is_error=False,
+        context=agent_ctx,
+    )
+    assert await mw.after_tool_call(single_ctx) is None
+
+    parallel_ctx = AfterToolCallContext(
+        assistant_message=AssistantMessage(content=[other_call, wait_call]),
+        tool_call=wait_call,
+        args={"task_ids": ["bgt-1"]},
+        result=ok_res,
+        is_error=False,
+        context=agent_ctx,
+    )
+    override = await mw.after_tool_call(parallel_ctx)
+    assert override is not None
+    assert override.is_error is True
+    assert override.terminate is False
+    assert "parallel" in override.content[0].text.lower()
