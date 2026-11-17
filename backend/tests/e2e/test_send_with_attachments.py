@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -56,29 +57,53 @@ async def _upload(client: httpx.AsyncClient, ws: str, conv: str, content: bytes)
     return r.json()["id"]
 
 
+# Bound so a hung LLM or SSE stream fails this helper instead of sitting
+# until a CI job timeout. A healthy "describe this image" turn should be
+# well under this budget; historical 9–10 minute PR-CI stalls were hangs.
+_SSE_DRAIN_TIMEOUT_SECONDS = 180
+
+
 async def _drain_sse_to_done(
     client: httpx.AsyncClient, ws: str, conv: str, body: dict[str, object]
 ) -> list[dict[str, object]]:
-    """Send a message expecting SSE; collect events until 'done' or 'error'."""
+    """Send a message expecting SSE; collect events until 'done' or 'error'.
+
+    Raises TimeoutError if no terminal event arrives within
+    ``_SSE_DRAIN_TIMEOUT_SECONDS``.
+    """
     headers = {"accept": "text/event-stream"}
     events: list[dict[str, object]] = []
     request_body = web_message_request(**body)
-    async with client.stream(
-        "POST",
-        f"/api/v1/ws/{ws}/conversations/{conv}/messages",
-        json=request_body,
-        headers=headers,
-    ) as resp:
-        async for line in resp.aiter_lines():
-            if not line.startswith("data: "):
-                continue
-            payload = json.loads(line[len("data: ") :])
-            events.append(payload)
-            if payload.get("type") in {"done", "error"}:
-                return events
-    return events
+    try:
+        async with asyncio.timeout(_SSE_DRAIN_TIMEOUT_SECONDS):
+            async with client.stream(
+                "POST",
+                f"/api/v1/ws/{ws}/conversations/{conv}/messages",
+                json=request_body,
+                headers=headers,
+            ) as resp:
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = json.loads(line[len("data: ") :])
+                    events.append(payload)
+                    if payload.get("type") in {"done", "error"}:
+                        return events
+    except TimeoutError as exc:
+        types = [e.get("type") for e in events]
+        raise TimeoutError(
+            f"SSE stream did not reach a terminal 'done' or 'error' event "
+            f"within {_SSE_DRAIN_TIMEOUT_SECONDS}s; collected {len(events)} "
+            f"events with types={types!r}"
+        ) from exc
+    types = [e.get("type") for e in events]
+    raise AssertionError(
+        f"SSE stream ended without a terminal 'done' or 'error' event; "
+        f"types={types!r} events={events!r}"
+    )
 
 
+@pytest.mark.real_llm
 async def test_send_with_image_attachment_marks_attached_and_returns_history(
     member_client_org_a, sample_png_bytes
 ) -> None:
@@ -92,7 +117,13 @@ async def test_send_with_image_attachment_marks_attached_and_returns_history(
         conv,
         {"content": "describe this image briefly", "attachments": [fid]},
     )
-    assert any(e.get("type") in {"done", "error"} for e in events), events
+    types = [e.get("type") for e in events]
+    # This test now requires a live LLM, so a terminal `error` (e.g. a
+    # placeholder endpoint connection refusal) is a failure, not success.
+    assert "done" in types, (
+        "expected a terminal 'done' event from the live LLM, "
+        f"got types={types!r} events={events!r}"
+    )
 
     listing = (await client.get(f"/api/v1/ws/{ws}/conversations/{conv}/attachments")).json()
     statuses = {a["id"]: a["status"] for a in listing["attachments"]}
