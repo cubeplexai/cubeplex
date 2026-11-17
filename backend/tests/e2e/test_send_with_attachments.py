@@ -121,8 +121,7 @@ async def test_send_with_image_attachment_marks_attached_and_returns_history(
     # This test now requires a live LLM, so a terminal `error` (e.g. a
     # placeholder endpoint connection refusal) is a failure, not success.
     assert "done" in types, (
-        "expected a terminal 'done' event from the live LLM, "
-        f"got types={types!r} events={events!r}"
+        f"expected a terminal 'done' event from the live LLM, got types={types!r} events={events!r}"
     )
 
     listing = (await client.get(f"/api/v1/ws/{ws}/conversations/{conv}/attachments")).json()
