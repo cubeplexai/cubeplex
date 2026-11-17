@@ -172,6 +172,7 @@ async def manager(
     # pause/resume orchestration and must run against the pause-enabled branch
     # — mirrors tests/unit/test_sandbox_manager_pause.py:71.
     mgr._pause_on_idle = True
+    mgr._paused_ttl_seconds = 86400
     return mgr
 
 

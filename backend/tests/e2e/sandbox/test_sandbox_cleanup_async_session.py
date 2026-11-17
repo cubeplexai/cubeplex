@@ -65,7 +65,8 @@ class _FakeCleanupProvider(SandboxProvider):
     async def pause(self, sandbox_id: str) -> None:
         del sandbox_id
 
-    async def terminate(self, sandbox_id: str) -> None:
+    async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
+        del delete_volumes
         self.terminated_ids.append(sandbox_id)
 
     async def renew_ttl(self, sandbox_id: str, ttl_seconds: int) -> None:
@@ -394,3 +395,126 @@ async def test_get_or_create_revives_unhealthy_running_sandbox(
     revived_row = await _fetch_row(session_factory, stale_row_id)
     assert revived_row.status == "running"
     assert revived_row.sandbox_id == fresh_id
+
+
+async def test_restart_pause_capable_sandbox_preserves_instance_and_resumes(
+    session_factory: async_sessionmaker[AsyncSession],
+    seeded_org_ws_user: tuple[str, str, str, str],
+    enc_backend: FernetBackend,
+) -> None:
+    """Restart on a pause-capable provider pauses (retaining sandbox_id) and retries cleanly."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    org_id, ws_a, _ws_b, user_id = seeded_org_ws_user
+    sbx_id = f"cpod-rst-{secrets.token_hex(4)}"
+
+    class _PausingProvider(_FakeCleanupProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.paused_ids: list[str] = []
+            self.resumed_ids: list[str] = []
+            self.fail_next_pause = True
+
+        @property
+        def capabilities(self) -> SandboxCapabilities:
+            return SandboxCapabilities(
+                background=True,
+                persistent_volume=True,
+                pause=True,
+                reset_rootfs=True,
+                egress_proxy=True,
+            )
+
+        async def pause(self, sandbox_id: str) -> None:
+            if self.fail_next_pause:
+                self.fail_next_pause = False
+                raise RuntimeError("transient pause error")
+            self.paused_ids.append(sandbox_id)
+
+        async def inspect_state(self, sandbox_id: str) -> ProviderInstanceState | None:
+            if sandbox_id in self.paused_ids:
+                return ProviderInstanceState.PAUSED
+            return ProviderInstanceState.RUNNING
+
+        async def resume(
+            self,
+            sandbox_id: str,
+            *,
+            workdir: str | None = None,
+            user_sandbox_id: str | None = None,
+            run_identity: Any = None,
+        ) -> Any:
+            del workdir, user_sandbox_id, run_identity
+            self.resumed_ids.append(sandbox_id)
+            fake = MagicMock()
+            fake.id = sandbox_id
+            fake.set_run_env = MagicMock()
+            fake.renew = AsyncMock()
+            fake.close = AsyncMock()
+            return fake
+
+    provider = _PausingProvider()
+    mgr = _make_manager(session_factory, enc_backend, provider)
+    mgr._exchange_host = "exchange.internal"
+
+    row_id = await _seed_row(
+        session_factory,
+        org_id=org_id,
+        workspace_id=ws_a,
+        user_id=user_id,
+        status="running",
+        sandbox_id=sbx_id,
+        last_activity_at=datetime.now(UTC) - timedelta(seconds=3600),
+        ttl_seconds=60,
+    )
+    async with session_factory() as session:
+        ref = EgressRef(
+            ref_hash=secrets.token_hex(16),
+            sandbox_id=sbx_id,
+            org_id=org_id,
+            workspace_id=ws_a,
+            user_id=user_id,
+            status="valid",
+            bindings=[{"env_name": "SECRET_A"}],
+        )
+        session.add(ref)
+        await session.commit()
+        ref_id = ref.id
+
+    # First attempt hits transient pause error -> stays kill_pending + restart with sandbox_id kept.
+    await mgr.restart_user_sandbox(row_id)
+    pending_row = await _fetch_row(session_factory, row_id)
+    assert pending_row.status == "kill_pending"
+    assert pending_row.cleanup_action == "restart"
+    assert pending_row.sandbox_id == sbx_id
+    assert provider.terminated_ids == []
+
+    # Reaper retry pauses the instance (never terminates) and revokes old EgressRef.
+    await mgr.cleanup_expired()
+    paused_row = await _fetch_row(session_factory, row_id)
+    assert paused_row.status == "paused"
+    assert paused_row.cleanup_action is None
+    assert paused_row.cleanup_requested_at is None
+    assert paused_row.sandbox_id == sbx_id
+    assert paused_row.paused_at is not None
+    assert provider.paused_ids == [sbx_id]
+    assert provider.terminated_ids == []
+    async with session_factory() as session:
+        ref_row = (
+            await session.execute(sa.select(EgressRef).where(EgressRef.id == ref_id))  # type: ignore[arg-type]
+        ).scalar_one()
+        assert ref_row.status == "revoked"
+
+    # Next get_or_create resumes the exact same provider sandbox_id (RootFS preserved).
+    attachment = await mgr.get_or_create(
+        scope_type=paused_row.scope_type,
+        scope_id=paused_row.scope_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_a,
+    )
+    assert attachment.sandbox.id == sbx_id
+    assert provider.resumed_ids == [sbx_id]
+    resumed_row = await _fetch_row(session_factory, row_id)
+    assert resumed_row.status == "running"
+    assert resumed_row.sandbox_id == sbx_id

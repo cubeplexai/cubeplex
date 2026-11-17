@@ -950,3 +950,31 @@ async def test_to_cubepod_network_policy_and_create_upstream_proxy() -> None:
     assert create_bodies[0]["extension"]["networkPolicy"]["upstreamProxy"] == (
         "http://proxy.corp:3128"
     )
+
+
+async def test_cubepod_terminate_forwards_delete_volumes() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE" and request.url.path.startswith("/sandboxes/"):
+            seen.append((request.url.path, request.url.query.decode()))
+            return httpx.Response(204)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    provider = CubePodProvider(
+        client=AsyncCubePod(
+            base_url="http://cubepod.local",
+            transport=httpx.MockTransport(handler),
+        ),
+        poll_interval=0.0,
+    )
+    try:
+        await provider.terminate("cpod-keep-vol")
+        await provider.terminate("cpod-drop-vol", delete_volumes=True)
+    finally:
+        await provider.aclose()
+
+    assert seen == [
+        ("/sandboxes/cpod-keep-vol", ""),
+        ("/sandboxes/cpod-drop-vol", "deleteVolumes=true"),
+    ]

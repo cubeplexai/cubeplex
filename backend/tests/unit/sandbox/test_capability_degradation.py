@@ -372,7 +372,7 @@ async def test_panel_token_and_ws_upstream_routing_without_duplicate_host_header
         async def pause(self, sandbox_id):  # type: ignore[no-untyped-def]
             raise NotImplementedError
 
-        async def terminate(self, sandbox_id):  # type: ignore[no-untyped-def]
+        async def terminate(self, sandbox_id, *, delete_volumes=False):  # type: ignore[no-untyped-def]
             raise NotImplementedError
 
         async def renew_ttl(self, sandbox_id, ttl_seconds):  # type: ignore[no-untyped-def]

@@ -149,3 +149,20 @@ async def test_local_provider_resolve_workdir_does_not_double_nest(
     sb = await provider.create(_spec(resolved, volume_key="vol-1"))
     assert sb.workdir == resolved
     assert provider.resolve_workdir(volume_key=None) == str(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_local_provider_terminate_delete_volumes_removes_scoped_workdir(
+    tmp_path: Path,
+) -> None:
+    provider = LocalSandboxProvider(base_workdir=str(tmp_path))
+    sb_keep = await provider.create(_spec(str(tmp_path), volume_key="vol-keep"))
+    (Path(sb_keep.workdir) / "note.txt").write_text("keep", encoding="utf-8")
+    await provider.terminate(sb_keep.id, delete_volumes=False)
+    assert (Path(sb_keep.workdir) / "note.txt").exists()
+
+    sb_drop = await provider.create(_spec(str(tmp_path), volume_key="vol-drop"))
+    (Path(sb_drop.workdir) / "note.txt").write_text("drop", encoding="utf-8")
+    await provider.terminate(sb_drop.id, delete_volumes=True)
+    assert not Path(sb_drop.workdir).exists()
+    assert tmp_path.is_dir()

@@ -420,7 +420,7 @@ call → `tool_result` works end to end.
 | Secret injection / env substitution (`cbxref_…` placeholders) | – | ❌ Not available. It needs the backend mTLS credential-exchange listener + egress CA/client certs that the Kubernetes chart deploys (`gen-egress-certs.sh` + the egress webhook). The compose overlay ships none of that, and `sandbox.egress_exchange_host` stays empty, so injection is disabled. |
 | Server-proxy mode (`use_server_proxy: true`) | On Kubernetes release-1.1.1 the proxied URL keeps the target port in the path (`/proxy/<port>`). Checked against a local 1.1.1 server. | Compose still sets `use_server_proxy: false`. The overlay reaches sandbox containers through host-mapped bridge ports: `extra_hosts` sets `host.docker.internal` on both the backend and opensandbox-server. |
 | `pvc.claimName` volumes | Yes — but treated as Docker named volumes | No CSI features, no ReadWriteMany |
-| Pause / resume (`POST /sandboxes/{id}/pause`, etc.) | Calls Docker `pause`/`unpause` (cgroup freezer) | No checkpoint to disk — paused state is lost on host Docker restart. CubePlex defaults `pause_on_idle: false` for this reason. |
+| Pause / resume (`POST /sandboxes/{id}/pause`, etc.) | Calls Docker `pause`/`unpause` (cgroup freezer) | No checkpoint to disk — paused state is lost on host Docker restart (CubePlex automatically revives from `/workspace` on next use). Set `sandbox.pause_on_idle: false` if you prefer killing idle Docker containers instead of freezing them. |
 
 **In short:** under Docker-mode OpenSandbox, the agent can *run* commands,
 read/write files, browse the file tree, and open the interactive **terminal**

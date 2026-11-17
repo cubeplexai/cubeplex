@@ -88,9 +88,25 @@ async def test_kill_success_marks_terminated() -> None:
 
     await mgr._kill_record(session, repo, record)
 
-    provider.terminate.assert_awaited_once_with(record.sandbox_id)
+    provider.terminate.assert_awaited_once_with(record.sandbox_id, delete_volumes=False)
     repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
     repo.mark_kill_pending.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_kill_delete_on_success_passes_delete_volumes_true() -> None:
+    """Explicit sandbox deletion must pass delete_volumes=True to provider.terminate()."""
+    provider = _make_provider()
+    mgr = _make_manager(provider)
+    session = MagicMock()
+    repo = AsyncMock()
+    record = _make_record(cleanup_action="delete")
+
+    await mgr._kill_record(session, repo, record, delete_on_success=True)
+
+    provider.terminate.assert_awaited_once_with(record.sandbox_id, delete_volumes=True)
+    repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
+    repo.soft_delete.assert_awaited_once_with(record.id)
 
 
 @pytest.mark.asyncio

@@ -245,7 +245,10 @@ sandbox:
 | `sandbox.cubepod.api_key` | `""` | CubePod 网关的可选 Bearer token（若填写则拒绝占位符）。环境变量覆盖：`CUBEPLEX_SANDBOX__CUBEPOD__API_KEY`。 |
 | `sandbox.cubepod.default_template` | `cubeplex-ubuntu24-desktop` | 默认 CubePod 模板名称。当 `sandbox.provider` 为 `cubepod` 时必填。环境变量覆盖：`CUBEPLEX_SANDBOX__CUBEPOD__DEFAULT_TEMPLATE`。 |
 | `sandbox.cubepod.warm_pool` | `""` | 创建沙箱时可选使用的 CubePod `PodWarmPool` 名称。环境变量覆盖：`CUBEPLEX_SANDBOX__CUBEPOD__WARM_POOL`。 |
-| `sandbox.ttl` | `1800` | 空闲 30 分钟后回收。 |
+| `sandbox.ttl` | `1800` | 当 `pause_on_idle` 为 `false` 或提供商不支持 `pause` 时，运行中沙箱空闲多少秒后被销毁。 |
+| `sandbox.pause_on_idle` | `true` | 在支持 `pause` 的提供商（如 CubePod）上，空闲时暂停沙箱而非直接销毁。环境变量覆盖：`CUBEPLEX_SANDBOX__PAUSE_ON_IDLE`。 |
+| `sandbox.idle_ttl_seconds` | `1800` | `pause_on_idle` 将运行中沙箱置为暂停前的空闲秒数。环境变量覆盖：`CUBEPLEX_SANDBOX__IDLE_TTL_SECONDS`。 |
+| `sandbox.paused_ttl_seconds` | `0` | 已暂停沙箱被自动销毁前的保留秒数（`<= 0` 表示永不自动销毁，保留系统盘与 `/workspace` 直至沙箱或工作区被显式删除）。环境变量覆盖：`CUBEPLEX_SANDBOX__PAUSED_TTL_SECONDS`。 |
 | `sandbox.ready_timeout` | `300` | 等待新建沙箱就绪的秒数（覆盖冷拉镜像耗时）。 |
 | `sandbox.command_default_timeout_seconds` | `3600` | 正整数秒数，上限 `2147483647`（32 位秒数技术上限）。启动时若为超范围值、非整数、布尔值或 `null`，后端会直接拒绝启动。环境变量覆盖：`CUBEPLEX_SANDBOX__COMMAND_DEFAULT_TIMEOUT_SECONDS`。 |
 | `sandbox.run_user` / `run_uid` / `run_gid` | `cubeplex` / `1000` / `1000` | agent 命令和上传文件以此用户身份运行，需与沙箱镜像匹配。将 `run_uid` 设为 `null` 可保留原先的 root 默认身份。浏览器组件仍以 root 启动。 |

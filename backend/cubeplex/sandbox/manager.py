@@ -27,7 +27,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
@@ -239,7 +239,7 @@ class SandboxManager:
         # Pause/resume knobs
         self._pause_on_idle: bool = config.get("sandbox.pause_on_idle", True)
         self._idle_ttl_seconds: int = config.get("sandbox.idle_ttl_seconds", 30 * 60)
-        self._paused_ttl_seconds: int = config.get("sandbox.paused_ttl_seconds", 24 * 60)
+        self._paused_ttl_seconds: int = config.get("sandbox.paused_ttl_seconds", 0)
         self._resume_timeout: int = config.get("sandbox.resume_timeout", 30)
         self._lease_seconds: int = config.get("sandbox.lease_seconds", 5 * 60)
         self._pause_attempt_grace_seconds: int = config.get(
@@ -673,6 +673,7 @@ class SandboxManager:
                         user_id=effective_user_id,
                         image=policy.default_image,
                         ttl_seconds=self._ttl,
+                        paused_ttl_seconds=self._paused_ttl_seconds,
                         scope_type=scope_type,
                         scope_id=scope_id,
                         provider=provider.name,
@@ -914,6 +915,7 @@ class SandboxManager:
                 sandbox_id=sandbox_id,
                 image=policy.default_image,
                 provider=provider.name,
+                paused_ttl_seconds=self._paused_ttl_seconds,
             )
             promoted = True
         except SandboxCleanupRequestedError as exc:
@@ -1261,6 +1263,9 @@ class SandboxManager:
                 sandbox_instance_id=instance_id,
                 now=requested_at,
             )
+            if action == "restart" and self._provider_for_record(row).capabilities.pause:
+                await self._pause_record_for_restart(session, repo, row)
+                return
             await self._kill_record(
                 session,
                 repo,
@@ -1283,6 +1288,111 @@ class SandboxManager:
             action="delete",
             raise_on_delete_conflict=False,
         )
+
+    async def _cleanup_rows_for_hard_delete(
+        self,
+        session: AsyncSession,
+        rows: list[UserSandbox],
+    ) -> bool:
+        """Destroy provider instances + volumes for rows being hard-deleted.
+
+        Returns ``True`` if any row remains unconfirmed (``deleted_at is None``).
+        """
+        pending = False
+        for row in rows:
+            if row.deleted_at is not None:
+                continue
+            row_id = row.id
+            prior_status = row.status
+            prior_action = row.cleanup_action
+            prior_requested_at = row.cleanup_requested_at
+            instance_id = self._cleanup_instance_id(row.sandbox_id)
+            repo = UserSandboxRepository(session, org_id=row.org_id, workspace_id=row.workspace_id)
+            requested_at = datetime.now(UTC)
+            await repo.request_cleanup(row_id, action="delete", requested_at=requested_at)
+            if instance_id is None:
+                finalized = await self._finalize_cleanup_without_instance(
+                    repo,
+                    row,
+                    action="delete",
+                    now=requested_at,
+                    prior_status=prior_status,
+                    prior_cleanup_action=prior_action,
+                    prior_cleanup_requested_at=prior_requested_at,
+                )
+                if not finalized:
+                    pending = True
+                continue
+            await BackgroundTaskService(
+                session,
+                org_id=row.org_id,
+                workspace_id=row.workspace_id,
+            ).request_environment_stop(
+                user_sandbox_id=row_id,
+                sandbox_instance_id=instance_id,
+                reason=TaskStopReason.user_stop,
+                now=requested_at,
+            )
+            await session.commit()
+            await self._kill_record(session, repo, row, delete_on_success=True)
+            refreshed = await UserSandboxRepository.get_by_id_system(session, row_id)
+            if refreshed is not None and refreshed.deleted_at is None:
+                pending = True
+        return pending
+
+    async def delete_workspace_sandboxes(
+        self,
+        workspace_id: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Delete all provider sandboxes and volumes owned by ``workspace_id``."""
+
+        async def _run(active_session: AsyncSession) -> bool:
+            stmt = select(UserSandbox).where(
+                UserSandbox.workspace_id == workspace_id,  # type: ignore[arg-type]
+                col(UserSandbox.deleted_at).is_(None),
+                or_(
+                    col(UserSandbox.sandbox_id).is_not(None),
+                    col(UserSandbox.status).in_(("provisioning", "kill_pending")),
+                ),
+            )
+            rows = list((await active_session.execute(stmt)).scalars().all())
+            if not rows:
+                return False
+            return await self._cleanup_rows_for_hard_delete(active_session, rows)
+
+        if session is not None:
+            return await _run(session)
+        async with self._session_factory() as owned_session:
+            return await _run(owned_session)
+
+    async def delete_user_sandboxes(
+        self,
+        user_id: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Delete all provider sandboxes and volumes owned by ``user_id``."""
+
+        async def _run(active_session: AsyncSession) -> bool:
+            stmt = select(UserSandbox).where(
+                UserSandbox.user_id == user_id,  # type: ignore[arg-type]
+                col(UserSandbox.deleted_at).is_(None),
+                or_(
+                    col(UserSandbox.sandbox_id).is_not(None),
+                    col(UserSandbox.status).in_(("provisioning", "kill_pending")),
+                ),
+            )
+            rows = list((await active_session.execute(stmt)).scalars().all())
+            if not rows:
+                return False
+            return await self._cleanup_rows_for_hard_delete(active_session, rows)
+
+        if session is not None:
+            return await _run(session)
+        async with self._session_factory() as owned_session:
+            return await _run(owned_session)
 
     def _get_lifecycle_lock(self, user_sandbox_id: str) -> asyncio.Lock:
         lock = self._lifecycle_locks.get(user_sandbox_id)
@@ -1576,6 +1686,16 @@ class SandboxManager:
                             record.id,
                         )
                         continue
+                    if record.status == "running" and self._pause_on_idle:
+                        if self._provider_for_record(record).capabilities.pause:
+                            continue
+                    if (
+                        record.status == "kill_pending"
+                        and record.cleanup_action == "restart"
+                        and self._provider_for_record(record).capabilities.pause
+                    ):
+                        await self._pause_record_for_restart(session, scoped_repo, record)
+                        continue
                     await self._kill_record(session, scoped_repo, record)
                 except Exception:
                     logger.opt(exception=True).warning(
@@ -1836,6 +1956,8 @@ class SandboxManager:
 
     async def reap_paused(self) -> None:
         """Hard-kill paused rows past paused_ttl_seconds."""
+        if self._paused_ttl_seconds <= 0:
+            return
         async with self._session_factory() as session:
             expired = await UserSandboxRepository.list_paused_expired_system(session)
             for record in expired:
@@ -1934,6 +2056,88 @@ class SandboxManager:
                         record.id,
                     )
 
+    async def _pause_record_for_restart(
+        self,
+        session: AsyncSession,
+        scoped_repo: UserSandboxRepository,
+        record: UserSandbox,
+    ) -> None:
+        """Pause a sandbox for user restart so RootFS and /workspace are preserved."""
+        record_id = record.id
+        sandbox_id = record.sandbox_id
+        assert sandbox_id, "restart pause target must have sandbox_id"
+        provider = self._provider_for_record(record)
+
+        async def _teardown_session_state() -> None:
+            try:
+                from cubeplex.sandbox.command_coordinator import kill_sandbox_commands
+
+                async def _no_sandbox(_row: object) -> None:
+                    return None
+
+                await kill_sandbox_commands(session, record_id, get_sandbox=_no_sandbox)
+            except Exception:
+                logger.exception("failed to mark sandbox commands killed for {}", record_id)
+            if self._exchange_host:
+                await self._revoke_egress(session, sandbox_id)
+
+        try:
+            await provider.pause(sandbox_id)
+        except SandboxInstanceGoneError:
+            await _teardown_session_state()
+            await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
+            return
+        except SandboxConflictError as exc:
+            try:
+                conflict_state = await provider.inspect_state(sandbox_id)
+            except Exception:
+                logger.warning(
+                    "Restart pause conflict for {} (will retry): {}",
+                    sandbox_id,
+                    exc,
+                )
+                await scoped_repo.mark_kill_pending(record_id)
+                return
+            if conflict_state is None or conflict_state in (
+                ProviderInstanceState.FAILED,
+                ProviderInstanceState.TERMINATED,
+            ):
+                await _teardown_session_state()
+                await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
+                return
+            if conflict_state != ProviderInstanceState.PAUSED:
+                await scoped_repo.mark_kill_pending(record_id)
+                return
+        except Exception as exc:
+            logger.warning(
+                "Failed to pause sandbox {} for restart (will retry on next loop): {}",
+                sandbox_id,
+                exc,
+            )
+            await scoped_repo.mark_kill_pending(record_id)
+            return
+
+        await _teardown_session_state()
+        try:
+            state = await provider.inspect_state(sandbox_id)
+        except Exception:
+            state = ProviderInstanceState.TRANSITIONAL
+
+        if state is None or state in (
+            ProviderInstanceState.FAILED,
+            ProviderInstanceState.TERMINATED,
+        ):
+            await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
+        elif state == ProviderInstanceState.PAUSED:
+            await scoped_repo.mark_paused(record_id, paused_at=datetime.now(UTC))
+            logger.info("Paused sandbox {} for non-destructive restart", sandbox_id)
+        else:
+            await scoped_repo.mark_pausing_from_restart(record_id)
+            logger.info(
+                "Pause initiated for restart of {}; reconciler will advance to paused",
+                sandbox_id,
+            )
+
     async def _kill_record(
         self,
         session: AsyncSession,
@@ -1953,8 +2157,8 @@ class SandboxManager:
         provider = self._provider_for_record(record)
         killed = False
         try:
-            await provider.terminate(sandbox_id)
-            logger.info("Killed sandbox {}", sandbox_id)
+            await provider.terminate(sandbox_id, delete_volumes=should_delete)
+            logger.info("Killed sandbox {} (delete_volumes={})", sandbox_id, should_delete)
             killed = True
         except Exception as exc:
             logger.warning(
@@ -1975,17 +2179,18 @@ class SandboxManager:
             await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
             if should_delete:
                 await scoped_repo.soft_delete(record_id)
-                logger.warning(
-                    "UserSandbox {} soft-deleted after provider cleanup; volume {} is now "
-                    "orphaned for operator reclamation",
-                    record_id,
-                    build_sandbox_pvc_name(
-                        self._volume_pvc_prefix,
-                        workspace_id,
-                        scope_type,
-                        scope_id,
-                    ),
-                )
+                if provider.name == "opensandbox":
+                    logger.warning(
+                        "UserSandbox {} soft-deleted after provider cleanup; volume {} is now "
+                        "orphaned for operator reclamation",
+                        record_id,
+                        build_sandbox_pvc_name(
+                            self._volume_pvc_prefix,
+                            workspace_id,
+                            scope_type,
+                            scope_id,
+                        ),
+                    )
             if self._exchange_host and sandbox_id:
                 await self._revoke_egress(session, sandbox_id)
         else:
@@ -2003,6 +2208,11 @@ def init_sandbox_manager(
     """Initialize the global SandboxManager singleton."""
     global _sandbox_manager
     _sandbox_manager = SandboxManager(session_factory, encryption_backend, registry=registry)
+    return _sandbox_manager
+
+
+def get_sandbox_manager_or_none() -> SandboxManager | None:
+    """Return the global SandboxManager singleton if initialized, else ``None``."""
     return _sandbox_manager
 
 

@@ -63,7 +63,7 @@ class UserSandbox(CubeplexBase, OrgScopedMixin, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
     paused_ttl_seconds: int = Field(
-        default=24 * 60,
+        default=0,
         sa_column_kwargs={"server_default": "1440"},
     )
     last_resumed_at: datetime | None = Field(

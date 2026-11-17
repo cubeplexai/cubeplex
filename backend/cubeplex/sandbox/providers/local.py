@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+import shutil
 import signal
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -453,8 +454,13 @@ class LocalSandboxProvider(SandboxProvider):
             return ProviderInstanceState.RUNNING
         return None
 
-    async def terminate(self, sandbox_id: str) -> None:
-        self._instances.pop(sandbox_id, None)
+    async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
+        existing = self._instances.pop(sandbox_id, None)
+        if delete_volumes and existing is not None:
+            base_dir = Path(self.default_workdir).resolve()
+            target_dir = Path(existing.workdir).resolve()
+            if target_dir != base_dir and target_dir.is_relative_to(base_dir):
+                shutil.rmtree(target_dir, ignore_errors=True)
 
     async def aclose(self) -> None:
         self._instances.clear()

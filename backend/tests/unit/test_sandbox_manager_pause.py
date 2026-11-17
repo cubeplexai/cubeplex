@@ -190,7 +190,7 @@ async def test_pause_idle_pause_raises_reverts_and_kills(mock_encryption_backend
     # get_or_create could observe `running` and return a handle to a
     # sandbox we're about to terminate (codex P2 round 3).
     scoped_repo.mark_running.assert_not_called()
-    provider.terminate.assert_awaited_once_with(record.sandbox_id)
+    provider.terminate.assert_awaited_once_with(record.sandbox_id, delete_volumes=False)
     scoped_repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
 
 
@@ -225,7 +225,7 @@ async def test_pause_idle_no_capability_kills_record(mock_encryption_backend: An
     # Same race rationale as the pause-failure path: never flip the
     # claimed row back to `running` before killing.
     scoped_repo.mark_running.assert_not_called()
-    provider.terminate.assert_awaited_once_with(record.sandbox_id)
+    provider.terminate.assert_awaited_once_with(record.sandbox_id, delete_volumes=False)
     scoped_repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
 
 
@@ -581,8 +581,80 @@ async def test_kill_record_marks_kill_pending_on_failure(
 
 def test_pause_resume_config_knob_defaults(manager: SandboxManager) -> None:
     """Verify the new config knobs are read at __init__ time."""
-    assert isinstance(manager._pause_on_idle, bool)
+    assert manager._pause_on_idle is True
     assert manager._idle_ttl_seconds > 0
-    assert manager._paused_ttl_seconds > 0
+    assert manager._paused_ttl_seconds == 0
     assert manager._resume_timeout > 0
     assert manager._lease_seconds > 0
+
+
+@pytest.mark.asyncio
+async def test_reap_paused_noop_when_paused_ttl_disabled(
+    mock_encryption_backend: Any,
+) -> None:
+    """When paused_ttl_seconds <= 0, reap_paused must not terminate any paused rows."""
+    factory, _ = _make_session_factory()
+    registry, provider = _make_registry()
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
+    mgr._paused_ttl_seconds = 0
+
+    with patch(
+        "cubeplex.sandbox.manager.UserSandboxRepository.list_paused_expired_system",
+        new=AsyncMock(),
+    ) as list_mock:
+        await mgr.reap_paused()
+
+    list_mock.assert_not_awaited()
+    provider.terminate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_expired_skips_pause_capable_running_rows_when_pause_on_idle(
+    mock_encryption_backend: Any,
+) -> None:
+    """cleanup_expired must leave pause-capable running rows for pause_idle when pause_on_idle=True."""
+    factory, _ = _make_session_factory()
+    pause_provider = MagicMock(name="CubePodProvider")
+    pause_provider.name = "cubepod"
+    pause_provider.capabilities = SandboxCapabilities(pause=True)
+    pause_provider.terminate = AsyncMock()
+
+    nopause_provider = MagicMock(name="LocalProvider")
+    nopause_provider.name = "local"
+    nopause_provider.capabilities = SandboxCapabilities(pause=False)
+    nopause_provider.terminate = AsyncMock()
+
+    registry = ProviderRegistry(
+        {"cubepod": pause_provider, "local": nopause_provider},
+        default_name="cubepod",
+    )
+    mgr = SandboxManager(factory, mock_encryption_backend, registry=registry)
+    mgr._exchange_host = ""
+    mgr._pause_on_idle = True
+
+    pause_running = _make_record(record_id="rec-pause", sandbox_id="cpod-1")
+    pause_running.status = "running"
+    pause_running.cleanup_action = None
+    pause_running.provider = "cubepod"
+
+    nopause_running = _make_record(record_id="rec-local", sandbox_id="local-1")
+    nopause_running.status = "running"
+    nopause_running.cleanup_action = None
+    nopause_running.provider = "local"
+
+    by_id = {
+        "rec-pause": pause_running,
+        "rec-local": nopause_running,
+    }
+    scoped_repo = MagicMock()
+    scoped_repo.get = AsyncMock(side_effect=lambda rid: by_id[rid])
+    scoped_repo.mark_terminated = AsyncMock()
+    scoped_repo.mark_kill_pending = AsyncMock()
+
+    with patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls:
+        repo_cls.list_expired_system = AsyncMock(return_value=[pause_running, nopause_running])
+        repo_cls.return_value = scoped_repo
+        await mgr.cleanup_expired()
+
+    pause_provider.terminate.assert_not_awaited()
+    nopause_provider.terminate.assert_awaited_once()

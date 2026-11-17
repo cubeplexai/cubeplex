@@ -163,7 +163,7 @@ class SandboxProvider(ABC):
         raise SandboxCapabilityUnsupportedError("pause", self.name)
 
     @abstractmethod
-    async def terminate(self, sandbox_id: str) -> None:
+    async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
         """Destroy an instance idempotently (missing instance succeeds)."""
         ...
 

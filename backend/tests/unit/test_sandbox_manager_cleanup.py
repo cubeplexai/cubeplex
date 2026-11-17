@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cubeplex.models.background_task import TaskStopReason
+from cubeplex.sandbox.base import SandboxCapabilities
 from cubeplex.sandbox.manager import SandboxManager
+from cubeplex.sandbox.provider import ProviderInstanceState
+from cubeplex.sandbox.registry import ProviderRegistry
 
 
 def _session_factory() -> tuple[MagicMock, MagicMock]:
@@ -37,14 +40,25 @@ def _record(*, status: str = "running", cleanup_action: str | None = None) -> Ma
 
 
 @pytest.mark.asyncio
-async def test_restart_stops_original_instance_tasks_before_provider_cleanup(
+async def test_restart_pauses_pause_capable_provider_after_fencing_tasks(
     mock_encryption_backend: Any,
 ) -> None:
     factory, _ = _session_factory()
-    manager = SandboxManager(factory, mock_encryption_backend)
+    provider = MagicMock(name="CubePodProvider")
+    provider.name = "cubepod"
+    provider.capabilities = SandboxCapabilities(pause=True)
+    provider.pause = AsyncMock()
+    provider.inspect_state = AsyncMock(return_value=ProviderInstanceState.PAUSED)
+    provider.terminate = AsyncMock()
+    registry = ProviderRegistry({"cubepod": provider}, default_name="cubepod")
+
+    manager = SandboxManager(factory, mock_encryption_backend, registry=registry)
+    manager._exchange_host = ""
     row = _record()
+    row.provider = "cubepod"
     repo = MagicMock()
     repo.request_cleanup = AsyncMock(return_value=True)
+    repo.mark_paused = AsyncMock(return_value=True)
     task_service = MagicMock()
     task_service.request_environment_stop = AsyncMock(return_value=["task-1"])
     manager._kill_record = AsyncMock()  # type: ignore[method-assign]
@@ -52,6 +66,10 @@ async def test_restart_stops_original_instance_tasks_before_provider_cleanup(
     with (
         patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
         patch("cubeplex.sandbox.manager.BackgroundTaskService", return_value=task_service),
+        patch(
+            "cubeplex.sandbox.command_coordinator.kill_sandbox_commands",
+            new=AsyncMock(),
+        ),
     ):
         repo_cls.get_by_id_system = AsyncMock(return_value=row)
         repo_cls.return_value = repo
@@ -66,6 +84,39 @@ async def test_restart_stops_original_instance_tasks_before_provider_cleanup(
         reason=TaskStopReason.user_stop,
         now=requested_at,
     )
+    provider.pause.assert_awaited_once_with("provider-instance")
+    provider.terminate.assert_not_awaited()
+    manager._kill_record.assert_not_awaited()
+    repo.mark_paused.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_restart_falls_back_to_kill_on_non_pausing_provider(
+    mock_encryption_backend: Any,
+) -> None:
+    factory, _ = _session_factory()
+    provider = MagicMock(name="LocalProvider")
+    provider.name = "local"
+    provider.capabilities = SandboxCapabilities(pause=False)
+    registry = ProviderRegistry({"local": provider}, default_name="local")
+
+    manager = SandboxManager(factory, mock_encryption_backend, registry=registry)
+    row = _record()
+    row.provider = "local"
+    repo = MagicMock()
+    repo.request_cleanup = AsyncMock(return_value=True)
+    task_service = MagicMock()
+    task_service.request_environment_stop = AsyncMock(return_value=["task-1"])
+    manager._kill_record = AsyncMock()  # type: ignore[method-assign]
+
+    with (
+        patch("cubeplex.sandbox.manager.UserSandboxRepository") as repo_cls,
+        patch("cubeplex.sandbox.manager.BackgroundTaskService", return_value=task_service),
+    ):
+        repo_cls.get_by_id_system = AsyncMock(return_value=row)
+        repo_cls.return_value = repo
+        await manager.restart_user_sandbox(row.id)
+
     manager._kill_record.assert_awaited_once()
     assert manager._kill_record.await_args.kwargs["delete_on_success"] is False
 

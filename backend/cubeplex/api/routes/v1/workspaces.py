@@ -353,6 +353,14 @@ async def delete_workspace(
     if closed.cleanup_pending:
         return HardDeleteResponse(deleted=False, cleanup_pending=True)
 
+    from cubeplex.sandbox.manager import get_sandbox_manager_or_none
+
+    sandbox_manager = get_sandbox_manager_or_none()
+    if sandbox_manager is not None and await sandbox_manager.delete_workspace_sandboxes(
+        workspace_id, session=session
+    ):
+        return HardDeleteResponse(deleted=False, cleanup_pending=True)
+
     # Collect vault credential ids from workspace-scoped grants and sandbox env
     # vars before those rows are deleted, so we can remove the backing secrets.
     from cubeplex.models.credential import Credential
@@ -486,10 +494,24 @@ async def delete_workspace(
 
     await purge_workspace_execution_state(session, workspace_id=workspace_id)
 
+    # Break bidirectional FK between user_sandboxes and user_sandbox_sync_events
+    # before deleting UserSandbox rows.
+    from sqlalchemy import update as sa_update
+
+    from cubeplex.models.user_sandbox_sync_event import UserSandboxSyncEvent
+
+    await session.execute(
+        sa_update(UserSandbox)
+        .where(UserSandbox.workspace_id == workspace_id)  # type: ignore[arg-type]
+        .values(last_skill_sync_event_id=None)
+    )
+    await session.execute(
+        sa_delete(UserSandboxSyncEvent).where(
+            UserSandboxSyncEvent.workspace_id == workspace_id  # type: ignore[arg-type]
+        )
+    )
+
     # Delete child rows deepest-first to avoid FK violations.
-    # NOTE: UserSandbox rows are deleted without calling the sandbox manager's
-    # kill path. Provider sandboxes are reaped by cleanup_expired. A public
-    # sandbox-manager kill-by-workspace API is the proper fix — tracked follow-up.
     ws_child_tables = [
         EgressRef,
         MemoryItem,
