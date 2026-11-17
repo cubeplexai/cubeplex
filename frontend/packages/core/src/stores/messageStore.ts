@@ -1408,6 +1408,20 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
   return base
 }
 
+function extractEventToolName(tr: ToolResultEvent): string {
+  return tr.data.tool_name ?? (tr.data as unknown as { name?: string }).name ?? ''
+}
+
+function committedToolCallIdsFor(messages: readonly Message[] | undefined): Set<string> {
+  const ids = new Set<string>()
+  for (const msg of messages ?? []) {
+    if (msg.role === 'tool_result' && msg.tool_call_id) {
+      ids.add(msg.tool_call_id)
+    }
+  }
+  return ids
+}
+
 /**
  * Build the assistant (+ tool) messages for a finished/interrupted turn from the
  * current streaming buckets. Pure — reads its inputs, allocates message ids, and
@@ -1421,6 +1435,7 @@ function buildTurnMessages(
   stopReason: AssistantMessageType['stop_reason'] = 'stop',
   runId: string | null = null,
   errorMessage: string | null = null,
+  committedToolCallIds?: ReadonlySet<string>,
 ): { assistantMessage: AssistantMessageType | null; toolMessages: ToolResultMessageType[] } {
   const mainStream = agents[MAIN_AGENT_KEY]
   if (!mainStream) return { assistantMessage: null, toolMessages: [] }
@@ -1463,17 +1478,19 @@ function buildTurnMessages(
   // Persist main-agent tool results into history so the just-finished message
   // remains interactive after streamingConversationId clears. Deduplicate by
   // tool_call_id so streaming ToolExecutionUpdateEvent chunks collapse to the
-  // single persisted checkpoint row, and skip subagent tool results — those
-  // get richer messages from the loop below.
+  // single persisted checkpoint row, and skip subagent tool results only when
+  // a dedicated child stream bucket exists (early errors / reattached streams
+  // without child deltas still rely on the main-stream tool_result).
   const latestToolResults = new Map<string, ToolResultEvent>()
   for (const tr of mainStream.toolResults) {
     const tcId = tr.data.tool_call_id
-    const toolName = tr.data.tool_name ?? (tr.data as unknown as { name?: string }).name ?? ''
-    if (!tcId || toolName === 'subagent') continue
+    const toolName = extractEventToolName(tr)
+    if (!tcId || committedToolCallIds?.has(tcId)) continue
+    if (toolName === 'subagent' && Boolean(agents[`subagent:${tcId}`])) continue
     latestToolResults.set(tcId, tr)
   }
   for (const [tcId, tr] of latestToolResults) {
-    const toolName = tr.data.tool_name ?? (tr.data as unknown as { name?: string }).name ?? ''
+    const toolName = extractEventToolName(tr)
     const mapEntry = toolResultMap[tcId]
     const receivedAtMs =
       mapEntry?.receivedAt ?? (tr.timestamp ? new Date(tr.timestamp).getTime() : Date.now())
@@ -1493,7 +1510,14 @@ function buildTurnMessages(
   for (const [key, agentStream] of Object.entries(agents)) {
     if (key === MAIN_AGENT_KEY) continue
     const toolCallId = key.startsWith('subagent:') ? key.slice(9) : key
+    if (committedToolCallIds?.has(toolCallId)) continue
     const args = subagentArgs[key]
+    const latestInnerToolResults = new Map<string, ToolResultEvent>()
+    for (const tr of agentStream.toolResults) {
+      const innerId = tr.data.tool_call_id
+      if (!innerId) continue
+      latestInnerToolResults.set(innerId, tr)
+    }
     toolMessages.push({
       id: nextMessageId('tool'),
       role: 'tool_result',
@@ -1511,19 +1535,17 @@ function buildTurnMessages(
             id: tc.data.tool_call_id,
             started_at: tc.data.started_at ?? (tc.timestamp || null),
           })),
-          tool_results: agentStream.toolResults
-            .map((tr) => {
-              const mapEntry = toolResultMap[tr.data.tool_call_id ?? '']
-              return {
-                tool_name: tr.data.tool_name ?? '',
-                tool_call_id: tr.data.tool_call_id ?? '',
-                content: tr.data.content ?? '',
-                content_type: tr.data.content_type ?? mapEntry?.contentType ?? null,
-                started_at: tr.data.started_at ?? null,
-                completed_at: tr.timestamp || null,
-              }
-            })
-            .filter((tr) => tr.tool_call_id),
+          tool_results: [...latestInnerToolResults.entries()].map(([innerId, tr]) => {
+            const mapEntry = toolResultMap[innerId]
+            return {
+              tool_name: extractEventToolName(tr),
+              tool_call_id: innerId,
+              content: tr.data.content ?? '',
+              content_type: tr.data.content_type ?? mapEntry?.contentType ?? null,
+              started_at: tr.data.started_at ?? null,
+              completed_at: tr.timestamp || null,
+            }
+          }),
           thinking: agentStream.thinking,
           role: args?.role,
           task: args?.task,
@@ -1569,6 +1591,7 @@ function appendErroredAssistantTurn(
     'error',
     runId,
     errorMessageForAssistant(data),
+    committedToolCallIdsFor(state.messages[conversationId]),
   )
   return [
     ...(state.messages[conversationId] ?? []),
@@ -1584,14 +1607,17 @@ async function finalizeCompletedStream(
   stopReason: AssistantMessageType['stop_reason'] = 'stop',
 ): Promise<void> {
   // Superseded by another send — do not read/clear shared streamAgents or flags.
-  if (!ownsStreamingConversation(get(), conversationId)) return
+  const current = get()
+  if (!ownsStreamingConversation(current, conversationId)) return
 
   const { assistantMessage, toolMessages } = buildTurnMessages(
-    get().streamAgents,
-    get().toolResultMap,
-    get().turnUsage[conversationId] ?? null,
+    current.streamAgents,
+    current.toolResultMap,
+    current.turnUsage[conversationId] ?? null,
     stopReason,
-    get().currentRunId,
+    current.currentRunId,
+    null,
+    committedToolCallIdsFor(current.messages[conversationId]),
   )
 
   if (!assistantMessage) {
@@ -1697,6 +1723,8 @@ async function finalizePausedStream(
     state0.turnUsage[conversationId] ?? null,
     'stop',
     state0.currentRunId,
+    null,
+    committedToolCallIdsFor(state0.messages[conversationId]),
   )
 
   if (!assistantMessage) {
@@ -2974,22 +3002,33 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     //     above, so the user message is forkable too.
     const handleRunId = (runId: string) => {
       set((s) => {
+        const ownsThisSend =
+          ownsStreamingConversation(s, conversationId) &&
+          s.pendingRunClientMessageId === userMessage.id
         const list = s.messages[conversationId] ?? []
         const startIdx = list.findIndex((m) => m.id === userMessage.id)
+        const nextList =
+          startIdx < 0
+            ? list
+            : list.map((m, idx) => {
+                if (ownsThisSend) {
+                  return idx >= startIdx && m.seq === undefined && !m.run_id
+                    ? { ...m, run_id: runId }
+                    : m
+                }
+                return idx === startIdx && m.seq === undefined && !m.run_id
+                  ? { ...m, run_id: runId }
+                  : m
+              })
+        if (!ownsThisSend) {
+          return {
+            messages: { ...s.messages, [conversationId]: nextList },
+          }
+        }
         return {
           currentRunId: runId,
           stopAllStatus: { ...s.stopAllStatus, [conversationId]: null },
-          messages: {
-            ...s.messages,
-            [conversationId]:
-              startIdx < 0
-                ? list
-                : list.map((m, idx) =>
-                    idx >= startIdx && m.seq === undefined && !m.run_id
-                      ? { ...m, run_id: runId }
-                      : m,
-                  ),
-          },
+          messages: { ...s.messages, [conversationId]: nextList },
         }
       })
     }
@@ -3445,14 +3484,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       return
     }
 
-    const runId = state.streamingConversationId === conversationId ? state.currentRunId : null
-    const { assistantMessage, toolMessages } = buildTurnMessages(
-      state.streamAgents,
-      state.toolResultMap,
-      state.turnUsage[conversationId] ?? null,
-      'stop',
-      runId,
-    )
+    const ownsStream = ownsStreamingConversation(state, conversationId)
+    const runId = ownsStream ? state.currentRunId : null
+    const { assistantMessage, toolMessages } = ownsStream
+      ? buildTurnMessages(
+          state.streamAgents,
+          state.toolResultMap,
+          state.turnUsage[conversationId] ?? null,
+          'stop',
+          runId,
+          null,
+          committedToolCallIdsFor(state.messages[conversationId]),
+        )
+      : { assistantMessage: null, toolMessages: [] }
     const mainHasContent = !!assistantMessage && assistantMessage.content.length > 0
 
     const steerMessage: UserMessageType = {
@@ -3497,7 +3541,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           steerMessage,
         ],
       },
-      streamAgents: { [MAIN_AGENT_KEY]: emptyStream() },
+      ...(ownsStreamingConversation(s, conversationId)
+        ? { streamAgents: { [MAIN_AGENT_KEY]: emptyStream() } }
+        : {}),
       pendingSteers: {
         ...s.pendingSteers,
         [conversationId]: (s.pendingSteers[conversationId] ?? []).filter(
