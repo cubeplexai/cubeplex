@@ -87,3 +87,23 @@ def test_create_timeout_overrides_request_timeout_for_create_only(mock_encryptio
     assert create.request_timeout.total_seconds() == manager._create_timeout
     assert manager._request_timeout >= 1800
     assert manager._create_timeout != manager._request_timeout
+
+
+def test_reserve_wait_timeout_covers_create_and_ready_budget(mock_encryption_backend, monkeypatch):
+    from cubeplex.sandbox import manager as manager_mod
+
+    values = {
+        "sandbox.create_timeout": 240,
+        "sandbox.ready_timeout": 120,
+    }
+    monkeypatch.setattr(
+        manager_mod.config,
+        "get",
+        lambda key, default=None: values.get(key, default),
+    )
+    mgr = SandboxManager(MagicMock(), mock_encryption_backend)
+    assert mgr._reserve_wait_timeout == 360.0
+
+    values["sandbox.reserve_wait_timeout"] = 45.0
+    mgr_override = SandboxManager(MagicMock(), mock_encryption_backend)
+    assert mgr_override._reserve_wait_timeout == 45.0

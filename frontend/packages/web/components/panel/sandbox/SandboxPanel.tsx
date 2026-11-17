@@ -37,7 +37,6 @@ function sandboxScopeKey(workspaceId: string | null, conversationId?: string | n
 }
 
 export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps) {
-  const [activeTab, setActiveTab] = useState<SandboxTab>('files')
   const [refreshing, setRefreshing] = useState(false)
   const close = usePanelStore((s) => s.close)
   const openSandbox = usePanelStore((s) => s.openSandbox)
@@ -45,6 +44,12 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
   const initialFilePath = sandboxView?.initialFilePath ?? null
   const initialTab = sandboxView?.initialTab
   const sandboxRevision = sandboxView?.revision ?? null
+  // Seed activeTab from the store on mount so opening directly to Terminal or
+  // Browser does not mount SandboxFilesView and fire a competing /sandbox/files
+  // request during the first render.
+  const [activeTab, setActiveTab] = useState<SandboxTab>(
+    initialFilePath ? 'files' : (initialTab ?? 'files'),
+  )
   const { mutate } = useSWRConfig()
   const browserRefreshRef = useRef<(() => Promise<void>) | null>(null)
   const terminalRefreshRef = useRef<(() => Promise<unknown>) | null>(null)

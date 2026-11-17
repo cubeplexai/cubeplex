@@ -246,8 +246,12 @@ class SandboxManager:
             "sandbox.pause_attempt_grace_seconds", 3 * self._idle_ttl_seconds
         )
 
-        # Reserve-row race polling
-        self._reserve_wait_timeout: float = config.get("sandbox.reserve_wait_timeout", 30.0)
+        # Reserve-row race polling: wait at least as long as the winner's
+        # create + ready budget so cold starts do not time out race losers early.
+        default_reserve_wait = float(self._create_timeout + self._ready_timeout)
+        self._reserve_wait_timeout: float = float(
+            config.get("sandbox.reserve_wait_timeout", default_reserve_wait)
+        )
         self._reserve_poll_interval: float = config.get("sandbox.reserve_poll_interval", 0.5)
 
         self._touch_cache: dict[str, datetime] = {}
