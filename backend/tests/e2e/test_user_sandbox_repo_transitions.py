@@ -599,3 +599,44 @@ async def test_list_expired_system_still_reaps_stuck_provisioning(
 
     expired = await UserSandboxRepository.list_expired_system(db_session)
     assert any(r.id == row.id for r in expired)
+
+
+async def test_kill_pending_selected_immediately_and_restart_guards_preserve_delete_fence(
+    db_session: AsyncSession, scope: dict[str, str]
+) -> None:
+    """kill_pending rows are selected without waiting for ttl_seconds, and restart
+    settlement helpers never overwrite a concurrent delete request."""
+    repo = _mk_repo(db_session, scope)
+    row = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
+    await repo.acquire_in_use(row.id, 300)
+    now = datetime.now(UTC)
+
+    assert await repo.request_cleanup(row.id, action="restart", requested_at=now)
+    await db_session.refresh(row)
+    assert row.in_use_until is None
+
+    # Selected immediately despite fresh last_activity_at and ttl_seconds=3600
+    expired = await UserSandboxRepository.list_expired_system(db_session)
+    assert any(r.id == row.id for r in expired)
+
+    # Async restart pause keeps cleanup_action='restart' until mark_paused settles it
+    assert await repo.mark_pausing_from_restart(row.id) is True
+    await db_session.refresh(row)
+    assert row.status == "pausing"
+    assert row.cleanup_action == "restart"
+    assert await repo.mark_paused(row.id, paused_at=now, paused_ttl_seconds=0) is True
+    await db_session.refresh(row)
+    assert row.status == "paused"
+    assert row.cleanup_action is None
+
+    # Concurrent delete upgrades restart and blocks mark_terminated_from_restart / mark_paused
+    assert await repo.request_cleanup(row.id, action="restart", requested_at=now)
+    assert await repo.request_cleanup(
+        row.id, action="delete", requested_at=now + timedelta(seconds=1)
+    )
+    assert await repo.mark_terminated_from_restart(row.id) is False
+    assert await repo.mark_pausing_from_restart(row.id) is False
+    assert await repo.mark_paused(row.id, paused_at=now) is False
+    await db_session.refresh(row)
+    assert row.status == "kill_pending"
+    assert row.cleanup_action == "delete"

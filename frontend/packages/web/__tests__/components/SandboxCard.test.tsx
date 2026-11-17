@@ -87,4 +87,22 @@ describe('SandboxCard', () => {
     await waitFor(() => expect(mocks.restartMySandbox).toHaveBeenCalledWith('ws-1', 'sbx-1'))
     expect(onMutated).toHaveBeenCalledOnce()
   })
+
+  it.each(['paused', 'terminated', 'failed'] as const)(
+    'disables Restart while keeping Delete enabled when status is %s',
+    (status) => {
+      render(
+        <ul>
+          <SandboxCard
+            sandbox={{ ...baseSandbox, status, can_manage: true }}
+            wsId="ws-1"
+            onMutated={vi.fn()}
+          />
+        </ul>,
+      )
+
+      expect(screen.getByRole('button', { name: 'restart' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'delete' })).toBeEnabled()
+    },
+  )
 })

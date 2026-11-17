@@ -166,3 +166,18 @@ async def test_local_provider_terminate_delete_volumes_removes_scoped_workdir(
     await provider.terminate(sb_drop.id, delete_volumes=True)
     assert not Path(sb_drop.workdir).exists()
     assert tmp_path.is_dir()
+
+    # delete_volume cleans up workdir even after instance was already popped / restarted
+    await provider.delete_volume("vol-keep")
+    assert not Path(sb_keep.workdir).exists()
+    await provider.delete_volume("")  # no-op
+
+    # Symlink inside base_workdir must be unlinked without deleting the target directory
+    victim = tmp_path / "vol-victim"
+    victim.mkdir()
+    (victim / "secret.txt").write_text("safe", encoding="utf-8")
+    link = tmp_path / "vol-link"
+    link.symlink_to(victim)
+    await provider.delete_volume("vol-link")
+    assert not link.exists() and not link.is_symlink()
+    assert (victim / "secret.txt").read_text(encoding="utf-8") == "safe"

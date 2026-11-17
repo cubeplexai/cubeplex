@@ -135,7 +135,14 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
             <Button
               variant="outline"
               size="sm"
-              disabled={deletePending || busy !== null}
+              disabled={
+                deletePending ||
+                busy !== null ||
+                (!restartPending &&
+                  (sandbox.status === 'paused' ||
+                    sandbox.status === 'terminated' ||
+                    sandbox.status === 'failed'))
+              }
               onClick={() => setRestartOpen(true)}
             >
               {restartPending ? t('retryRestart') : t('restart')}

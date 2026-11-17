@@ -539,13 +539,49 @@ async def delete_account(
     if cleanup_pending:
         return HardDeleteResponse(deleted=False, cleanup_pending=True)
 
+    from sqlalchemy import or_
+
+    from cubeplex.config import config
+    from cubeplex.models.user_sandbox import UserSandbox
+    from cubeplex.repositories.membership import MembershipRepository
+    from cubeplex.repositories.workspace import WorkspaceRepository
     from cubeplex.sandbox.manager import get_sandbox_manager_or_none
 
+    mem_repo_pre = MembershipRepository(session)
+    ws_repo_pre = WorkspaceRepository(session)
+    pre_memberships = await mem_repo_pre.list_user_workspaces(user.id)
+    sole_member_ws_ids: list[str] = []
+    for m in pre_memberships:
+        ws = await ws_repo_pre.get(m.workspace_id)
+        if ws is None:
+            continue
+        members = await mem_repo_pre.list_workspace_members(m.workspace_id)
+        if len(members) <= 1:
+            sole_member_ws_ids.append(m.workspace_id)
+
     sandbox_manager = get_sandbox_manager_or_none()
-    if sandbox_manager is not None and await sandbox_manager.delete_user_sandboxes(
-        user.id, session=session
-    ):
-        return HardDeleteResponse(deleted=False, cleanup_pending=True)
+    if sandbox_manager is not None:
+        sbx_pending = await sandbox_manager.delete_user_sandboxes(user.id, session=session)
+        for sole_ws_id in sole_member_ws_ids:
+            if await sandbox_manager.delete_workspace_sandboxes(sole_ws_id, session=session):
+                sbx_pending = True
+        if sbx_pending:
+            return HardDeleteResponse(deleted=False, cleanup_pending=True)
+    elif bool(config.get("sandbox.enabled", True)):
+        sbx_scope = [col(UserSandbox.user_id) == user.id]
+        if sole_member_ws_ids:
+            sbx_scope.append(col(UserSandbox.workspace_id).in_(sole_member_ws_ids))
+        has_live_sandbox = await session.scalar(
+            select(col(UserSandbox.id))
+            .where(
+                or_(*sbx_scope),
+                col(UserSandbox.deleted_at).is_(None),
+                col(UserSandbox.sandbox_id).is_not(None),
+            )
+            .limit(1)
+        )
+        if has_live_sandbox is not None:
+            return HardDeleteResponse(deleted=False, cleanup_pending=True)
 
     from cubeplex.plugins.audit import audit_log
 
@@ -760,24 +796,42 @@ async def delete_account(
         sa_delete(IMIdentityLink).where(IMIdentityLink.user_id == user.id)  # type: ignore[arg-type]
     )
 
-    await purge_user_execution_state(session, user_id=user.id)
+    await purge_user_execution_state(
+        session,
+        user_id=user.id,
+        extra_workspace_ids=sole_member_ws_ids,
+    )
 
     # Break bidirectional FK between user_sandboxes and user_sandbox_sync_events
-    # before deleting UserSandbox rows.
+    # before deleting UserSandbox rows (including sole-member archived workspaces).
     from cubeplex.models.user_sandbox_sync_event import UserSandboxSyncEvent
 
     user_sbx_tbl = UserSandbox.__table__  # type: ignore[attr-defined]
-    user_sbx_ids = select(user_sbx_tbl.c.id).where(user_sbx_tbl.c.user_id == user.id)
+    sbx_table_preds = [user_sbx_tbl.c.user_id == user.id]
+    sbx_model_preds = [col(UserSandbox.user_id) == user.id]
+    if sole_member_ws_ids:
+        sbx_table_preds.append(user_sbx_tbl.c.workspace_id.in_(sole_member_ws_ids))
+        sbx_model_preds.append(col(UserSandbox.workspace_id).in_(sole_member_ws_ids))
+    user_sbx_ids = select(user_sbx_tbl.c.id).where(or_(*sbx_table_preds))
     await session.execute(
-        sa_update(UserSandbox)
-        .where(UserSandbox.user_id == user.id)  # type: ignore[arg-type]
-        .values(last_skill_sync_event_id=None)
+        sa_update(UserSandbox).where(or_(*sbx_model_preds)).values(last_skill_sync_event_id=None)
     )
     await session.execute(
         sa_delete(UserSandboxSyncEvent).where(
             UserSandboxSyncEvent.user_sandbox_id.in_(user_sbx_ids)  # type: ignore[attr-defined]
         )
     )
+    if sole_member_ws_ids:
+        await session.execute(
+            sa_delete(EgressRef).where(
+                EgressRef.workspace_id.in_(sole_member_ws_ids)  # type: ignore[attr-defined]
+            )
+        )
+        await session.execute(
+            sa_delete(UserSandbox).where(
+                UserSandbox.workspace_id.in_(sole_member_ws_ids)  # type: ignore[attr-defined]
+            )
+        )
 
     # Delete user-owned rows (deepest FK dependents first).
     for model, user_col in [

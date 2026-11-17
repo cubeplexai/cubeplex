@@ -136,6 +136,29 @@ class BackgroundTaskService(BackgroundTaskLifecycle):
         )
         return await self.request_tasks_stop(task_ids=task_ids, reason=reason, now=now)
 
+    async def finalize_environment_reset(
+        self,
+        *,
+        user_sandbox_id: str,
+        sandbox_instance_id: str,
+        reason: TaskStopReason,
+        now: datetime,
+    ) -> list[str]:
+        """Terminalize tasks bound to a sandbox whose guest compute was restarted in place."""
+        stopped = await self.request_environment_stop(
+            user_sandbox_id=user_sandbox_id,
+            sandbox_instance_id=sandbox_instance_id,
+            reason=reason,
+            now=now,
+        )
+        for task_id in stopped:
+            await self.finalize_task_environment_reset(
+                task_id=task_id,
+                sandbox_instance_id=sandbox_instance_id,
+                now=now,
+            )
+        return stopped
+
     async def reserve_task(
         self,
         *,

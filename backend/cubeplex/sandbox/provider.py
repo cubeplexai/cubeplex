@@ -86,6 +86,11 @@ class SandboxProvider(ABC):
         ...
 
     @property
+    def preserves_rootfs_on_pause(self) -> bool:
+        """Return True when ``pause`` stops guest compute while retaining RootFS on disk."""
+        return bool(self.capabilities.pause and self.capabilities.reset_rootfs)
+
+    @property
     @abstractmethod
     def default_workdir(self) -> str:
         """Default workspace directory path inside newly provisioned instances."""
@@ -166,6 +171,11 @@ class SandboxProvider(ABC):
     async def terminate(self, sandbox_id: str, *, delete_volumes: bool = False) -> None:
         """Destroy an instance idempotently (missing instance succeeds)."""
         ...
+
+    async def delete_volume(self, volume_key: str) -> None:
+        """Idempotently delete a persistent volume by *volume_key* when supported."""
+        del volume_key
+        return
 
     async def renew_ttl(self, sandbox_id: str, ttl_seconds: int) -> None:
         """Extend provider-side lifetime when supported."""

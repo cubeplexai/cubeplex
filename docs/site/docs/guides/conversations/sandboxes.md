@@ -38,16 +38,16 @@ A sandbox with status **Off** (container stopped) still appears in the list. Tha
 
 ## Restart
 
-**Restart** stops the running sandbox instance while keeping the sandbox row, its installed environment, and all of its files. On pause-capable runtimes (such as CubePod), the status flips to **Paused** (and **Off** on non-pausing runtimes); the next time the agent needs to run code in that conversation, the sandbox resumes cleanly with your environment and `/workspace` files intact.
+**Restart** stops running processes in the sandbox while keeping the sandbox row and `/workspace` files. On persistent-disk runtimes (such as CubePod), the status flips to **Paused** and your installed system environment is preserved too (on other runtimes, the status flips to **Off**); the next time the agent needs to run code in that conversation, the sandbox resumes cleanly.
 
-Use Restart when the sandbox is in a bad state — a hung process, a broken shell, or a runaway command you want to cut short — while keeping your environment and working files.
+Use Restart when the sandbox is in a bad state — a hung process, a broken shell, or a runaway command you want to cut short — while keeping your working files (and system environment on CubePod).
 
 ## Delete
 
-**Delete** permanently removes the sandbox and its persistent volumes (on OpenSandbox deployments, external Kubernetes PVCs remain on disk for operator reclamation). The row is soft-deleted, the sandbox is stopped, and the next time you send a message there, CubePlex provisions a brand-new sandbox with empty storage.
+**Delete** permanently removes the sandbox and its managed persistent volumes (on OpenSandbox deployments, external volumes remain on disk for operator reclamation). The row is soft-deleted and the sandbox is stopped; on runtimes that manage volume deletion (such as CubePod), the next message provisions a brand-new sandbox with empty storage.
 
 :::caution
-Delete cannot be undone and permanently deletes stored files in the sandbox. If you only want to stop running processes while keeping your environment and files, use **Restart** instead.
+Delete cannot be undone and permanently deletes managed storage in the sandbox. If you only want to stop running processes while keeping your files, use **Restart** instead.
 :::
 
 ## Sandbox statuses
@@ -58,11 +58,11 @@ The badge on each row reflects the sandbox's runtime state:
 |---|---|
 | **Running** | The container is up and ready to execute code. |
 | **Starting** | A container is being provisioned. This is transient — it becomes Running shortly. |
-| **Paused** | The container is paused (idle for a long time). It resumes automatically on next use. |
+| **Paused** | The sandbox is suspended (after idle timeout or a manual **Restart** on CubePod). It resumes automatically on next use. |
 | **Pausing** / **Resuming** | Transitional states while pausing or resuming. |
 | **Stopping** | The container is being stopped after a Restart or Delete action. |
 | **Off** | The container is stopped, but the sandbox row and its files are still around. It starts again on next use. |
-| **Failed** | The last provisioning attempt failed. Use **Restart** to try again, or **Delete** to clear it. |
+| **Failed** | The last provisioning attempt failed. Send a new message to retry provisioning, or use **Delete** to clear it. |
 
 ## Background commands and recovery
 
@@ -106,7 +106,7 @@ Everything under the sandbox's working directory (`/workspace`) lives on its per
 
 - **Installed packages persist.** When the agent runs a plain `pip install` or `npm install -g`, the packages land on persistent storage and are still available in later conversations — nothing gets reinstalled on every chat.
 - **Isolated environments work normally.** If a project or skill needs its own Python environment (a conflicting dependency set, a different Python version), the agent can create one with `python -m venv` or `uv`. Environments created under the working directory survive restarts and recreation like any other file.
-- **Everything outside the working directory is temporary.** System locations (`/tmp`, `/opt`, …) are reset when the sandbox is recreated.
+- **System filesystem persistence depends on the runtime.** On persistent-disk runtimes (such as CubePod), system paths and home directories also persist across idle pauses and manual restarts until the sandbox is deleted or its RootFS is explicitly reset; on non-persistent-RootFS runtimes (such as OpenSandbox), locations outside `/workspace` (`/tmp`, `/opt`, …) are reset when the container is recreated.
 - **Commands run as the non-root `cubeplex` user** (uid 1000), not as root. Prefer installs that write under `/workspace` (the default pip/npm overlays already do). System-wide package managers that need root (for example `apt-get`) will fail unless an operator has arranged elevated access.
 
 ## How the agent organizes files

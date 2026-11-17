@@ -17,6 +17,7 @@ under the workspace PVC so they survive pause/resume and kill+recreate.
 
 import asyncio
 import hashlib
+import inspect
 import re
 import time
 import weakref
@@ -27,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from loguru import logger
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
@@ -423,9 +424,13 @@ class SandboxManager:
         try:
             async with asyncio.timeout(10):
                 state = await provider.inspect_state(instance_id)
-                if state is None or state in (
-                    ProviderInstanceState.FAILED,
-                    ProviderInstanceState.TERMINATED,
+                if (
+                    state is None
+                    or state in (ProviderInstanceState.FAILED, ProviderInstanceState.TERMINATED)
+                    or (
+                        state == ProviderInstanceState.PAUSED
+                        and self._supports_pause_restart(provider)
+                    )
                 ):
                     raise SandboxInstanceGoneError(instance_id)
                 if state != ProviderInstanceState.RUNNING:
@@ -780,9 +785,9 @@ class SandboxManager:
                     f"sandbox {record.id} is kill_pending; retry after reaper cleans up"
                 )
 
-            if record.status == "paused":
+            if record.status in ("paused", "pausing", "resuming"):
                 raise SandboxError(
-                    f"sandbox {record.id} resume failed; row still paused, retry later"
+                    f"sandbox {record.id} resume failed (status={record.status}); retry later"
                 )
 
             raise SandboxError(f"unreachable status {record.status!r}")
@@ -1218,6 +1223,10 @@ class SandboxManager:
             if record:
                 await repo.release_in_use(record.id)
 
+    @staticmethod
+    def _supports_pause_restart(provider: SandboxProvider) -> bool:
+        return bool(provider.capabilities.pause and provider.capabilities.reset_rootfs)
+
     async def _request_user_cleanup(
         self,
         user_sandbox_id: str,
@@ -1226,52 +1235,67 @@ class SandboxManager:
         raise_on_delete_conflict: bool,
     ) -> None:
         """Snapshot row state, fence new work, and finalize or terminate."""
-        async with self._session_factory() as session:
-            row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
-            if row is None or row.deleted_at is not None:
-                return
-            row_id = row.id
-            prior_status = row.status
-            prior_action = row.cleanup_action
-            prior_requested_at = row.cleanup_requested_at
-            instance_id = self._cleanup_instance_id(row.sandbox_id)
-            repo = UserSandboxRepository(session, org_id=row.org_id, workspace_id=row.workspace_id)
-            requested_at = datetime.now(UTC)
-            if not await repo.request_cleanup(
-                row_id,
-                action=action,
-                requested_at=requested_at,
-            ):
-                if raise_on_delete_conflict and (
-                    prior_status == "kill_pending" and prior_action == "delete"
+        async with self._get_lifecycle_lock(user_sandbox_id):
+            async with self._session_factory() as session:
+                row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+                if row is None or row.deleted_at is not None:
+                    return
+                row_id = row.id
+                prior_status = row.status
+                prior_action = row.cleanup_action
+                prior_requested_at = row.cleanup_requested_at
+                prior_paused_at = row.paused_at
+                instance_id = self._cleanup_instance_id(row.sandbox_id)
+                repo = UserSandboxRepository(
+                    session, org_id=row.org_id, workspace_id=row.workspace_id
+                )
+                requested_at = datetime.now(UTC)
+                if not await repo.request_cleanup(
+                    row_id,
+                    action=action,
+                    requested_at=requested_at,
                 ):
-                    raise SandboxConflictError("sandbox deletion is already pending")
-                return
-            if instance_id is None:
-                await self._finalize_cleanup_without_instance(
+                    if raise_on_delete_conflict and (
+                        prior_status == "kill_pending" and prior_action == "delete"
+                    ):
+                        raise SandboxConflictError("sandbox deletion is already pending")
+                    return
+                if instance_id is None:
+                    await self._finalize_cleanup_without_instance(
+                        repo,
+                        row,
+                        action=action,
+                        now=requested_at,
+                        prior_status=prior_status,
+                        prior_cleanup_action=prior_action,
+                        prior_cleanup_requested_at=prior_requested_at,
+                    )
+                    return
+                await self._request_managed_task_stop(
+                    row,
+                    sandbox_instance_id=instance_id,
+                    now=requested_at,
+                )
+                provider = self._provider_for_record(row)
+                if (
+                    action == "restart"
+                    and prior_status != "provisioning"
+                    and self._supports_pause_restart(provider)
+                ):
+                    await self._pause_record_for_restart(
+                        session,
+                        repo,
+                        row,
+                        prior_status=prior_status,
+                        prior_paused_at=prior_paused_at,
+                    )
+                    return
+                await self._kill_record(
+                    session,
                     repo,
                     row,
-                    action=action,
-                    now=requested_at,
-                    prior_status=prior_status,
-                    prior_cleanup_action=prior_action,
-                    prior_cleanup_requested_at=prior_requested_at,
+                    delete_on_success=(action == "delete"),
                 )
-                return
-            await self._request_managed_task_stop(
-                row,
-                sandbox_instance_id=instance_id,
-                now=requested_at,
-            )
-            if action == "restart" and self._provider_for_record(row).capabilities.pause:
-                await self._pause_record_for_restart(session, repo, row)
-                return
-            await self._kill_record(
-                session,
-                repo,
-                row,
-                delete_on_success=(action == "delete"),
-            )
 
     async def restart_user_sandbox(self, user_sandbox_id: str) -> None:
         """Request restart, fence new work, then stop the original instance."""
@@ -1303,41 +1327,47 @@ class SandboxManager:
             if row.deleted_at is not None:
                 continue
             row_id = row.id
-            prior_status = row.status
-            prior_action = row.cleanup_action
-            prior_requested_at = row.cleanup_requested_at
-            instance_id = self._cleanup_instance_id(row.sandbox_id)
-            repo = UserSandboxRepository(session, org_id=row.org_id, workspace_id=row.workspace_id)
-            requested_at = datetime.now(UTC)
-            await repo.request_cleanup(row_id, action="delete", requested_at=requested_at)
-            if instance_id is None:
-                finalized = await self._finalize_cleanup_without_instance(
-                    repo,
-                    row,
-                    action="delete",
-                    now=requested_at,
-                    prior_status=prior_status,
-                    prior_cleanup_action=prior_action,
-                    prior_cleanup_requested_at=prior_requested_at,
+            async with self._get_lifecycle_lock(row_id):
+                current = await UserSandboxRepository.get_by_id_system(session, row_id)
+                if current is None or current.deleted_at is not None:
+                    continue
+                prior_status = current.status
+                prior_action = current.cleanup_action
+                prior_requested_at = current.cleanup_requested_at
+                instance_id = self._cleanup_instance_id(current.sandbox_id)
+                repo = UserSandboxRepository(
+                    session, org_id=current.org_id, workspace_id=current.workspace_id
                 )
-                if not finalized:
+                requested_at = datetime.now(UTC)
+                await repo.request_cleanup(row_id, action="delete", requested_at=requested_at)
+                if instance_id is None:
+                    finalized = await self._finalize_cleanup_without_instance(
+                        repo,
+                        current,
+                        action="delete",
+                        now=requested_at,
+                        prior_status=prior_status,
+                        prior_cleanup_action=prior_action,
+                        prior_cleanup_requested_at=prior_requested_at,
+                    )
+                    if not finalized:
+                        pending = True
+                    continue
+                await BackgroundTaskService(
+                    session,
+                    org_id=current.org_id,
+                    workspace_id=current.workspace_id,
+                ).request_environment_stop(
+                    user_sandbox_id=row_id,
+                    sandbox_instance_id=instance_id,
+                    reason=TaskStopReason.user_stop,
+                    now=requested_at,
+                )
+                await session.commit()
+                await self._kill_record(session, repo, current, delete_on_success=True)
+                refreshed = await UserSandboxRepository.get_by_id_system(session, row_id)
+                if refreshed is not None and refreshed.deleted_at is None:
                     pending = True
-                continue
-            await BackgroundTaskService(
-                session,
-                org_id=row.org_id,
-                workspace_id=row.workspace_id,
-            ).request_environment_stop(
-                user_sandbox_id=row_id,
-                sandbox_instance_id=instance_id,
-                reason=TaskStopReason.user_stop,
-                now=requested_at,
-            )
-            await session.commit()
-            await self._kill_record(session, repo, row, delete_on_success=True)
-            refreshed = await UserSandboxRepository.get_by_id_system(session, row_id)
-            if refreshed is not None and refreshed.deleted_at is None:
-                pending = True
         return pending
 
     async def delete_workspace_sandboxes(
@@ -1352,10 +1382,6 @@ class SandboxManager:
             stmt = select(UserSandbox).where(
                 UserSandbox.workspace_id == workspace_id,  # type: ignore[arg-type]
                 col(UserSandbox.deleted_at).is_(None),
-                or_(
-                    col(UserSandbox.sandbox_id).is_not(None),
-                    col(UserSandbox.status).in_(("provisioning", "kill_pending")),
-                ),
             )
             rows = list((await active_session.execute(stmt)).scalars().all())
             if not rows:
@@ -1379,10 +1405,6 @@ class SandboxManager:
             stmt = select(UserSandbox).where(
                 UserSandbox.user_id == user_id,  # type: ignore[arg-type]
                 col(UserSandbox.deleted_at).is_(None),
-                or_(
-                    col(UserSandbox.sandbox_id).is_not(None),
-                    col(UserSandbox.status).in_(("provisioning", "kill_pending")),
-                ),
             )
             rows = list((await active_session.execute(stmt)).scalars().all())
             if not rows:
@@ -1472,6 +1494,11 @@ class SandboxManager:
                     )
                     await cmd_session.commit()
                 await provider.reset_rootfs(sandbox_id)
+                await self._finalize_managed_task_reset(
+                    row,
+                    sandbox_instance_id=sandbox_id,
+                    now=datetime.now(UTC),
+                )
 
                 async with self._session_factory() as session:
                     repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
@@ -1482,6 +1509,19 @@ class SandboxManager:
                         if not run_ok:
                             current_row = await repo.get(user_sandbox_id)
                             current_status = current_row.status if current_row is not None else None
+                            if (
+                                current_row is None
+                                or current_row.deleted_at is not None
+                                or current_status in ("terminated", "failed")
+                            ):
+                                raise SandboxNotFoundError(f"Sandbox {user_sandbox_id} not found")
+                            if current_row.cleanup_action is not None or (
+                                current_status == "paused" and current_row.paused_at != paused_at
+                            ):
+                                raise SandboxConflictError(
+                                    f"Sandbox {user_sandbox_id} changed state "
+                                    f"({current_status!r}) before running transition"
+                                )
                             if current_status == "running":
                                 run_ok = True
                             elif current_status == "paused":
@@ -1489,13 +1529,27 @@ class SandboxManager:
                                 run_ok = await repo.mark_running(
                                     user_sandbox_id, last_resumed_at=datetime.now(UTC)
                                 )
-                            elif current_row is None or current_status in ("terminated", "failed"):
-                                raise SandboxNotFoundError(f"Sandbox {user_sandbox_id} not found")
                             if not run_ok:
                                 raise SandboxConflictError(
                                     f"Sandbox {user_sandbox_id} changed state "
                                     f"({current_status!r}) before running transition"
                                 )
+                    else:
+                        current_row = await repo.get(user_sandbox_id)
+                        if (
+                            current_row is None
+                            or current_row.deleted_at is not None
+                            or current_row.status in ("terminated", "failed")
+                        ):
+                            raise SandboxNotFoundError(f"Sandbox {user_sandbox_id} not found")
+                        if (
+                            current_row.status != "running"
+                            or current_row.cleanup_action is not None
+                        ):
+                            raise SandboxConflictError(
+                                f"Sandbox {user_sandbox_id} changed state "
+                                f"({current_row.status!r}) during reset_rootfs"
+                            )
                     marked_running = True
                     await repo.update_activity(user_sandbox_id)
 
@@ -1587,6 +1641,22 @@ class SandboxManager:
             )
         if not safe_without_provider:
             return False
+        if action == "delete":
+            provider = self._provider_for_record(row)
+            volume_key = self._build_user_volume_key(
+                row.workspace_id,
+                row.scope_type,
+                row.scope_id,
+            )
+            with suppress(Exception):
+                await provider.delete_volume(volume_key)
+            if provider.name in ("opensandbox", "cubepod"):
+                logger.warning(
+                    "UserSandbox {} soft-deleted without live instance; volume {} may remain "
+                    "for operator reclamation",
+                    row_id,
+                    volume_key,
+                )
         await repo.mark_terminated(row_id, clear_sandbox_id=True)
         if action == "delete":
             await repo.soft_delete(row_id)
@@ -1605,6 +1675,26 @@ class SandboxManager:
                 org_id=row.org_id,
                 workspace_id=row.workspace_id,
             ).request_environment_stop(
+                user_sandbox_id=row.id,
+                sandbox_instance_id=sandbox_instance_id,
+                reason=TaskStopReason.user_stop,
+                now=now,
+            )
+            await session.commit()
+
+    async def _finalize_managed_task_reset(
+        self,
+        row: UserSandbox,
+        *,
+        sandbox_instance_id: str,
+        now: datetime,
+    ) -> None:
+        async with self._session_factory() as session:
+            await BackgroundTaskService(
+                session,
+                org_id=row.org_id,
+                workspace_id=row.workspace_id,
+            ).finalize_environment_reset(
                 user_sandbox_id=row.id,
                 sandbox_instance_id=sandbox_instance_id,
                 reason=TaskStopReason.user_stop,
@@ -1637,66 +1727,69 @@ class SandboxManager:
             provision_budget = self._create_timeout + self._ready_timeout
             for record_id, org_id, workspace_id in to_reap:
                 try:
-                    scoped_repo = UserSandboxRepository(
-                        session,
-                        org_id=org_id,
-                        workspace_id=workspace_id,
-                    )
-                    # Re-read after expire_all: a stuck row may have been
-                    # claimed for a new revive between select and now.
-                    current = await scoped_repo.get(record_id)
-                    if current is None:
-                        continue
-                    record = current
-                    if (
-                        record.cleanup_action is not None
-                        and self._cleanup_instance_id(record.sandbox_id) is None
-                    ):
-                        await self._finalize_cleanup_without_instance(
-                            scoped_repo,
-                            record,
-                            action=record.cleanup_action,
-                            now=datetime.now(UTC),
+                    async with self._get_lifecycle_lock(record_id):
+                        scoped_repo = UserSandboxRepository(
+                            session,
+                            org_id=org_id,
+                            workspace_id=workspace_id,
                         )
-                        continue
-                    # A live create (fresh reserve or revive) is `provisioning`
-                    # through Sandbox.create + check_ready. If ttl is shorter
-                    # than that budget, the TTL filter still matches mid-create;
-                    # do not reap until the budget has also elapsed.
-                    if record.status == "provisioning":
-                        started = record.last_activity_at
-                        if started is not None:
-                            if started.tzinfo is None:
-                                started = started.replace(tzinfo=UTC)
-                            age = (datetime.now(UTC) - started).total_seconds()
-                            if age < provision_budget:
-                                logger.debug(
-                                    "Skipping in-flight provisioning {} "
-                                    "(age={:.0f}s < provision_budget={})",
-                                    record.id,
-                                    age,
-                                    provision_budget,
-                                )
-                                continue
-                    if not record.sandbox_id:
-                        # Crashed provisioning row — no remote sandbox to kill.
-                        await scoped_repo.mark_terminated(record.id)
-                        logger.info(
-                            "Reaped orphan provisioning record {} (no sandbox_id)",
-                            record.id,
-                        )
-                        continue
-                    if record.status == "running" and self._pause_on_idle:
-                        if self._provider_for_record(record).capabilities.pause:
+                        # Re-read after expire_all: a stuck row may have been
+                        # claimed for a new revive between select and now.
+                        current = await scoped_repo.get(record_id)
+                        if current is None or isinstance(
+                            getattr(current, "deleted_at", None), datetime
+                        ):
                             continue
-                    if (
-                        record.status == "kill_pending"
-                        and record.cleanup_action == "restart"
-                        and self._provider_for_record(record).capabilities.pause
-                    ):
-                        await self._pause_record_for_restart(session, scoped_repo, record)
-                        continue
-                    await self._kill_record(session, scoped_repo, record)
+                        record = current
+                        if (
+                            record.cleanup_action in ("restart", "delete")
+                            and self._cleanup_instance_id(record.sandbox_id) is None
+                        ):
+                            await self._finalize_cleanup_without_instance(
+                                scoped_repo,
+                                record,
+                                action=record.cleanup_action,
+                                now=datetime.now(UTC),
+                            )
+                            continue
+                        # A live create (fresh reserve or revive) is `provisioning`
+                        # through Sandbox.create + check_ready. If ttl is shorter
+                        # than that budget, the TTL filter still matches mid-create;
+                        # do not reap until the budget has also elapsed.
+                        if record.status == "provisioning":
+                            started = record.last_activity_at
+                            if started is not None:
+                                if started.tzinfo is None:
+                                    started = started.replace(tzinfo=UTC)
+                                age = (datetime.now(UTC) - started).total_seconds()
+                                if age < provision_budget:
+                                    logger.debug(
+                                        "Skipping in-flight provisioning {} "
+                                        "(age={:.0f}s < provision_budget={})",
+                                        record.id,
+                                        age,
+                                        provision_budget,
+                                    )
+                                    continue
+                        if not record.sandbox_id:
+                            # Crashed provisioning row — no remote sandbox to kill.
+                            await scoped_repo.mark_terminated(record.id)
+                            logger.info(
+                                "Reaped orphan provisioning record {} (no sandbox_id)",
+                                record.id,
+                            )
+                            continue
+                        if record.status == "running" and self._pause_on_idle:
+                            if self._provider_for_record(record).capabilities.pause:
+                                continue
+                        if (
+                            record.status == "kill_pending"
+                            and record.cleanup_action == "restart"
+                            and self._supports_pause_restart(self._provider_for_record(record))
+                        ):
+                            await self._pause_record_for_restart(session, scoped_repo, record)
+                            continue
+                        await self._kill_record(session, scoped_repo, record)
                 except Exception:
                     logger.opt(exception=True).warning(
                         "Unexpected error cleaning up sandbox {}",
@@ -1735,6 +1828,16 @@ class SandboxManager:
                 user_sandbox_id=record.id,
                 run_identity=self._run_identity(),
             )
+        except (SandboxInstanceGoneError, SandboxNotFoundError) as exc:
+            logger.warning(
+                "Paused sandbox {} gone during resume ({}); marking terminated for revive",
+                record.sandbox_id,
+                exc,
+            )
+            settled = await repo.mark_terminated_from_resuming(record.id)
+            if settled and self._exchange_host:
+                await self._revoke_egress(session, record.sandbox_id)
+            return None
         except Exception as exc:
             logger.warning(
                 "Resume failed for {}: {}; leaving row at ``resuming`` for "
@@ -1756,10 +1859,21 @@ class SandboxManager:
             if current_status == "running":
                 run_ok = True
                 break
-            if current_status != "paused":
+            provider_is_paused = False
+            if current_status == "paused":
+                with suppress(Exception):
+                    pstate = await provider.inspect_state(record.sandbox_id)
+                    provider_is_paused = pstate == ProviderInstanceState.PAUSED
+            if (
+                current is None
+                or isinstance(getattr(current, "deleted_at", None), datetime)
+                or getattr(current, "cleanup_action", None) in ("restart", "delete")
+                or current_status != "paused"
+                or provider_is_paused
+            ):
                 logger.warning(
-                    "Resume of {} succeeded at provider but row is in "
-                    "terminal state {}; treating as failure",
+                    "Resume of {} succeeded at provider but row changed concurrently "
+                    "(status={}); treating as failure",
                     record.sandbox_id,
                     current_status,
                 )
@@ -1959,7 +2073,10 @@ class SandboxManager:
         if self._paused_ttl_seconds <= 0:
             return
         async with self._session_factory() as session:
-            expired = await UserSandboxRepository.list_paused_expired_system(session)
+            expired = await UserSandboxRepository.list_paused_expired_system(
+                session,
+                paused_ttl_seconds=self._paused_ttl_seconds,
+            )
             for record in expired:
                 scoped = UserSandboxRepository(
                     session,
@@ -1967,7 +2084,7 @@ class SandboxManager:
                     workspace_id=record.workspace_id,
                 )
                 if not await scoped.claim_terminated_from_paused(
-                    record.id, paused_ttl_seconds=record.paused_ttl_seconds
+                    record.id, paused_ttl_seconds=self._paused_ttl_seconds
                 ):
                     continue
                 await self._kill_record(session, scoped, record)
@@ -2015,33 +2132,51 @@ class SandboxManager:
                         continue
 
                     if state == ProviderInstanceState.PAUSED:
-                        await scoped.mark_paused(record.id, paused_at=datetime.now(UTC))
-                    elif state == ProviderInstanceState.RUNNING:
-                        last_active = (
-                            record.last_activity_at.replace(tzinfo=UTC)
-                            if record.last_activity_at.tzinfo is None
-                            else record.last_activity_at
+                        await scoped.mark_paused(
+                            record.id,
+                            paused_at=datetime.now(UTC),
+                            paused_ttl_seconds=self._paused_ttl_seconds,
                         )
-                        pause_idle_age = (datetime.now(UTC) - last_active).total_seconds()
+                    elif state == ProviderInstanceState.RUNNING:
                         if (
                             record.status == "pausing"
-                            and pause_idle_age >= self._pause_attempt_grace_seconds
+                            and getattr(record, "cleanup_action", None) == "restart"
                         ):
-                            logger.warning(
-                                "Reconciler: {} stuck pausing on no-op-pause backend "
-                                "(idle {}s >= grace {}s); killing instead of reverting",
-                                record.sandbox_id,
-                                int(pause_idle_age),
-                                self._pause_attempt_grace_seconds,
-                            )
-                            await self._kill_record(session, scoped, record)
+                            req_at = getattr(record, "cleanup_requested_at", None)
+                            if req_at is not None:
+                                if req_at.tzinfo is None:
+                                    req_at = req_at.replace(tzinfo=UTC)
+                                req_age = (datetime.now(UTC) - req_at).total_seconds()
+                            else:
+                                req_age = 0.0
+                            if req_age >= self._pause_attempt_grace_seconds:
+                                await self._kill_record(session, scoped, record)
                         else:
-                            await scoped.mark_running(
-                                record.id,
-                                last_resumed_at=(
-                                    datetime.now(UTC) if record.status == "resuming" else None
-                                ),
+                            last_active = (
+                                record.last_activity_at.replace(tzinfo=UTC)
+                                if record.last_activity_at.tzinfo is None
+                                else record.last_activity_at
                             )
+                            pause_idle_age = (datetime.now(UTC) - last_active).total_seconds()
+                            if (
+                                record.status == "pausing"
+                                and pause_idle_age >= self._pause_attempt_grace_seconds
+                            ):
+                                logger.warning(
+                                    "Reconciler: {} stuck pausing on no-op-pause backend "
+                                    "(idle {}s >= grace {}s); killing instead of reverting",
+                                    record.sandbox_id,
+                                    int(pause_idle_age),
+                                    self._pause_attempt_grace_seconds,
+                                )
+                                await self._kill_record(session, scoped, record)
+                            else:
+                                await scoped.mark_running(
+                                    record.id,
+                                    last_resumed_at=(
+                                        datetime.now(UTC) if record.status == "resuming" else None
+                                    ),
+                                )
                     elif state == ProviderInstanceState.FAILED:
                         await scoped.mark_failed_from_transient(record.id)
                     elif state == ProviderInstanceState.TERMINATED:
@@ -2056,17 +2191,31 @@ class SandboxManager:
                         record.id,
                     )
 
+    @staticmethod
+    async def _rollback_if_async(session: AsyncSession) -> None:
+        rollback = getattr(session, "rollback", None)
+        if inspect.iscoroutinefunction(rollback):
+            with suppress(Exception):
+                await rollback()
+
     async def _pause_record_for_restart(
         self,
         session: AsyncSession,
         scoped_repo: UserSandboxRepository,
         record: UserSandbox,
+        *,
+        prior_status: str | None = None,
+        prior_paused_at: datetime | None = None,
     ) -> None:
         """Pause a sandbox for user restart so RootFS and /workspace are preserved."""
         record_id = record.id
         sandbox_id = record.sandbox_id
         assert sandbox_id, "restart pause target must have sandbox_id"
         provider = self._provider_for_record(record)
+        now = datetime.now(UTC)
+        effective_paused_at = (
+            prior_paused_at if prior_status == "paused" and prior_paused_at is not None else now
+        )
 
         async def _teardown_session_state() -> None:
             try:
@@ -2078,21 +2227,28 @@ class SandboxManager:
                 await kill_sandbox_commands(session, record_id, get_sandbox=_no_sandbox)
             except Exception:
                 logger.exception("failed to mark sandbox commands killed for {}", record_id)
+                await self._rollback_if_async(session)
+            with suppress(Exception):
+                await self._finalize_managed_task_reset(
+                    record,
+                    sandbox_instance_id=sandbox_id,
+                    now=datetime.now(UTC),
+                )
             if self._exchange_host:
                 await self._revoke_egress(session, sandbox_id)
 
         try:
             await provider.pause(sandbox_id)
-        except SandboxInstanceGoneError:
+        except (SandboxInstanceGoneError, SandboxNotFoundError):
             await _teardown_session_state()
-            await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
+            await scoped_repo.mark_terminated_from_restart(record_id)
             return
-        except SandboxConflictError as exc:
+        except SandboxError as exc:
             try:
                 conflict_state = await provider.inspect_state(sandbox_id)
             except Exception:
                 logger.warning(
-                    "Restart pause conflict for {} (will retry): {}",
+                    "Restart pause error for {} (will retry): {}",
                     sandbox_id,
                     exc,
                 )
@@ -2103,7 +2259,7 @@ class SandboxManager:
                 ProviderInstanceState.TERMINATED,
             ):
                 await _teardown_session_state()
-                await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
+                await scoped_repo.mark_terminated_from_restart(record_id)
                 return
             if conflict_state != ProviderInstanceState.PAUSED:
                 await scoped_repo.mark_kill_pending(record_id)
@@ -2127,9 +2283,13 @@ class SandboxManager:
             ProviderInstanceState.FAILED,
             ProviderInstanceState.TERMINATED,
         ):
-            await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
+            await scoped_repo.mark_terminated_from_restart(record_id)
         elif state == ProviderInstanceState.PAUSED:
-            await scoped_repo.mark_paused(record_id, paused_at=datetime.now(UTC))
+            await scoped_repo.mark_paused(
+                record_id,
+                paused_at=effective_paused_at,
+                paused_ttl_seconds=self._paused_ttl_seconds,
+            )
             logger.info("Paused sandbox {} for non-destructive restart", sandbox_id)
         else:
             await scoped_repo.mark_pausing_from_restart(record_id)
@@ -2176,20 +2336,24 @@ class SandboxManager:
                 await kill_sandbox_commands(session, record_id, get_sandbox=_no_sandbox)
             except Exception:
                 logger.exception("failed to mark sandbox commands killed for {}", record_id)
+                await self._rollback_if_async(session)
             await scoped_repo.mark_terminated(record_id, clear_sandbox_id=True)
             if should_delete:
+                volume_key = build_sandbox_pvc_name(
+                    self._volume_pvc_prefix,
+                    workspace_id,
+                    scope_type,
+                    scope_id,
+                )
+                with suppress(Exception):
+                    await provider.delete_volume(volume_key)
                 await scoped_repo.soft_delete(record_id)
                 if provider.name == "opensandbox":
                     logger.warning(
                         "UserSandbox {} soft-deleted after provider cleanup; volume {} is now "
                         "orphaned for operator reclamation",
                         record_id,
-                        build_sandbox_pvc_name(
-                            self._volume_pvc_prefix,
-                            workspace_id,
-                            scope_type,
-                            scope_id,
-                        ),
+                        volume_key,
                     )
             if self._exchange_host and sandbox_id:
                 await self._revoke_egress(session, sandbox_id)
