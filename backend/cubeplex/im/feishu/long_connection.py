@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from types import MethodType
@@ -54,6 +55,7 @@ def _install_graceful_shutdown_receiver(
     client: Any,
     *,
     is_shutting_down: Callable[[], bool],
+    on_terminal_error: Callable[[BaseException], None] | None = None,
 ) -> None:
     """Replace lark_oapi's receive loop with shutdown-aware semantics.
 
@@ -62,6 +64,24 @@ def _install_graceful_shutdown_receiver(
     (code 1000), which should end the receive task quietly instead of logging
     an error and re-raising into asyncio's default exception handler.
     """
+
+    async def _recover_or_terminate(self: Any, exc: BaseException) -> None:
+        try:
+            await self._disconnect()
+            if getattr(self, "_auto_reconnect", False):
+                await self._reconnect()
+                return
+        except Exception as reconnect_exc:
+            if is_shutting_down():
+                return
+            if on_terminal_error is not None:
+                on_terminal_error(reconnect_exc)
+                return
+            raise
+        if on_terminal_error is not None:
+            on_terminal_error(exc)
+            return
+        raise exc
 
     async def _receive_message_loop(self: Any) -> None:
         try:
@@ -72,24 +92,63 @@ def _install_graceful_shutdown_receiver(
                     raise RuntimeError("connection is closed")
                 msg = await self._conn.recv()
                 asyncio.get_running_loop().create_task(self._handle_message(msg))
-        except ConnectionClosedOK:
+        except ConnectionClosedOK as exc:
             if is_shutting_down():
                 with suppress(Exception):
                     await self._disconnect()
                 return
-            await self._disconnect()
-            if getattr(self, "_auto_reconnect", False):
-                await self._reconnect()
-                return
-            raise
+            await _recover_or_terminate(self, exc)
         except Exception as exc:
-            await self._disconnect()
-            if getattr(self, "_auto_reconnect", False):
-                await self._reconnect()
+            if is_shutting_down():
+                with suppress(Exception):
+                    await self._disconnect()
                 return
-            raise exc
+            await _recover_or_terminate(self, exc)
 
     client._receive_message_loop = MethodType(_receive_message_loop, client)
+
+
+class _ThreadLocalLoopProxy:
+    """Route ``lark_oapi.ws.client.loop`` lookups to the caller thread's loop.
+
+    ``lark_oapi.ws.client`` stores a single module-level ``loop`` global and
+    calls ``run_until_complete`` / ``create_task`` on it inside ``start()``
+    and ``_connect()``. Mutating that global per account races whenever
+    multiple ``FeishuLongConnection`` workers connect or reconnect at once.
+    """
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+
+    def bind(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._local.loop = loop
+
+    def unbind(self) -> None:
+        self._local.loop = None
+
+    def _resolve(self) -> asyncio.AbstractEventLoop:
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            bound: asyncio.AbstractEventLoop | None = getattr(self._local, "loop", None)
+            if bound is not None:
+                return bound
+            return asyncio.get_event_loop()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._resolve(), name)
+
+
+_WS_LOOP_PROXY = _ThreadLocalLoopProxy()
+_WS_LOOP_PROXY_LOCK = threading.Lock()
+
+
+def _install_ws_loop_proxy() -> None:
+    import lark_oapi.ws.client as _ws_client_mod
+
+    with _WS_LOOP_PROXY_LOCK:
+        if not isinstance(_ws_client_mod.loop, _ThreadLocalLoopProxy):
+            _ws_client_mod.loop = _WS_LOOP_PROXY
 
 
 def _as_plain_dict(raw: Any) -> dict[str, Any]:
@@ -427,15 +486,26 @@ class FeishuLongConnection:
         self._redis_key_prefix = redis_key_prefix
         self._domain = domain
         self._ws_future: asyncio.Future[Any] | None = None
+        self._thread: threading.Thread | None = None
+        self._runner_task: asyncio.Task[None] | None = None
+        self._stop_event: asyncio.Event | None = None
+        self._connecting_phase = False
         self._client: Any = None
         self._thread_loop: asyncio.AbstractEventLoop | None = None
         self._disconnecting = False
 
     async def connect(self) -> None:
         assert lark is not None
+        import lark_oapi.ws.client as _ws_client_mod
         from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 
+        if self._thread is not None and self._thread.is_alive():
+            await self.disconnect()
+
+        _install_ws_loop_proxy()
         self._disconnecting = False
+        self._connecting_phase = False
+        account_id = getattr(self._account, "id", "unknown")
         domain = LARK_DOMAIN if self._domain == "lark" else FEISHU_DOMAIN
         # Capture loop NOW on the asyncio main thread; the handler closure
         # uses it via run_coroutine_threadsafe from the SDK worker.
@@ -461,41 +531,166 @@ class FeishuLongConnection:
             redis_key_prefix=self._redis_key_prefix,
             outbound_client=outbound_client,
         )
-        self._client = lark.ws.Client(
-            app_id=self._app_id,
-            app_secret=self._app_secret,
-            event_handler=handler,
-            log_level=lark.LogLevel.INFO,
-            domain=domain,
-        )
-        _install_graceful_shutdown_receiver(
-            self._client,
-            is_shutting_down=lambda: self._disconnecting,
-        )
+
+        ws_future: asyncio.Future[None] = loop.create_future()
+        init_done: asyncio.Future[None] = loop.create_future()
+        # Consume any late init exception if connect() was cancelled first.
+        init_done.add_done_callback(lambda fut: None if fut.cancelled() else fut.exception())
+        self._ws_future = ws_future
+
+        def _complete_init() -> None:
+            if not init_done.done():
+                init_done.set_result(None)
+
+        def _fail_init(exc: BaseException) -> None:
+            if not init_done.done():
+                init_done.set_exception(exc)
+
+        def _finish_ws_future() -> None:
+            if not init_done.done():
+                init_done.set_exception(RuntimeError("Feishu worker exited before initialization"))
+            if not ws_future.done():
+                ws_future.set_result(None)
+
+        async def _run_client(client: Any, stop_event: asyncio.Event) -> None:
+            ping_task: asyncio.Task[Any] | None = None
+            self._connecting_phase = True
+            try:
+                try:
+                    await client._connect()
+                except _ws_client_mod.ClientException:
+                    raise
+                except Exception as exc:
+                    if self._disconnecting or stop_event.is_set():
+                        return
+                    logger.warning(
+                        "[Feishu LC] initial connect failed for {}: {}",
+                        account_id,
+                        exc,
+                    )
+                    await client._disconnect()
+                    if not getattr(client, "_auto_reconnect", False) or self._disconnecting:
+                        raise
+                    await client._reconnect()
+
+                self._connecting_phase = False
+                if self._disconnecting or stop_event.is_set():
+                    return
+
+                ping_task = asyncio.create_task(client._ping_loop())
+                await stop_event.wait()
+            finally:
+                self._connecting_phase = False
+                if ping_task is not None:
+                    ping_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await ping_task
+                if self._disconnecting or stop_event.is_set():
+                    with suppress(asyncio.CancelledError, Exception):
+                        await asyncio.wait_for(client._disconnect(), timeout=1.5)
 
         def _start_in_thread() -> None:
-            # ``lark_oapi.ws.client`` captures a module-level ``loop`` at
-            # import time via ``asyncio.get_event_loop()`` — under uvicorn
-            # that grabs the main asyncio loop and then ``client.start()``
-            # calls ``loop.run_until_complete()`` on it, raising
-            # "This event loop is already running". Install a fresh loop on
-            # this executor thread and replace the captured global so the
-            # SDK's run_until_complete targets this thread instead.
-            import lark_oapi.ws.client as _ws_client_mod
-
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            _ws_client_mod.loop = new_loop
-            self._thread_loop = new_loop
+            assert lark is not None
+            new_loop: asyncio.AbstractEventLoop | None = None
             try:
-                self._client.start()
-            finally:
-                with suppress(Exception):
-                    new_loop.close()
-                self._thread_loop = None
+                try:
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    _WS_LOOP_PROXY.bind(new_loop)
+                    self._thread_loop = new_loop
+                    stop_event = asyncio.Event()
 
-        # ws.Client.start() is blocking — run it in a thread executor.
-        self._ws_future = loop.run_in_executor(None, _start_in_thread)
+                    def _on_terminal_receiver_error(exc: BaseException) -> None:
+                        if not self._disconnecting:
+                            logger.opt(exception=exc).error(
+                                "[Feishu LC] receive loop terminated for account {}",
+                                account_id,
+                            )
+                        stop_event.set()
+
+                    # Construct ``ws.Client`` on ``new_loop`` so its internal
+                    # ``ExpiringCache`` cleanup task binds to this worker loop
+                    # rather than leaking onto the main FastAPI loop.
+                    client = lark.ws.Client(
+                        app_id=self._app_id,
+                        app_secret=self._app_secret,
+                        event_handler=handler,
+                        log_level=lark.LogLevel.INFO,
+                        domain=domain,
+                    )
+                    _install_graceful_shutdown_receiver(
+                        client,
+                        is_shutting_down=lambda: self._disconnecting,
+                        on_terminal_error=_on_terminal_receiver_error,
+                    )
+                    runner_task = new_loop.create_task(_run_client(client, stop_event))
+                    self._client = client
+                    self._stop_event = stop_event
+                    self._runner_task = runner_task
+                except BaseException as exc:
+                    if not loop.is_closed():
+                        with suppress(RuntimeError):
+                            loop.call_soon_threadsafe(_fail_init, exc)
+                    return
+
+                if not loop.is_closed():
+                    with suppress(RuntimeError):
+                        loop.call_soon_threadsafe(_complete_init)
+
+                if self._disconnecting:
+                    stop_event.set()
+                    runner_task.cancel()
+
+                try:
+                    new_loop.run_until_complete(runner_task)
+                except asyncio.CancelledError:
+                    pass
+                except BaseException as exc:
+                    if not self._disconnecting:
+                        logger.opt(exception=exc).error(
+                            "[Feishu LC] worker exited for account {}",
+                            account_id,
+                        )
+            finally:
+                self._connecting_phase = False
+                self._runner_task = None
+                self._stop_event = None
+                self._thread_loop = None
+                _WS_LOOP_PROXY.unbind()
+                if new_loop is not None:
+                    with suppress(Exception):
+                        pending = asyncio.all_tasks(new_loop)
+                        for task in pending:
+                            task.cancel()
+                        if pending:
+                            new_loop.run_until_complete(
+                                asyncio.gather(*pending, return_exceptions=True)
+                            )
+                    with suppress(Exception):
+                        new_loop.run_until_complete(new_loop.shutdown_asyncgens())
+                    with suppress(Exception):
+                        new_loop.close()
+                    with suppress(Exception):
+                        asyncio.set_event_loop(None)
+                if not loop.is_closed():
+                    with suppress(RuntimeError):
+                        loop.call_soon_threadsafe(_finish_ws_future)
+
+        # Dedicated daemon thread per account: the WS worker runs for the
+        # connection lifetime and would starve ``asyncio.to_thread`` if
+        # scheduled onto the default ThreadPoolExecutor.
+        thread = threading.Thread(
+            target=_start_in_thread,
+            name=f"feishu-lc:{account_id}",
+            daemon=True,
+        )
+        self._thread = thread
+        thread.start()
+        try:
+            await init_done
+        except BaseException:
+            await self.disconnect()
+            raise
 
     async def disconnect(self) -> None:
         self._disconnecting = True
@@ -508,15 +703,41 @@ class FeishuLongConnection:
                 client._auto_reconnect = False
 
         tl = self._thread_loop
-        if client is not None and tl is not None and not tl.is_closed():
+        stop_event = getattr(self, "_stop_event", None)
+        runner_task = getattr(self, "_runner_task", None)
 
-            async def _shutdown_client() -> None:
-                await client._disconnect()
+        if tl is not None and not tl.is_closed():
+            if stop_event is not None:
 
-            with suppress(Exception):
-                cfut = asyncio.run_coroutine_threadsafe(_shutdown_client(), tl)
-                await asyncio.wrap_future(cfut)
-        elif client is not None:
+                def _request_worker_stop() -> None:
+                    stop_event.set()
+                    if (
+                        getattr(self, "_connecting_phase", False)
+                        and runner_task is not None
+                        and not runner_task.done()
+                    ):
+                        runner_task.cancel()
+
+                with suppress(Exception):
+                    tl.call_soon_threadsafe(_request_worker_stop)
+            else:
+                if client is not None:
+
+                    async def _shutdown_client() -> None:
+                        await client._disconnect()
+
+                    try:
+                        cfut = asyncio.run_coroutine_threadsafe(_shutdown_client(), tl)
+                        await asyncio.wait_for(asyncio.wrap_future(cfut), timeout=1.5)
+                    except asyncio.CancelledError:
+                        cur = asyncio.current_task()
+                        if cur is not None and cur.cancelling() > 0:
+                            raise
+                    except Exception:
+                        pass
+                with suppress(Exception):
+                    tl.call_soon_threadsafe(tl.stop)
+        elif client is not None and self._ws_future is None:
             disconnect = getattr(client, "_disconnect", None)
             if disconnect is not None:
                 with suppress(Exception):
@@ -524,16 +745,15 @@ class FeishuLongConnection:
                     if asyncio.iscoroutine(result):
                         await result
 
-        # client.start() blocks on loop.run_until_complete(_select()) where
-        # _select is `while True: sleep(3600)`. Break it out after the socket
-        # is closed so the executor thread can leave start() and close its loop.
-        if tl is not None and not tl.is_closed():
-            with suppress(Exception):
-                tl.call_soon_threadsafe(tl.stop)
-
         if self._ws_future is not None:
-            with suppress(asyncio.CancelledError, Exception):
+            try:
                 await asyncio.wait_for(asyncio.shield(self._ws_future), timeout=2.0)
+            except asyncio.CancelledError:
+                cur = asyncio.current_task()
+                if cur is not None and cur.cancelling() > 0:
+                    raise
+            except Exception:
+                pass
             if not self._ws_future.done():
                 self._ws_future.cancel()
 
