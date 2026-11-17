@@ -13,6 +13,7 @@ from typing import Any
 
 from loguru import logger
 
+from cubeplex.im.link import resolve_mailto_email
 from cubeplex.models.im_connector import IMConnectorAccount
 
 _LINK_RE = _re.compile(
@@ -23,11 +24,14 @@ _LINK_RE = _re.compile(
 # Feishu auto-renders email-like input as `[user@host](mailto:user@host)`.
 # Unwrap before regex so the user-typed bare email and the auto-linked
 # form both match. Also covers angle-bracketed RFC 5322 form `<email>`.
-_MAILTO_AUTOLINK_RE = _re.compile(r"\[[^\]]+\]\(mailto:([^)]+)\)", _re.IGNORECASE)
+_MAILTO_AUTOLINK_RE = _re.compile(r"\[([^\]]+)\]\(mailto:([^)]+)\)", _re.IGNORECASE)
 
 
 def _unwrap_email_autolinks(text: str) -> str:
-    text = _MAILTO_AUTOLINK_RE.sub(r"\1", text)
+    text = _MAILTO_AUTOLINK_RE.sub(
+        lambda m: resolve_mailto_email(m.group(1), m.group(2)),
+        text,
+    )
     return text.replace("<", "").replace(">", "")
 
 
@@ -55,10 +59,11 @@ async def handle_link_command(
             await connector.send_to_chat(event.channel_id, event.reply_to_id, "无法识别发送者。")
         return
 
+    normalized_email = email.strip().lower()
     try:
         token = sign_link_token(
             im_user_id=sender_ref,
-            email=email,
+            email=normalized_email,
             account_id=account.id,
             workspace_id=account.workspace_id,
             platform="feishu",
@@ -73,7 +78,7 @@ async def handle_link_command(
 
     base = str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
     url = f"{base}/im-link?token={token}"
-    text = f"点击链接完成绑定：\n{url}"
+    text = f"点击链接完成绑定（{normalized_email}）：\n{url}"
     if connector is not None:
         await connector.send_to_chat(event.channel_id, event.reply_to_id, text)
     else:
