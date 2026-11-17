@@ -231,11 +231,16 @@ async def test_build_registers_persona_tools_for_interactive(
     assert "persona_update" in names
 
 
-async def test_build_keeps_persona_update_schema_for_non_interactive(
+@pytest.mark.parametrize(
+    ("trigger", "expected_allow_write"),
+    [("schedule", False), ("im", True)],
+)
+async def test_build_persona_update_allow_write_by_trigger(
     monkeypatch: pytest.MonkeyPatch,
+    trigger: str,
+    expected_allow_write: bool,
 ) -> None:
-    """Scheduled runs still register persona_update (stable tool schema) but
-    gate writes at execute time via allow_write=False."""
+    """Scheduled runs register persona_update with allow_write=False; IM runs allow writes."""
     mock_agent = MagicMock()
     mock_agent._extra = {}
     monkeypatch.setattr(
@@ -312,7 +317,7 @@ async def test_build_keeps_persona_update_schema_for_non_interactive(
             org_id="o1",
             workspace_id="w1",
             conversation_id=_CONV_ID,
-            trigger="schedule",
+            trigger=trigger,
         ),
         conversation_id=_CONV_ID,
         run_id=_RUN_ID,
@@ -323,9 +328,9 @@ async def test_build_keeps_persona_update_schema_for_non_interactive(
         effective_system_prompt="you are a test",
         extra_ref_holder=extra_ref_holder,
         publish_stream_event=MagicMock(),
-        trigger="schedule",
+        trigger=trigger,
     )
     names = {getattr(t, "name", None) for t in tools}
     assert "persona_get" in names
     assert "persona_update" in names
-    assert captured.get("allow_write") is False
+    assert captured.get("allow_write") is expected_allow_write
