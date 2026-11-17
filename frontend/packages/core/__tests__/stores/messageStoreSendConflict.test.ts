@@ -195,4 +195,53 @@ describe('messageStore.send active-run conflict', () => {
 
     expect(useMessageStore.getState().runLifecycle.conv1).toBe('idle')
   })
+
+  it('ignores a superseded send onRunId callback instead of stamping a newer send', async () => {
+    let fireFirstRunId!: (runId: string) => void
+    const firstHold = deferred<void>()
+    const secondHold = deferred<void>()
+    vi.mocked(streamMessages)
+      .mockImplementationOnce((_c, _conv, _content, _att, _sig, opts) => {
+        fireFirstRunId = (id: string) => opts?.onRunId?.(id)
+        return (async function* () {
+          await firstHold.promise
+          yield* []
+        })()
+      })
+      .mockImplementationOnce((_c, _conv, _content, _att, _sig, opts) => {
+        return (async function* () {
+          await secondHold.promise
+          opts?.onRunId?.('run-2')
+          yield {
+            type: 'text_delta',
+            timestamp: new Date().toISOString(),
+            data: { content: 'second answer' },
+            agent_id: null,
+            agent_name: null,
+          } as AgentEvent
+          yield {
+            type: 'done',
+            timestamp: new Date().toISOString(),
+            data: {},
+            agent_id: null,
+            agent_name: null,
+          } as AgentEvent
+        })()
+      })
+
+    const send1 = useMessageStore.getState().send(fakeClient, 'conv1', 'first prompt')
+    const send2Promise = useMessageStore.getState().send(fakeClient, 'conv1', 'second prompt')
+    // Stale callback from send #1 resolves while send #2's POST is still in flight.
+    fireFirstRunId('run-1')
+    secondHold.resolve()
+    firstHold.resolve()
+    await Promise.all([send1, send2Promise])
+
+    const msgs = useMessageStore.getState().messages.conv1
+    expect(msgs.map((m) => [m.role, m.run_id])).toEqual([
+      ['user', 'run-1'],
+      ['user', 'run-2'],
+      ['assistant', 'run-2'],
+    ])
+  })
 })
