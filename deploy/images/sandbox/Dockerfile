@@ -283,10 +283,10 @@ RUN python3 /tmp/inject-clipboard-close.py \
 RUN (getent passwd 1000 && userdel -r "$(getent passwd 1000 | cut -d: -f1)" 2>/dev/null || true) \
     && (getent group 1000 && groupdel "$(getent group 1000 | cut -d: -f1)" 2>/dev/null || true) \
     && groupadd -g 1000 cubeplex \
-    && useradd -u 1000 -g 1000 -m -d /home/cubeplex -s /bin/bash cubeplex \
+    && useradd -u 1000 -g 1000 -M -d /workspace -s /bin/bash cubeplex \
     && usermod -aG audio,video cubeplex \
-    && mkdir -p /var/log/neko /tmp/runtime-neko /home/cubeplex/.config/chromium \
-    && chown -R cubeplex:cubeplex /var/log/neko /tmp/runtime-neko /home/cubeplex \
+    && mkdir -p /var/log/neko /tmp/runtime-neko \
+    && chown -R cubeplex:cubeplex /var/log/neko /tmp/runtime-neko \
     && chmod 700 /tmp/runtime-neko \
     && chown cubeplex:cubeplex /workspace
 
