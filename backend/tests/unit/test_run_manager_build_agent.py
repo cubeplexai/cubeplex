@@ -187,7 +187,9 @@ async def test_subagent_receives_foreground_sandbox_tools(
     assert "background" in main_execute.parameters.model_fields
     assert "background" not in child_execute.parameters.model_fields
     assert "notify_on_complete" not in child_execute.parameters.model_fields
-    assert {tool.name for tool in subagent.shared_tools}.isdisjoint({"monitor", "kill_execute"})
+    assert {tool.name for tool in subagent.shared_tools}.isdisjoint(
+        {"monitor", "kill_execute", "wait_for_tasks"}
+    )
 
 
 async def test_build_wires_run_id_into_channel(

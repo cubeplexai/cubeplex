@@ -96,6 +96,7 @@ async def test_background_false_mounts_foreground_execute_and_foreground_prompt(
     assert tool_names == {"execute", "write", "edit", "read"}
     assert "monitor" not in tool_names
     assert "kill_execute" not in tool_names
+    assert "wait_for_tasks" not in tool_names
 
     exec_tool = next(t for t in mw.tools if t.name == "execute")
     assert "background" not in exec_tool.parameters.model_fields
