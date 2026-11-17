@@ -51,8 +51,8 @@ if [ -s "$MITM_CA" ]; then
     # Chromium <91 read ~/.pki/nssdb; modern (XDG) Chromium reads
     # ~/.local/share/pki/nssdb. Import into both so a Chromium upgrade in
     # the image doesn't silently break trust on existing profiles.
-    for NSS_DB in "${HOME:-/home/cubeplex}/.pki/nssdb" \
-        "${HOME:-/home/cubeplex}/.local/share/pki/nssdb"; do
+    for NSS_DB in "${HOME:-/workspace}/.pki/nssdb" \
+        "${HOME:-/workspace}/.local/share/pki/nssdb"; do
         import_mitm_ca "$NSS_DB"
     done
 fi
