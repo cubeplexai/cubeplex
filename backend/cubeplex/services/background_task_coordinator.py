@@ -382,23 +382,11 @@ class BackgroundTaskCoordinator:
                     recovery = await self.resolve_foreground(recovering_task)
                 async with self.session_factory() as session:
                     if isinstance(recovery, ForegroundResultEvidence):
-                        fresh_command = await session.get(SandboxCommand, command.id)
-                        if (
-                            recovering_task.state not in TERMINAL_TASK_STATES
-                            and fresh_command is not None
-                            and fresh_command.provider_ref is None
-                        ):
-                            await service(session).record_start_failed(
-                                task_id=task_id,
-                                owner_token=token,
-                                now=self.clock(),
-                                message=(
-                                    "start was submitted without a receipt "
-                                    "before foreground completion"
-                                ),
-                            )
-                        await service(session).record_foreground_delivery(
-                            task_id=task_id, owner_token=token, now=self.clock(), evidence=recovery
+                        await service(session).reconcile_foreground_checkpoint(
+                            task_id=task_id,
+                            owner_token=token,
+                            evidence=recovery,
+                            now=self.clock(),
                         )
                     elif recovery == "not_delivered":
                         await service(session).handoff_task(

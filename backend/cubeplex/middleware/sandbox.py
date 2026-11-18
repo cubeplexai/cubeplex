@@ -1760,6 +1760,7 @@ class _TaskWaitValidator(Protocol):
 
 def _make_wait_for_tasks_tool(
     validate_task_wait: _TaskWaitValidator | None = None,
+    validation_sink: dict[str, dict[str, Any]] | None = None,
 ) -> AgentTool[_WaitForTasksArgs]:
     async def _wait(
         tool_call_id: str,
@@ -1768,7 +1769,7 @@ def _make_wait_for_tasks_tool(
         signal: asyncio.Event | None = None,
         on_update: Callable[[StructuredValue], None] | None = None,
     ) -> AgentToolResult:
-        del tool_call_id, signal, on_update
+        del signal, on_update
         if validate_task_wait is None:
             return AgentToolResult(
                 content=[TextContent(text="Error: Task waiting is not configured by the host.")],
@@ -1795,6 +1796,8 @@ def _make_wait_for_tasks_tool(
                 content=[TextContent(text=f"Error: Cannot wait on tasks. {validation.reason}")],
                 is_error=True,
             )
+        if validation_sink is not None:
+            validation_sink[tool_call_id] = dict(validation.validation)
         return AgentToolResult(
             content=[
                 TextContent(
@@ -2350,7 +2353,8 @@ class SandboxMiddleware(Middleware):
         self._live_lock = asyncio.Lock()
         self._owner_id = f"run:{run_id}" if run_id else "run:local"
         self._lease_task: asyncio.Task[None] | None = None
-        self._wait_for_tasks_active = False
+        self._wait_for_tasks_boundary: tuple[str | None, str] | None = None
+        self._wait_task_validations: dict[str, dict[str, Any]] = {}
 
         caps = _sandbox_capabilities(sandbox)
         file_tools: list[AgentTool[Any]] = [
@@ -2407,7 +2411,10 @@ class SandboxMiddleware(Middleware):
                     on_live=self._ensure_lease_task,
                     handoff=self._handoff_conversation_command,
                 ),
-                _make_wait_for_tasks_tool(validate_task_wait=validate_task_wait),
+                _make_wait_for_tasks_tool(
+                    validate_task_wait=validate_task_wait,
+                    validation_sink=self._wait_task_validations,
+                ),
                 *file_tools,
             ]
         else:
@@ -2457,7 +2464,8 @@ class SandboxMiddleware(Middleware):
     ) -> list[UserMessage | AssistantMessage | ToolResultMessage] | None:
         """Hand off work once; task delivery starts a later run when needed."""
         del ctx, signal
-        self._wait_for_tasks_active = False
+        self._wait_for_tasks_boundary = None
+        self._wait_task_validations.clear()
         await self._release_managed_commands()
         return None
 
@@ -2717,7 +2725,6 @@ class SandboxMiddleware(Middleware):
         if binding is None or self._session_factory is None:
             await self._persist_killed(command_id)
             return
-        from cubeplex.models import SandboxCommand
         from cubeplex.services.background_tasks import BackgroundTaskService
 
         now = datetime.now(UTC)
@@ -2728,29 +2735,18 @@ class SandboxMiddleware(Middleware):
                 org_id=org_id,
                 workspace_id=workspace_id,
             )
-            command_row = await session.get(SandboxCommand, command_id)
-            if command_row is not None and command_row.provider_ref is not None:
-                # Start receipt was already persisted before sandbox.start raised;
-                # hand off to coordinator observation instead of failing start.
-                await service.record_observation_failure(
-                    task_id=binding.task_id,
-                    owner_token=binding.owner_token,
-                    now=now,
-                    message=message,
-                )
-                await service.defer_owner(
-                    task_id=binding.task_id,
-                    owner_token=binding.owner_token,
-                    now=now,
-                    retry_at=now + timedelta(seconds=1),
-                )
-            else:
-                await service.record_start_failed(
-                    task_id=binding.task_id,
-                    owner_token=binding.owner_token,
-                    now=now,
-                    message=message,
-                )
+            await service.record_start_failed(
+                task_id=binding.task_id,
+                owner_token=binding.owner_token,
+                now=now,
+                message=message,
+            )
+            await service.defer_owner(
+                task_id=binding.task_id,
+                owner_token=binding.owner_token,
+                now=now,
+                retry_at=now + timedelta(seconds=1),
+            )
             await session.commit()
 
     async def _persist_exited(
@@ -3121,15 +3117,20 @@ class SandboxMiddleware(Middleware):
         Because this runs before the tool body, a blocked command never reaches
         ``sandbox.execute`` — no sandbox side effects, TTL clock untouched.
         """
-        if self._wait_for_tasks_active:
-            return BeforeToolCallResult(
-                block=True,
-                reason=(
-                    "You already called wait_for_tasks to suspend this turn. "
-                    "Do not call any more tools; reply to the user with a brief "
-                    "text update now."
-                ),
-            )
+        if self._wait_for_tasks_boundary is not None:
+            from cubeloop.middleware.todo import _input_boundary
+
+            current_boundary = (ctx.context.run_id, _input_boundary(ctx.context))
+            if self._wait_for_tasks_boundary == current_boundary:
+                return BeforeToolCallResult(
+                    block=True,
+                    reason=(
+                        "You already called wait_for_tasks to suspend this turn. "
+                        "Do not call any more tools; reply to the user with a brief "
+                        "text update now."
+                    ),
+                )
+            self._wait_for_tasks_boundary = None
         tool_name = getattr(ctx.tool_call, "name", None)
         if tool_name not in ("execute", "monitor"):
             return None
@@ -3215,8 +3216,34 @@ class SandboxMiddleware(Middleware):
             block for block in ctx.assistant_message.content if isinstance(block, ToolCall)
         ]
         if len(tool_calls) <= 1:
+            wait_validation = self._wait_task_validations.pop(ctx.tool_call.id, {})
             if not ctx.is_error and ctx.result.is_error is not True:
-                self._wait_for_tasks_active = True
+                import copy
+
+                from cubeloop.middleware.todo import TaskWaitBinding, _input_boundary
+
+                boundary = _input_boundary(ctx.context)
+                self._wait_for_tasks_boundary = (ctx.context.run_id, boundary)
+                todos = ctx.context.extra.get("todos")
+                details = ctx.result.details if isinstance(ctx.result.details, dict) else {}
+                task_ids = details.get("task_ids")
+                if (
+                    isinstance(todos, list)
+                    and any(
+                        isinstance(t, dict) and t.get("status") not in ("completed", "cancelled")
+                        for t in todos
+                    )
+                    and isinstance(task_ids, list)
+                    and task_ids
+                ):
+                    ctx.context.extra["todo_task_wait"] = TaskWaitBinding(
+                        task_ids=list(task_ids),
+                        todos=copy.deepcopy(todos),
+                        run_id=ctx.context.run_id,
+                        input_boundary=boundary,
+                        validation=copy.deepcopy(wait_validation),
+                    ).model_dump(mode="json")
+                    ctx.context.extra["todo_task_wait_outcome"] = None
             return None
         return AfterToolCallResult(
             content=[
