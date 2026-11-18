@@ -2457,6 +2457,7 @@ class SandboxMiddleware(Middleware):
     ) -> list[UserMessage | AssistantMessage | ToolResultMessage] | None:
         """Hand off work once; task delivery starts a later run when needed."""
         del ctx, signal
+        self._wait_for_tasks_active = False
         await self._release_managed_commands()
         return None
 
@@ -2716,6 +2717,7 @@ class SandboxMiddleware(Middleware):
         if binding is None or self._session_factory is None:
             await self._persist_killed(command_id)
             return
+        from cubeplex.models import SandboxCommand
         from cubeplex.services.background_tasks import BackgroundTaskService
 
         now = datetime.now(UTC)
@@ -2726,12 +2728,29 @@ class SandboxMiddleware(Middleware):
                 org_id=org_id,
                 workspace_id=workspace_id,
             )
-            await service.record_start_failed(
-                task_id=binding.task_id,
-                owner_token=binding.owner_token,
-                now=now,
-                message=message,
-            )
+            command_row = await session.get(SandboxCommand, command_id)
+            if command_row is not None and command_row.provider_ref is not None:
+                # Start receipt was already persisted before sandbox.start raised;
+                # hand off to coordinator observation instead of failing start.
+                await service.record_observation_failure(
+                    task_id=binding.task_id,
+                    owner_token=binding.owner_token,
+                    now=now,
+                    message=message,
+                )
+                await service.defer_owner(
+                    task_id=binding.task_id,
+                    owner_token=binding.owner_token,
+                    now=now,
+                    retry_at=now + timedelta(seconds=1),
+                )
+            else:
+                await service.record_start_failed(
+                    task_id=binding.task_id,
+                    owner_token=binding.owner_token,
+                    now=now,
+                    message=message,
+                )
             await session.commit()
 
     async def _persist_exited(
