@@ -1365,6 +1365,9 @@ class RunManager:
                         now=datetime.now(UTC),
                     )
                     if claimed and background_notice_id is not None:
+                        from cubeplex.im.run_handoff import (
+                            enqueue_im_background_notice_handoff,
+                        )
                         from cubeplex.services.background_task_delivery import (
                             BackgroundTaskDeliveryService,
                         )
@@ -1381,6 +1384,17 @@ class RunManager:
                         )
                         if not bound:
                             raise ExecutionRevokedError("background notice lost delivery authority")
+                        await enqueue_im_background_notice_handoff(
+                            admission_session,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            conversation_id=conversation_id,
+                            actor_user_id=ctx.user_id,
+                            notice_id=background_notice_id,
+                            attempt_id=ctx.execution.attempt_id,
+                            admission_id=ctx.execution.admission_id,
+                            content=content,
+                        )
                     await admission_session.commit()
                 if not claimed:
                     await clear_active_run(
