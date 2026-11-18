@@ -540,6 +540,65 @@ async def test_start_receipt_loss_with_foreground_checkpoint_settles_without_loo
     assert command.log_state == "unavailable"
 
 
+async def test_record_start_failed_truncates_reason_and_stops_started_orphans(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+) -> None:
+    command_id = await remote_command(db_session, reservation_context)
+    command = await db_session.get(SandboxCommand, command_id)
+    assert command is not None and command.task_id is not None
+    task = await db_session.get(BackgroundTask, command.task_id)
+    assert task is not None and task.owner_token is not None
+    lifecycle = service(db_session)
+    assert await lifecycle.begin_start(task_id=task.id, owner_token=task.owner_token, now=NOW)
+    await lifecycle.record_start_failed(
+        task_id=task.id,
+        owner_token=task.owner_token,
+        now=NOW,
+        message="x" * 1000,
+    )
+    await db_session.commit()
+    await db_session.refresh(task)
+    assert task.state == "failed"
+    assert task.result_unavailable_reason is not None
+    assert len(task.result_unavailable_reason) == 512
+
+    # When provider_ref was already persisted, reconcile_foreground_checkpoint
+    # requests stop (cancelling notifications) instead of raising ValueError.
+    from dataclasses import replace
+
+    cmd2_id = await remote_command(
+        db_session,
+        replace(reservation_context, spec=replace(reservation_context.spec, tool_call_id="tc-2")),
+    )
+    cmd2 = await db_session.get(SandboxCommand, cmd2_id)
+    assert cmd2 is not None and cmd2.task_id is not None
+    task2 = await db_session.get(BackgroundTask, cmd2.task_id)
+    assert task2 is not None and task2.owner_token is not None
+    assert await lifecycle.begin_start(task_id=task2.id, owner_token=task2.owner_token, now=NOW)
+    await lifecycle.register_start_receipt(
+        task_id=task2.id,
+        start_token=task2.owner_token,
+        sandbox_instance_id=reservation_context.details.sandbox_instance_id,
+        provider_ref="proc-late",
+        now=NOW,
+    )
+    await lifecycle.reconcile_foreground_checkpoint(
+        task_id=task2.id,
+        owner_token=task2.owner_token,
+        evidence=ForegroundResultEvidence(
+            run_id=task2.originating_run_id,
+            tool_call_id=task2.tool_call_id,
+            agent_id=task2.agent_id,
+        ),
+        now=NOW,
+    )
+    await db_session.commit()
+    await db_session.refresh(task2)
+    assert task2.stop_requested_at is not None
+    assert task2.notifications_cancelled_at is not None
+
+
 @pytest.mark.parametrize("notify", [True, False])
 async def test_expired_deadline_is_not_reset_by_recovery_or_notification_policy(
     db_session: AsyncSession,

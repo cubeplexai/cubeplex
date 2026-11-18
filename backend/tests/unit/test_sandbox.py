@@ -3383,6 +3383,39 @@ async def test_wait_for_tasks_allows_final_reply_and_blocks_followup_tools() -> 
     )
     assert blocked_read is not None and blocked_read.block is True
 
+    # A new user message (e.g., background notice or steer) clears the block.
+    from cubeloop.providers.base import TextContent, UserMessage
+
+    agent_ctx.messages.append(UserMessage(content=[TextContent(text="task finished")]))
+    unblocked = await mw.before_tool_call(
+        BeforeToolCallContext(
+            assistant_message=AssistantMessage(content=[read_call]),
+            tool_call=read_call,
+            args={"path": "/tmp/a"},
+            context=agent_ctx,
+        )
+    )
+    assert unblocked is None
+
+    # With unfinished todos, wait_for_tasks binds todo_task_wait for TodoListMiddleware.
+    agent_ctx.extra["todos"] = [{"id": "t1", "content": "wait", "status": "in_progress"}]
+    mw._wait_task_validations["tc-wait-2"] = {"task_revisions": {"bgt-1": 1}}
+    wait_call_2 = ToolCall(id="tc-wait-2", name="wait_for_tasks", arguments={"task_ids": ["bgt-1"]})
+    await mw.after_tool_call(
+        AfterToolCallContext(
+            assistant_message=AssistantMessage(content=[wait_call_2]),
+            tool_call=wait_call_2,
+            args={"task_ids": ["bgt-1"]},
+            result=result,
+            is_error=False,
+            context=agent_ctx,
+        )
+    )
+    assert agent_ctx.extra["todo_task_wait"]["task_ids"] == ["bgt-1"]
+    assert agent_ctx.extra["todo_task_wait"]["validation"] == {"task_revisions": {"bgt-1": 1}}
+    await mw.on_run_end(agent_ctx)
+    assert mw._wait_for_tasks_boundary is None
+
 
 @pytest.mark.asyncio
 async def test_wait_for_tasks_rejects_invalid_or_undeliverable_tasks() -> None:

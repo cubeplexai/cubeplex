@@ -655,7 +655,20 @@ class BackgroundTaskLifecycle:
         conversation, _, task, command = await self._lock_command_task(task_id)
         self._require_owner(task, owner_token, now)
         if command.provider_ref is not None:
-            raise ValueError("a started command with a provider receipt cannot fail start")
+            # Start receipt was already persisted before start aborted; request
+            # stop so the orphaned process is killed and notifications stop.
+            await self.request_task_stop(
+                task_id=task_id,
+                reason=TaskStopReason.run_stop,
+                now=now,
+            )
+            await self.record_observation_failure(
+                task_id=task_id,
+                owner_token=owner_token,
+                now=now,
+                message=message,
+            )
+            return
         if task.state not in TERMINAL_TASK_STATES:
             task.state = (
                 BackgroundTaskState.cancelled.value
@@ -668,11 +681,44 @@ class BackgroundTaskLifecycle:
                 task.result_summary = message[:4000]
         if command.log_state != "complete":
             command.log_state = "unavailable"
-            task.result_unavailable_reason = task.result_unavailable_reason or message[:4000]
+            task.result_unavailable_reason = task.result_unavailable_reason or message[:512]
         task.last_observed_at = now
         task.revision += 1
         await self._ensure_completion(conversation, task, command, now)
         await self.session.flush()
+
+    async def reconcile_foreground_checkpoint(
+        self,
+        *,
+        task_id: str,
+        owner_token: str,
+        evidence: ForegroundResultEvidence,
+        now: datetime,
+    ) -> None:
+        """Settle a foreground-checkpointed task under the row lock."""
+        _, _, task, command = await self._lock_command_task(task_id)
+        self._require_owner(task, owner_token, now)
+        if task.state not in TERMINAL_TASK_STATES:
+            if command.provider_ref is None:
+                await self.record_start_failed(
+                    task_id=task_id,
+                    owner_token=owner_token,
+                    now=now,
+                    message=("start was submitted without a receipt before foreground completion"),
+                )
+            else:
+                await self.request_task_stop(
+                    task_id=task_id,
+                    reason=TaskStopReason.run_stop,
+                    now=now,
+                )
+                return
+        await self.record_foreground_delivery(
+            task_id=task_id,
+            owner_token=owner_token,
+            evidence=evidence,
+            now=now,
+        )
 
     async def _ensure_completion(
         self,
