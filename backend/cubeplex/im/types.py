@@ -183,6 +183,9 @@ class InboundEvent:
       supplies it (DingTalk ``conversationTitle``) or after a lazy API lookup
       (Feishu ``im.v1.chats.get``). Used as the Topic title for group chats;
       DMs leave this None.
+    - ``parent_message_id``: optional platform message id of the quoted/replied
+      message (Feishu ``message.parent_id``), used to fetch quoted context
+      before ingest.
     """
 
     platform: str
@@ -198,6 +201,7 @@ class InboundEvent:
     text: str
     attachments: list[InboundAttachmentRef] = field(default_factory=list)
     channel_name: str | None = None
+    parent_message_id: str | None = None
 
 
 @dataclass(slots=True)

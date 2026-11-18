@@ -253,6 +253,124 @@ def _parse_feishu_post(
     return "\n".join(lines).strip(), attachments
 
 
+def _normalize_sdk_mentions(sdk_mentions: Any) -> list[dict[str, Any]]:
+    """Normalize ``im.v1.message.get`` Mention objects to the webhook dict shape.
+
+    ``im.message.receive_v1`` carries ``mention["id"] = {"open_id": ...}``
+    while ``im.v1.message.get`` returns ``Mention(key=..., id="<open_id>",
+    name=...)``. Normalizing lets ``_substitute_mentions`` and
+    ``_parse_feishu_post`` handle both uniformly.
+    """
+    out: list[dict[str, Any]] = []
+    for m in sdk_mentions or []:
+        if isinstance(m, dict):
+            mid = m.get("id")
+            id_dict = mid if isinstance(mid, dict) else {"open_id": str(mid or "")}
+            out.append(
+                {
+                    "key": m.get("key") or "",
+                    "id": id_dict,
+                    "name": m.get("name") or "",
+                }
+            )
+            continue
+        oid = getattr(m, "id", None)
+        id_dict = oid if isinstance(oid, dict) else {"open_id": str(oid or "")}
+        out.append(
+            {
+                "key": getattr(m, "key", None) or "",
+                "id": id_dict,
+                "name": getattr(m, "name", None) or "",
+            }
+        )
+    return out
+
+
+def _format_media_placeholder(msg_type: str, content_obj: dict[str, Any]) -> str:
+    """Return a concise text placeholder for a quoted Feishu media message."""
+    if msg_type == "image":
+        return "[image]"
+    kind = {"audio": "audio", "media": "video"}.get(msg_type, "file")
+    name = str(content_obj.get("file_name") or "").strip()
+    return f"[{kind}: {name}]" if name else f"[{kind}]"
+
+
+def _collect_card_text(node: Any, out: list[str], *, depth: int = 0) -> None:
+    """Best-effort text extraction from a Feishu interactive card JSON tree."""
+    if depth > 12 or len(out) >= 100:
+        return
+    if isinstance(node, list):
+        for item in node:
+            _collect_card_text(item, out, depth=depth + 1)
+        return
+    if not isinstance(node, dict):
+        return
+    tag = str(node.get("tag") or "").lower()
+    if tag in ("markdown", "lark_md", "plain_text"):
+        content = node.get("content")
+        if isinstance(content, str) and content.strip():
+            out.append(content.strip())
+    elif "content" in node and isinstance(node["content"], str) and tag == "":
+        # Header title or text object: {"tag": "plain_text", ...} or {"content": "..."}
+        if node["content"].strip():
+            out.append(node["content"].strip())
+    for key in ("header", "title", "text", "body", "elements", "fields", "columns"):
+        if key in node:
+            _collect_card_text(node[key], out, depth=depth + 1)
+
+
+def _extract_interactive_text(content_obj: dict[str, Any]) -> str:
+    """Extract readable text from an interactive card message, or fallback label."""
+    parts: list[str] = []
+    _collect_card_text(content_obj, parts)
+    if parts:
+        # Preserve order while deduplicating adjacent identical strings (e.g. header).
+        deduped: list[str] = []
+        for p in parts:
+            if not deduped or deduped[-1] != p:
+                deduped.append(p)
+        return "\n".join(deduped).strip()
+    return "[interactive card]"
+
+
+def _extract_quoted_body(
+    msg_type: str,
+    raw_content: str,
+    mentions: list[dict[str, Any]],
+    bot_open_id: str | None,
+) -> str | None:
+    """Parse a quoted Feishu message body into plain text for prompt context."""
+    content_obj: dict[str, Any] = {}
+    if raw_content:
+        try:
+            parsed = json.loads(raw_content)
+            if isinstance(parsed, dict):
+                content_obj = parsed
+        except json.JSONDecodeError:
+            content_obj = {}
+
+    if msg_type == "text":
+        text = _substitute_mentions(content_obj.get("text", ""), mentions, bot_open_id)
+        return text or None
+    if msg_type == "post":
+        text, atts = _parse_feishu_post(content_obj, mentions, bot_open_id)
+        att_labels = [f"[{a.kind}: {a.filename}]" if a.filename else f"[{a.kind}]" for a in atts]
+        combined = "\n".join([p for p in (text, *att_labels) if p]).strip()
+        return combined or None
+    if msg_type in _FEISHU_MEDIA_TYPES:
+        return _format_media_placeholder(msg_type, content_obj)
+    if msg_type == "interactive":
+        return _extract_interactive_text(content_obj)
+    return f"[{msg_type}]" if msg_type else None
+
+
+def _format_quoted_block(text: str, sender_label: str | None = None) -> str:
+    """Format quoted message text as a clear header + markdown blockquote."""
+    header = f"[Quoted message from {sender_label}]" if sender_label else "[Quoted message]"
+    quoted_lines = "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
+    return f"{header}\n{quoted_lines}"
+
+
 # Feishu reaction_type literals (no enum in the SDK). Names are UPPERCASE
 # in Feishu's emoji_type set — mixed case (e.g. "ThumbsUp") is rejected with
 # code=231001 "reaction type is invalid".
@@ -354,6 +472,12 @@ class FeishuConnector:
         chat_id = message.get("chat_id", "")
         message_id = message.get("message_id", "")
         chat_type = message.get("chat_type", "")
+        raw_parent_id = message.get("parent_id")
+        parent_id = (
+            raw_parent_id.strip()
+            if isinstance(raw_parent_id, str) and raw_parent_id.strip()
+            else None
+        )
 
         sender_ref = sender_id.get("union_id") or sender_open_id or ""
 
@@ -387,6 +511,7 @@ class FeishuConnector:
             sender_open_id=sender_open_id,
             text=text,
             attachments=attachments,
+            parent_message_id=parent_id,
         )
 
     def _group_message_mentions_bot(self, message: dict[str, Any]) -> bool:
@@ -534,6 +659,72 @@ class FeishuConnector:
         name = await self.get_chat_name(event.channel_id)
         if name:
             event.channel_name = name
+
+    async def get_quoted_message_text(self, message_id: str) -> str | None:
+        """Fetch and format a quoted message via ``GET /open-apis/im/v1/messages/:message_id``.
+
+        Requires ``im:message:readonly`` (or ``im:message``). Failures are
+        logged and return ``None`` so the inbound message still proceeds.
+        """
+        if self._client is None or not message_id:
+            return None
+        from lark_oapi.api.im.v1 import GetMessageRequest
+
+        req = GetMessageRequest.builder().message_id(message_id).user_id_type("open_id").build()
+        try:
+            response = await asyncio.to_thread(self._client.im.v1.message.get, req)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[Feishu] get_quoted_message_text raised for message_id={}", message_id
+            )
+            return None
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] get_quoted_message_text failed: code={} msg={} message_id={}",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+                message_id,
+            )
+            return None
+        data = getattr(response, "data", None)
+        items = getattr(data, "items", None) if data is not None else None
+        if not items:
+            return None
+        msg = items[0]
+        if getattr(msg, "deleted", False):
+            return _format_quoted_block("[deleted message]")
+
+        msg_type = str(getattr(msg, "msg_type", None) or "").strip()
+        body = getattr(msg, "body", None)
+        raw_content = str(getattr(body, "content", None) or "") if body is not None else ""
+        mentions = _normalize_sdk_mentions(getattr(msg, "mentions", None))
+        quoted_body = _extract_quoted_body(msg_type, raw_content, mentions, self._bot_open_id)
+        if not quoted_body:
+            return None
+
+        sender = getattr(msg, "sender", None)
+        sender_name = getattr(sender, "sender_name", None) if sender is not None else None
+        sender_type = getattr(sender, "sender_type", None) if sender is not None else None
+        if isinstance(sender_name, str) and sender_name.strip():
+            sender_label: str | None = sender_name.strip()
+        elif sender_type == "app":
+            sender_label = "bot"
+        else:
+            sender_label = None
+        return _format_quoted_block(quoted_body, sender_label=sender_label)
+
+    async def enrich_inbound_quoted_message(self, event: InboundEvent) -> None:
+        """Prepend quoted parent message content to ``event.text`` when present.
+
+        No-op when ``event.parent_message_id`` is absent or no client is bound.
+        Failures leave ``event.text`` untouched.
+        """
+        if not event.parent_message_id or self._client is None:
+            return
+        quoted_block = await self.get_quoted_message_text(event.parent_message_id)
+        if not quoted_block:
+            return
+        event.text = f"{quoted_block}\n\n{event.text}" if event.text else quoted_block
 
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
         """Send a one-off plain text bubble to a chat, optionally as a thread reply.

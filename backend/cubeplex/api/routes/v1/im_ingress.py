@@ -304,10 +304,12 @@ async def feishu_events(
         )
         return Response(status_code=status.HTTP_200_OK)
 
-    # Resolve group display name for Topic titles (im.v1.chats.get). Needs
-    # the live client on gate_connector; no-ops on DM / failure.
+    # Resolve group display name for Topic titles (im.v1.chats.get) and
+    # quoted parent message content (im.v1.message.get). Needs the live
+    # client on gate_connector; no-ops when not applicable or on failure.
     if gate_connector is not None:
         await gate_connector.enrich_inbound_channel_name(event)
+        await gate_connector.enrich_inbound_quoted_message(event)
 
     # Use the module-level session maker so ingest_inbound_event owns its
     # own transaction (the request's session is bound to FastAPI's
