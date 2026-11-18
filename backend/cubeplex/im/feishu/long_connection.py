@@ -375,6 +375,8 @@ def build_event_handler(
                     kwargs["rejection_notifier"] = gate_connector
                     # Resolve group display name for Topic titles (im.v1.chats.get).
                     await gate_connector.enrich_inbound_channel_name(event)
+                    # Resolve quoted parent message content (im.v1.message.get).
+                    await gate_connector.enrich_inbound_quoted_message(event)
                 res = await ingest(
                     event,
                     account=account,
