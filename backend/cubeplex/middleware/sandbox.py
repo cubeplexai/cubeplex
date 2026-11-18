@@ -2735,7 +2735,7 @@ class SandboxMiddleware(Middleware):
                 org_id=org_id,
                 workspace_id=workspace_id,
             )
-            await service.record_start_failed(
+            await service.record_observation_failure(
                 task_id=binding.task_id,
                 owner_token=binding.owner_token,
                 now=now,
