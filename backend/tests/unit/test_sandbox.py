@@ -3318,8 +3318,14 @@ def test_constructor_without_optional_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_wait_for_tasks_terminates_turn_when_valid() -> None:
+async def test_wait_for_tasks_allows_final_reply_and_blocks_followup_tools() -> None:
+    from cubeloop.agent.types import (
+        AfterToolCallContext,
+        AgentContext,
+        BeforeToolCallContext,
+    )
     from cubeloop.middleware.todo import TaskWaitValidation
+    from cubeloop.providers.base import AssistantMessage, ToolCall
 
     from cubeplex.middleware.sandbox import _make_wait_for_tasks_tool, _WaitForTasksArgs
 
@@ -3332,10 +3338,39 @@ async def test_wait_for_tasks_terminates_turn_when_valid() -> None:
     result = await tool.execute("tc-wait-1", _WaitForTasksArgs(task_ids=[" bgt-1 "]))
 
     validator.validate_tasks.assert_awaited_once_with(["bgt-1"])
-    assert result.terminate is True
+    assert result.terminate is False
     assert result.is_error is not True
     assert result.details == {"status": "waiting", "task_ids": ["bgt-1"]}
     assert "bgt-1" in _text(result)
+    assert "reply to the user" in _text(result).lower()
+
+    sandbox = _make_sandbox()
+    mw = SandboxMiddleware(sandbox=sandbox)
+    wait_call = ToolCall(id="tc-wait-1", name="wait_for_tasks", arguments={"task_ids": ["bgt-1"]})
+    other_call = ToolCall(id="tc-exec-1", name="execute", arguments={"command": "ls"})
+    agent_ctx = AgentContext(system_prompt="", messages=[])
+    assert (
+        await mw.after_tool_call(
+            AfterToolCallContext(
+                assistant_message=AssistantMessage(content=[wait_call]),
+                tool_call=wait_call,
+                args={"task_ids": ["bgt-1"]},
+                result=result,
+                is_error=False,
+                context=agent_ctx,
+            )
+        )
+        is None
+    )
+    blocked = await mw.before_tool_call(
+        BeforeToolCallContext(
+            assistant_message=AssistantMessage(content=[other_call]),
+            tool_call=other_call,
+            args={"command": "ls"},
+            context=agent_ctx,
+        )
+    )
+    assert blocked is not None and blocked.block is True
 
 
 @pytest.mark.asyncio

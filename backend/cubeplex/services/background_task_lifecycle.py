@@ -649,6 +649,31 @@ class BackgroundTaskLifecycle:
             task.revision += 1
         await self.session.flush()
 
+    async def record_start_failed(
+        self, *, task_id: str, owner_token: str, now: datetime, message: str
+    ) -> None:
+        conversation, _, task, command = await self._lock_command_task(task_id)
+        self._require_owner(task, owner_token, now)
+        if command.provider_ref is not None:
+            raise ValueError("a started command with a provider receipt cannot fail start")
+        if task.state not in TERMINAL_TASK_STATES:
+            task.state = (
+                BackgroundTaskState.cancelled.value
+                if task.stop_requested_at is not None
+                else BackgroundTaskState.failed.value
+            )
+            task.finished_at = command.finished_at = now
+            command.status = SandboxCommandStatus.killed.value
+            if command.monitor_outcome is None:
+                task.result_summary = message[:4000]
+        if command.log_state != "complete":
+            command.log_state = "unavailable"
+            task.result_unavailable_reason = task.result_unavailable_reason or message[:4000]
+        task.last_observed_at = now
+        task.revision += 1
+        await self._ensure_completion(conversation, task, command, now)
+        await self.session.flush()
+
     async def _ensure_completion(
         self,
         conversation: Conversation,

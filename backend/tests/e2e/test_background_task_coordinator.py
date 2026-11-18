@@ -498,6 +498,48 @@ async def test_start_receipt_loss_is_unknown_not_a_second_start(
     raw.commands.run.assert_not_awaited()
 
 
+async def test_start_receipt_loss_with_foreground_checkpoint_settles_without_looping(
+    db_session: AsyncSession,
+    session_factory: async_sessionmaker[AsyncSession],
+    reservation_context: ReservationContext,
+    mock_encryption_backend: EncryptionBackend,
+    remote: tuple[MagicMock, MagicMock, AsyncMock],
+) -> None:
+    command_id = await remote_command(db_session, reservation_context)
+    command = await db_session.get(SandboxCommand, command_id)
+    assert command is not None and command.task_id is not None
+    task = await db_session.get(BackgroundTask, command.task_id)
+    assert task is not None and task.owner_token is not None
+    assert await service(db_session).begin_start(
+        task_id=task.id, owner_token=task.owner_token, now=NOW
+    )
+    await db_session.commit()
+    _, raw, _ = remote
+    raw.id = command.sandbox_instance_id
+    raw.renew = AsyncMock()
+
+    async def foreground_delivered(recovering_task: BackgroundTask) -> ForegroundResultEvidence:
+        return ForegroundResultEvidence(
+            run_id=recovering_task.originating_run_id,
+            tool_call_id=recovering_task.tool_call_id,
+            agent_id=recovering_task.agent_id,
+        )
+
+    coordinator = BackgroundTaskCoordinator(
+        session_factory,
+        SandboxManager(session_factory, mock_encryption_backend),
+        resolve_foreground=foreground_delivered,
+        clock=lambda: NOW + timedelta(seconds=31),
+    )
+    await coordinator.reconcile_once()
+    await db_session.refresh(task)
+    await db_session.refresh(command)
+    assert task.state == "failed"
+    assert task.result_readiness == "unavailable"
+    assert task.foreground_result_delivered_at is not None
+    assert command.log_state == "unavailable"
+
+
 @pytest.mark.parametrize("notify", [True, False])
 async def test_expired_deadline_is_not_reset_by_recovery_or_notification_policy(
     db_session: AsyncSession,
