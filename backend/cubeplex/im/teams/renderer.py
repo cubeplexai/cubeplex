@@ -17,6 +17,18 @@ from cubeplex.im.types import RenderState
 _SPLIT_THRESHOLD = 24000
 
 
+def _active_stream_text(card_state: Any) -> str:
+    """Text currently being streamed to Teams.
+
+    After HITL resolves, cubeloop appends into ``post_hitl_content`` while
+    keeping the pre-HITL text in ``streaming_content``. Teams posts the
+    follow-up as a new activity below the Adaptive Card prompt.
+    """
+    if getattr(card_state, "hitl_resolved", False):
+        return str(card_state.post_hitl_content or "")
+    return str(card_state.streaming_content or "")
+
+
 class TeamsOpDispatcher:
     """Dispatches outbound ops to Teams via Markdown messages + Adaptive Cards."""
 
@@ -29,10 +41,25 @@ class TeamsOpDispatcher:
         self._connector = connector
         self._state = state
         self.sent_char_offset: int = 0
+        self._painted_len: int = 0
         self._pending_input_sent_id: str | None = None
+        # Only reset the bot message once per resolved HITL question — later
+        # tool/artifact patches still carry resolved_choice.
+        self._hitl_reset_qid: str | None = None
 
     def _can_edit(self) -> bool:
         return bool(getattr(self._connector, "supports_message_edit", True))
+
+    async def _flush_send_only_buffer(self, full_content: str) -> None:
+        remaining = full_content[self.sent_char_offset :]
+        while remaining:
+            chunk = remaining[:TEAMS_MSG_LIMIT]
+            remaining = remaining[TEAMS_MSG_LIMIT:]
+            msg_id = await self._connector.send_message(chunk)
+            if msg_id:
+                self._state.bot_message_id = msg_id
+            self.sent_char_offset += len(chunk)
+            self._painted_len = self.sent_char_offset
 
     async def dispatch_create(self, state: Any) -> bool:
         s = self._state
@@ -43,7 +70,7 @@ class TeamsOpDispatcher:
         if not self._can_edit():
             await self.dispatch_patch(state)
             return True
-        text = s.card_state.streaming_content or ""
+        text = _active_stream_text(s.card_state)
         current_segment = text[self.sent_char_offset :]
         if not current_segment:
             # A resolved HITL clears card_id and parks the offset at the end
@@ -53,7 +80,8 @@ class TeamsOpDispatcher:
             if pending is not None and pending.resolved_choice is None:
                 await self.dispatch_patch(state)
                 return False
-            if text:
+            if text or getattr(s.card_state, "hitl_resolved", False):
+                await self.dispatch_patch(state)
                 return False
             current_segment = "..."
         sealed_prefix = False
@@ -73,6 +101,9 @@ class TeamsOpDispatcher:
         if sealed_prefix:
             s.card_id = None
             s.bot_message_id = None
+            self._painted_len = self.sent_char_offset
+        else:
+            self._painted_len = len(text)
         return True
 
     async def dispatch_stream(self, state: Any, text: str) -> bool:
@@ -82,7 +113,7 @@ class TeamsOpDispatcher:
             return True
         if s.bot_message_id is None:
             return await self.dispatch_create(state)
-        full_content = s.card_state.streaming_content
+        full_content = _active_stream_text(s.card_state)
         current_segment = full_content[self.sent_char_offset :]
         if len(current_segment) > _SPLIT_THRESHOLD:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
@@ -96,13 +127,18 @@ class TeamsOpDispatcher:
                 # Channel rejected edit mid-stream — fall back to send-only.
                 return True
             self.sent_char_offset += split_at
+            self._painted_len = self.sent_char_offset
             remaining = full_content[self.sent_char_offset :]
             if remaining:
-                msg_id = await self._connector.send_message(remaining[:_SPLIT_THRESHOLD])
+                posted = remaining[:TEAMS_MSG_LIMIT]
+                msg_id = await self._connector.send_message(posted)
                 if msg_id:
                     s.card_id = msg_id
                     s.bot_message_id = msg_id
+                    self._painted_len = self.sent_char_offset + len(posted)
             note_edit_success(s)
+            return True
+        if not current_segment:
             return True
         try:
             ok = await self._connector.edit_message(s.bot_message_id, current_segment)
@@ -110,6 +146,7 @@ class TeamsOpDispatcher:
             note_flood_strike(s)
             return False
         if ok:
+            self._painted_len = len(full_content)
             note_edit_success(s)
         # False (e.g. 405) is OK: finalize will send the full buffer.
         return True
@@ -126,6 +163,12 @@ class TeamsOpDispatcher:
             and pending.resolved_choice is None
             and pending_id != self._pending_input_sent_id
         ):
+            if pending.choices or pending.needs_form():
+                active_text = _active_stream_text(s.card_state)
+                if not self._can_edit():
+                    await self._flush_send_only_buffer(active_text)
+                elif s.bot_message_id is not None and len(active_text) > self._painted_len:
+                    await self.dispatch_stream(state, active_text)
             if pending.choices:
                 await self._send_pending_input_card(pending)
                 self._pending_input_sent_id = pending_id
@@ -136,9 +179,13 @@ class TeamsOpDispatcher:
                 await self._connector.send_message(text)
                 self._pending_input_sent_id = pending_id
         if pending is not None and pending.resolved_choice is not None:
-            s.card_id = None
-            s.bot_message_id = None
-            self.sent_char_offset = len(s.card_state.streaming_content)
+            rid = f"{pending.kind}:{pending.run_id}:{pending.question_id or ''}"
+            if rid != self._hitl_reset_qid:
+                s.card_id = None
+                s.bot_message_id = None
+                self.sent_char_offset = len(_active_stream_text(s.card_state))
+                self._painted_len = self.sent_char_offset
+                self._hitl_reset_qid = rid
         return True
 
     async def _send_pending_input_card(self, pending: Any) -> None:
@@ -185,7 +232,7 @@ class TeamsOpDispatcher:
 
     async def dispatch_finalize(self, state: Any) -> bool:
         s = self._state
-        full_content = s.card_state.streaming_content
+        full_content = _active_stream_text(s.card_state)
         if s.card_state.error:
             error_suffix = f"\n\n⚠️ {s.card_state.error}"
             full_content = (full_content + error_suffix) if full_content else error_suffix
@@ -195,31 +242,36 @@ class TeamsOpDispatcher:
             if links:
                 full_content = f"{full_content}\n\n{links}" if full_content else links
         if not full_content:
+            if s.bot_message_id is not None and self._can_edit():
+                try:
+                    await self._connector.edit_message(s.bot_message_id, "✓")
+                except Exception:
+                    logger.opt(exception=True).warning("[Teams] finalize placeholder clear failed")
             return True
         remaining = full_content[self.sent_char_offset :]
         if not remaining:
             return True
 
-        # Prefer edit when the channel supports it and we already have a msg.
-        if s.bot_message_id is not None and self._can_edit() and len(remaining) <= TEAMS_MSG_LIMIT:
-            try:
-                ok = await self._connector.edit_message(s.bot_message_id, remaining)
-            except Exception:
-                logger.opt(exception=True).warning("[Teams] finalize edit failed")
-                ok = False
-            if ok:
-                self.sent_char_offset += len(remaining)
-                return True
-            # Fall through to send-new-message path.
-
-        # Send-only (Web Chat / edit failed / oversize): post remaining chunks.
+        edit_current = s.bot_message_id is not None and self._can_edit()
         while remaining:
             chunk = remaining[:TEAMS_MSG_LIMIT]
             remaining = remaining[TEAMS_MSG_LIMIT:]
+            if edit_current and s.bot_message_id:
+                edit_current = False
+                try:
+                    ok = await self._connector.edit_message(s.bot_message_id, chunk)
+                except Exception:
+                    logger.opt(exception=True).warning("[Teams] finalize edit failed")
+                    ok = False
+                if ok:
+                    self.sent_char_offset += len(chunk)
+                    self._painted_len = self.sent_char_offset
+                    continue
             msg_id = await self._connector.send_message(chunk)
             if msg_id:
                 s.bot_message_id = msg_id
             self.sent_char_offset += len(chunk)
+            self._painted_len = self.sent_char_offset
         return True
 
     async def emergency_text(self, text: str) -> None:

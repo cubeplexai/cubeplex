@@ -24,6 +24,18 @@ _DISCORD_MSG_LIMIT = 2000
 _SPLIT_THRESHOLD = 1900
 
 
+def _active_stream_text(card_state: Any) -> str:
+    """Text currently being streamed to Discord.
+
+    After HITL resolves, cubeloop appends into ``post_hitl_content`` while
+    keeping the pre-HITL text in ``streaming_content``. Discord posts the
+    follow-up as a new message below the prompt buttons.
+    """
+    if getattr(card_state, "hitl_resolved", False):
+        return str(card_state.post_hitl_content or "")
+    return str(card_state.streaming_content or "")
+
+
 class DiscordOpDispatcher:
     """Dispatches outbound ops to Discord via message send/edit."""
 
@@ -36,11 +48,15 @@ class DiscordOpDispatcher:
         self._connector = connector
         self._state = state
         self.sent_char_offset: int = 0
+        self._painted_len: int = 0
         self._pending_input_sent_id: str | None = None
+        # Only reset the bot message once per resolved HITL question — later
+        # tool/artifact patches still carry resolved_choice.
+        self._hitl_reset_qid: str | None = None
 
     async def dispatch_create(self, state: Any) -> bool:
         s = self._state
-        text = s.card_state.streaming_content or ""
+        text = _active_stream_text(s.card_state)
         current_segment = text[self.sent_char_offset :]
         if not current_segment:
             # A resolved HITL clears card_id and parks the offset at the end
@@ -50,7 +66,8 @@ class DiscordOpDispatcher:
             if pending is not None and pending.resolved_choice is None:
                 await self.dispatch_patch(state)
                 return False
-            if text:
+            if text or getattr(s.card_state, "hitl_resolved", False):
+                await self.dispatch_patch(state)
                 return False
             current_segment = "..."
         sealed_prefix = False
@@ -70,13 +87,16 @@ class DiscordOpDispatcher:
         if sealed_prefix:
             s.card_id = None
             s.bot_message_id = None
+            self._painted_len = self.sent_char_offset
+        else:
+            self._painted_len = len(text)
         return True
 
     async def dispatch_stream(self, state: Any, text: str) -> bool:
         s = self._state
         if s.bot_message_id is None:
             return await self.dispatch_create(state)
-        full_content = s.card_state.streaming_content
+        full_content = _active_stream_text(s.card_state)
         current_segment = full_content[self.sent_char_offset :]
         if len(current_segment) > _SPLIT_THRESHOLD:
             split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
@@ -87,13 +107,18 @@ class DiscordOpDispatcher:
                 note_flood_strike(s)
                 return False
             self.sent_char_offset += split_at
+            self._painted_len = self.sent_char_offset
             remaining = full_content[self.sent_char_offset :]
             if remaining:
-                msg_id = await self._connector.send_message(remaining[:_SPLIT_THRESHOLD])
+                posted = remaining[:_DISCORD_MSG_LIMIT]
+                msg_id = await self._connector.send_message(posted)
                 if msg_id:
                     s.card_id = msg_id
                     s.bot_message_id = msg_id
+                    self._painted_len = self.sent_char_offset + len(posted)
             note_edit_success(s)
+            return True
+        if not current_segment:
             return True
         try:
             ok = await self._connector.edit_message(s.bot_message_id, current_segment)
@@ -101,6 +126,7 @@ class DiscordOpDispatcher:
             note_flood_strike(s)
             return False
         if ok:
+            self._painted_len = len(full_content)
             note_edit_success(s)
         return bool(ok)
 
@@ -117,6 +143,9 @@ class DiscordOpDispatcher:
             and pending.resolved_choice is None
             and pending_id != self._pending_input_sent_id
         ):
+            active_text = _active_stream_text(s.card_state)
+            if s.bot_message_id is not None and len(active_text) > self._painted_len:
+                await self.dispatch_stream(state, active_text)
             if pending.choices:
                 await self._send_pending_input_buttons(pending)
                 self._pending_input_sent_id = pending_id
@@ -126,13 +155,17 @@ class DiscordOpDispatcher:
                 text = pending.question or "_(请在 CubePlex 网页端继续。)_"
                 await self._connector.send_message(text)
                 self._pending_input_sent_id = pending_id
-        # When the user answers a pending input, reset card state so the
-        # follow-up reply appears as a NEW message below the buttons
-        # instead of being edited into the old message above them.
+        # When the user answers a pending input, reset card state once per
+        # question so the follow-up reply appears as a NEW message below the
+        # buttons without later tool/artifact patches orphaning it.
         if pending is not None and pending.resolved_choice is not None:
-            s.card_id = None
-            s.bot_message_id = None
-            self.sent_char_offset = len(s.card_state.streaming_content)
+            rid = f"{pending.kind}:{pending.run_id}:{pending.question_id or ''}"
+            if rid != self._hitl_reset_qid:
+                s.card_id = None
+                s.bot_message_id = None
+                self.sent_char_offset = len(_active_stream_text(s.card_state))
+                self._painted_len = self.sent_char_offset
+                self._hitl_reset_qid = rid
         # Send typing indicator during tool calls.
         if getattr(self._connector, "_bot", None) is not None and s.bot_message_id is not None:
             try:
@@ -185,7 +218,7 @@ class DiscordOpDispatcher:
 
     async def dispatch_finalize(self, state: Any) -> bool:
         s = self._state
-        full_content = s.card_state.streaming_content
+        full_content = _active_stream_text(s.card_state)
         if s.card_state.error:
             error_suffix = f"\n\n⚠️ {s.card_state.error}"
             full_content = (full_content + error_suffix) if full_content else error_suffix
@@ -195,30 +228,41 @@ class DiscordOpDispatcher:
             if links:
                 full_content = f"{full_content}\n\n{links}" if full_content else links
         if not full_content:
+            if s.bot_message_id is not None:
+                try:
+                    await self._connector.edit_message(s.bot_message_id, "✓")
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "[Discord] finalize placeholder clear failed"
+                    )
             if s.inbound_message_id:
                 await self._connector.remove_reaction(s.inbound_message_id, "⏳")
             return True
         remaining = full_content[self.sent_char_offset :]
-        if s.bot_message_id is not None and len(remaining) <= _DISCORD_MSG_LIMIT:
-            try:
-                await self._connector.edit_message(s.bot_message_id, remaining)
-            except Exception:
-                logger.opt(exception=True).warning("[Discord] finalize edit failed")
-                await self.emergency_text(remaining[:4000])
-        else:
-            while remaining:
-                chunk = remaining[:_DISCORD_MSG_LIMIT]
-                remaining = remaining[_DISCORD_MSG_LIMIT:]
-                if s.bot_message_id and not self.sent_char_offset:
-                    try:
-                        await self._connector.edit_message(s.bot_message_id, chunk)
-                    except Exception:
-                        await self._connector.send_message(chunk)
-                else:
-                    msg_id = await self._connector.send_message(chunk)
-                    if msg_id:
-                        s.bot_message_id = msg_id
-                self.sent_char_offset += len(chunk)
+        if remaining:
+            if s.bot_message_id is not None and len(remaining) <= _DISCORD_MSG_LIMIT:
+                try:
+                    await self._connector.edit_message(s.bot_message_id, remaining)
+                except Exception:
+                    logger.opt(exception=True).warning("[Discord] finalize edit failed")
+                    await self.emergency_text(remaining[:4000])
+                self.sent_char_offset += len(remaining)
+            else:
+                edit_current = s.bot_message_id is not None
+                while remaining:
+                    chunk = remaining[:_DISCORD_MSG_LIMIT]
+                    remaining = remaining[_DISCORD_MSG_LIMIT:]
+                    if edit_current and s.bot_message_id:
+                        edit_current = False
+                        try:
+                            await self._connector.edit_message(s.bot_message_id, chunk)
+                        except Exception:
+                            await self._connector.send_message(chunk)
+                    else:
+                        msg_id = await self._connector.send_message(chunk)
+                        if msg_id:
+                            s.bot_message_id = msg_id
+                    self.sent_char_offset += len(chunk)
         if s.inbound_message_id:
             await self._connector.remove_reaction(s.inbound_message_id, "⏳")
         return True
