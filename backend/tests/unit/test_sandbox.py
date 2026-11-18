@@ -3372,6 +3372,17 @@ async def test_wait_for_tasks_allows_final_reply_and_blocks_followup_tools() -> 
     )
     assert blocked is not None and blocked.block is True
 
+    read_call = ToolCall(id="tc-read-1", name="read", arguments={"path": "/tmp/a"})
+    blocked_read = await mw.before_tool_call(
+        BeforeToolCallContext(
+            assistant_message=AssistantMessage(content=[read_call]),
+            tool_call=read_call,
+            args={"path": "/tmp/a"},
+            context=agent_ctx,
+        )
+    )
+    assert blocked_read is not None and blocked_read.block is True
+
 
 @pytest.mark.asyncio
 async def test_wait_for_tasks_rejects_invalid_or_undeliverable_tasks() -> None:
@@ -3428,7 +3439,7 @@ async def test_wait_for_tasks_rejects_parallel_tool_calls() -> None:
     wait_call = ToolCall(id="tc-wait", name="wait_for_tasks", arguments={"task_ids": ["bgt-1"]})
     other_call = ToolCall(id="tc-read", name="read", arguments={"path": "/tmp/a"})
     agent_ctx = AgentContext(system_prompt="", messages=[])
-    ok_res = AgentToolResult(content=[TextContent(text="waiting")], terminate=True)
+    ok_res = AgentToolResult(content=[TextContent(text="waiting")], terminate=False)
 
     single_ctx = AfterToolCallContext(
         assistant_message=AssistantMessage(content=[wait_call]),
