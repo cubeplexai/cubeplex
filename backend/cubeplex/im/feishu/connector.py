@@ -753,6 +753,25 @@ class FeishuConnector:
             )
             req = ReplyMessageRequest.builder().message_id(reply_to_id).request_body(body).build()
             response = await asyncio.to_thread(self._client.im.v1.message.reply, req)
+            if not getattr(response, "success", lambda: False)() and chat_id:
+                self._reply_to_id = None
+                fallback_body = (
+                    CreateMessageRequestBody.builder()
+                    .receive_id(chat_id)
+                    .msg_type("text")
+                    .content(payload)
+                    .build()
+                )
+                fallback_req = (
+                    CreateMessageRequest.builder()
+                    .receive_id_type("chat_id")
+                    .request_body(fallback_body)
+                    .build()
+                )
+                response = await asyncio.to_thread(
+                    self._client.im.v1.message.create,
+                    fallback_req,
+                )
         else:
             body = (
                 CreateMessageRequestBody.builder()
@@ -891,6 +910,15 @@ class FeishuConnector:
                 self._channel_id,
                 is_retryable,
             )
+            if not is_retryable and self._reply_to_id is not None and self._channel_id:
+                logger.info(
+                    "[Feishu] reply target {!r} rejected (code={}); falling back to channel create",
+                    self._reply_to_id,
+                    last_code,
+                )
+                self._reply_to_id = None
+                _path = "create"
+                continue
             if not is_retryable or attempt >= len(_RETRY_DELAYS):
                 break
             await asyncio.sleep(_RETRY_DELAYS[attempt])
@@ -927,6 +955,25 @@ class FeishuConnector:
                 .build()
             )
             response = await asyncio.to_thread(self._client.im.v1.message.reply, req)
+            if not getattr(response, "success", lambda: False)():
+                self._reply_to_id = None
+                fallback_body = (
+                    CreateMessageRequestBody.builder()
+                    .receive_id(self._channel_id)
+                    .msg_type("text")
+                    .content(payload)
+                    .build()
+                )
+                fallback_req = (
+                    CreateMessageRequest.builder()
+                    .receive_id_type("chat_id")
+                    .request_body(fallback_body)
+                    .build()
+                )
+                response = await asyncio.to_thread(
+                    self._client.im.v1.message.create,
+                    fallback_req,
+                )
         else:
             body = (
                 CreateMessageRequestBody.builder()

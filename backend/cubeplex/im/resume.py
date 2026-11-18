@@ -104,14 +104,15 @@ async def resume_paused_run(
     topic_creator_user_id: str | None = None
     topic_title: str | None = None
     if topic_id is not None or is_group_chat:
+        from sqlalchemy import select as _select
+
+        from cubeplex.db.engine import async_session_maker as _sm
+        from cubeplex.models.conversation import Conversation
+        from cubeplex.models.topic import Topic
+
         im_bound = False
-        if topic_id is not None:
-            from sqlalchemy import select as _select
-
-            from cubeplex.db.engine import async_session_maker as _sm
-            from cubeplex.models.topic import Topic
-
-            async with _sm() as _sess:
+        async with _sm() as _sess:
+            if topic_id is not None:
                 topic_row = (
                     await _sess.execute(
                         _select(Topic).where(
@@ -120,11 +121,13 @@ async def resume_paused_run(
                     )
                 ).scalar_one_or_none()
                 if topic_row is not None:
-                    # IM-origin marker is attributes["im"]; sandbox from the topic.
                     im_bound = "im" in (topic_row.attributes or {})
                     sandbox_mode = topic_row.sandbox_mode
                     topic_creator_user_id = topic_row.creator_user_id
                     topic_title = topic_row.title
+            if not im_bound:
+                conv_row = await _sess.get(Conversation, conversation_id)
+                im_bound = conv_row is not None and "im" in (conv_row.attributes or {})
 
         if not im_bound:
             logger.warning(
@@ -186,6 +189,7 @@ async def resume_paused_run(
         is_group_chat=is_group_chat,
         sandbox_mode=sandbox_mode,
         topic_creator_user_id=topic_creator_user_id,
+        conversation_creator_user_id=user_id,
     )
 
     try:
