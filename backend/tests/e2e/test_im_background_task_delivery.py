@@ -197,19 +197,30 @@ async def _stage_ready_background_event(
             topic_sandbox_mode=topic.sandbox_mode if topic is not None else None,
             topic_creator_user_id=topic.creator_user_id if topic is not None else None,
         )
-        sandbox = UserSandbox(
-            org_id=org_id,
-            workspace_id=ws_id,
-            user_id=target.owner_user_id,
-            scope_type=target.scope_type,
-            scope_id=target.scope_id,
-            sandbox_id=f"sbx-{uuid4()}",
-            status="running",
-            provider="local",
-            image="test",
-        )
-        session.add(sandbox)
-        await session.flush()
+        sandbox = (
+            await session.execute(
+                select(UserSandbox).where(
+                    col(UserSandbox.org_id) == org_id,
+                    col(UserSandbox.workspace_id) == ws_id,
+                    col(UserSandbox.scope_type) == target.scope_type,
+                    col(UserSandbox.scope_id) == target.scope_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if sandbox is None:
+            sandbox = UserSandbox(
+                org_id=org_id,
+                workspace_id=ws_id,
+                user_id=target.owner_user_id,
+                scope_type=target.scope_type,
+                scope_id=target.scope_id,
+                sandbox_id=f"sbx-{uuid4()}",
+                status="running",
+                provider="local",
+                image="test",
+            )
+            session.add(sandbox)
+            await session.flush()
         assert sandbox.sandbox_id is not None
 
         reserved = await BackgroundTaskService(
@@ -749,3 +760,167 @@ async def test_superseded_uncommitted_background_notice_attempt_tails_only_live_
         pass
 
     assert started_runs == [refreshed_event.delivery_run_id]
+
+
+async def test_thread_link_fallback_and_disabled_or_web_conversation_guards(
+    im_bg_env: dict[str, str],
+    run_manager: RunManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cubeplex.im.conversation_resolver import resolve_im_conversation
+    from cubeplex.services.conversation_execution import (
+        ConversationExecutionService,
+        UserMessageIntent,
+    )
+
+    snap = snapshot()
+    provider = FauxProvider(provider_id="provider")
+    provider.set_responses(
+        [
+            faux_assistant_message([faux_text("Link fallback reply")]),
+            faux_assistant_message([faux_text("Disabled account web reply")]),
+            faux_assistant_message([faux_text("Pure web reply")]),
+        ]
+    )
+    monkeypatch.setattr("cubeplex.llm.builder.build_provider", lambda *args, **kwargs: provider)
+    monkeypatch.setattr(
+        "cubeplex.llm.snapshot.load_llm_snapshot",
+        AsyncMock(return_value=snap),
+    )
+
+    coordinator = BackgroundTaskDeliveryCoordinator(
+        async_session_maker,
+        run_manager=run_manager,
+        redis=run_manager._redis,
+        redis_key_prefix=run_manager._key_prefix,
+    )
+
+    # 1) IMThreadLink-bound conversation with no prior IMRunQueueItem: falls back
+    # to resolve_im_destination_for_conversation + IMIdentityLink -> sender_open_id.
+    async with async_session_maker() as session:
+        wecom_account = await session.get(IMConnectorAccount, im_bg_env["wecom_account_id"])
+        assert wecom_account is not None
+        resolved = await resolve_im_conversation(
+            session,
+            wecom_account,
+            channel_id="zhangsan",
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=im_bg_env["user_id"],
+            title_hint="web-initiated turn on IM conversation",
+            origin="inbound",
+        )
+        admitted_1 = await ConversationExecutionService(
+            session,
+            org_id=im_bg_env["org_id"],
+            workspace_id=im_bg_env["ws_id"],
+        ).admit_user_message(
+            conversation_id=resolved.conversation_id,
+            actor_user_id=im_bg_env["user_id"],
+            namespace="web",
+            source_id=f"web-{uuid4().hex[:8]}",
+            intent=UserMessageIntent(content="start task"),
+            snapshot=snap,
+            now=NOW,
+        )
+        await session.commit()
+    assert admitted_1.admission.run_id is not None
+
+    event_1 = await _stage_ready_background_event(
+        org_id=im_bg_env["org_id"],
+        ws_id=im_bg_env["ws_id"],
+        user_id=im_bg_env["user_id"],
+        conversation_id=resolved.conversation_id,
+        originating_admission_id=admitted_1.admission.id,
+        originating_run_id=admitted_1.admission.run_id,
+    )
+    assert await coordinator.deliver_once(now=NOW, lease_until=NOW + timedelta(seconds=15)) == [
+        event_1.id
+    ]
+    await run_manager.drain(timeout_seconds=30)
+
+    async with async_session_maker() as session:
+        fallback_item = (
+            await session.execute(
+                select(IMRunQueueItem).where(
+                    col(IMRunQueueItem.account_id) == im_bg_env["wecom_account_id"],
+                    col(IMRunQueueItem.status) == "pending",
+                )
+            )
+        ).scalar_one()
+        fallback_item.status = "completed"
+        wecom_live = await session.get(IMConnectorAccount, im_bg_env["wecom_account_id"])
+        assert wecom_live is not None
+        wecom_live.enabled = False
+        await session.commit()
+    assert fallback_item.sender_im_user_id == "zhangsan"
+    assert fallback_item.sender_open_id == "zhangsan"
+
+    # 2) Disabled IM account: conversation still receives background notice in DB,
+    # without enqueueing onto a disabled connector.
+    event_2 = await _stage_ready_background_event(
+        org_id=im_bg_env["org_id"],
+        ws_id=im_bg_env["ws_id"],
+        user_id=im_bg_env["user_id"],
+        conversation_id=resolved.conversation_id,
+        originating_admission_id=admitted_1.admission.id,
+        originating_run_id=admitted_1.admission.run_id,
+    )
+    assert await coordinator.deliver_once(now=NOW, lease_until=NOW + timedelta(seconds=15)) == [
+        event_2.id
+    ]
+    await run_manager.drain(timeout_seconds=30)
+
+    # 3) Pure Web conversation (no IM link): delivers notice without IM queue rows.
+    async with async_session_maker() as session:
+        web_conv = Conversation(
+            org_id=im_bg_env["org_id"],
+            workspace_id=im_bg_env["ws_id"],
+            creator_user_id=im_bg_env["user_id"],
+            title="pure web conversation",
+        )
+        session.add(web_conv)
+        await session.flush()
+        admitted_web = await ConversationExecutionService(
+            session,
+            org_id=im_bg_env["org_id"],
+            workspace_id=im_bg_env["ws_id"],
+        ).admit_user_message(
+            conversation_id=web_conv.id,
+            actor_user_id=im_bg_env["user_id"],
+            namespace="web",
+            source_id=f"web-{uuid4().hex[:8]}",
+            intent=UserMessageIntent(content="web task"),
+            snapshot=snap,
+            now=NOW,
+        )
+        await session.commit()
+    assert admitted_web.admission.run_id is not None
+
+    event_3 = await _stage_ready_background_event(
+        org_id=im_bg_env["org_id"],
+        ws_id=im_bg_env["ws_id"],
+        user_id=im_bg_env["user_id"],
+        conversation_id=web_conv.id,
+        originating_admission_id=admitted_web.admission.id,
+        originating_run_id=admitted_web.admission.run_id,
+    )
+    assert await coordinator.deliver_once(now=NOW, lease_until=NOW + timedelta(seconds=15)) == [
+        event_3.id
+    ]
+    await run_manager.drain(timeout_seconds=30)
+
+    async with async_session_maker() as session:
+        refreshed_2 = await session.get(BackgroundTaskEvent, event_2.id)
+        refreshed_3 = await session.get(BackgroundTaskEvent, event_3.id)
+        pending = list(
+            await session.scalars(
+                select(IMRunQueueItem).where(
+                    col(IMRunQueueItem.workspace_id) == im_bg_env["ws_id"],
+                    col(IMRunQueueItem.status) == "pending",
+                )
+            )
+        )
+    assert refreshed_2 is not None and refreshed_2.state == "delivered"
+    assert refreshed_3 is not None and refreshed_3.state == "delivered"
+    assert pending == []

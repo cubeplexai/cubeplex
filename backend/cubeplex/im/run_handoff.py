@@ -16,20 +16,17 @@ the caller's state transition and the synthetic enqueue land atomically.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy import case, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from cubeplex.models.conversation import Conversation
 from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMIdentityLink,
     IMRunQueueItem,
     IMWebhookReceipt,
 )
-from cubeplex.models.topic import Topic
 from cubeplex.services.schedule_destination import resolve_im_destination_for_conversation
 
 BACKGROUND_NOTICE_EVENT_PREFIX = "background_notice:"
@@ -201,64 +198,7 @@ async def _resolve_im_handoff_target(
             scope_key=dest.im_scope_key,
             scope_kind=dest.im_scope_kind,
         )
-
-    conv = await session.get(Conversation, conversation_id)
-    if conv is None or conv.org_id != org_id or conv.workspace_id != workspace_id:
-        return None
-    im_blob = _im_attrs(conv.attributes)
-    if im_blob is None and conv.topic_id is not None:
-        topic = await session.get(Topic, conv.topic_id)
-        if topic is not None:
-            im_blob = _im_attrs(topic.attributes)
-    if im_blob is None:
-        return None
-    account_id = im_blob.get("account_id")
-    channel_id = im_blob.get("channel_id")
-    scope_kind = im_blob.get("scope_kind")
-    if (
-        not isinstance(account_id, str)
-        or not isinstance(channel_id, str)
-        or not isinstance(scope_kind, str)
-        or not account_id
-        or not channel_id
-        or not scope_kind
-    ):
-        return None
-
-    scope_key: str | None = None
-    sender_im_user_id: str | None = None
-    if scope_kind == "dm":
-        scope_key = "dm"
-    elif scope_kind == "channel":
-        scope_key = "channel"
-    elif scope_kind in ("participant", "group"):
-        link = (
-            await session.execute(
-                select(IMIdentityLink).where(
-                    col(IMIdentityLink.account_id) == account_id,
-                    col(IMIdentityLink.user_id) == actor_user_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if link is not None:
-            sender_im_user_id = link.im_user_id
-            scope_key = f"u:{link.im_user_id}"
-    if scope_key is None:
-        return None
-    return _ImHandoffTarget(
-        account_id=account_id,
-        channel_id=channel_id,
-        scope_key=scope_key,
-        scope_kind=scope_kind,
-        sender_im_user_id=sender_im_user_id,
-    )
-
-
-def _im_attrs(attributes: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not attributes:
-        return None
-    im = attributes.get("im")
-    return im if isinstance(im, dict) else None
+    return None
 
 
 async def enqueue_im_background_notice_handoff(
