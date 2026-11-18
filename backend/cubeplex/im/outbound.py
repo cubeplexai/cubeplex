@@ -20,7 +20,7 @@ from redis.asyncio import Redis
 
 from cubeplex.im.card_model import AskFormOption
 from cubeplex.im.types import RenderState
-from cubeplex.streams.run_events import read_run_events_after
+from cubeplex.streams.run_events import _run_meta_key, get_latest_event_id, read_run_events_after
 
 # AskUser / SandboxConfirm card-button gating: when the tailer emits a
 # pending_input op we bind the inbound sender's open_id to a Redis key so
@@ -667,6 +667,18 @@ class OutboundRunTailer:
                     block_ms=self._block_ms,
                 )
                 if not events:
+                    meta_status = await self._redis.hget(  # type: ignore[misc]
+                        _run_meta_key(self._prefix, self._run_id),
+                        "status",
+                    )
+                    if meta_status in ("cancelled", "stale"):
+                        latest_id = await get_latest_event_id(
+                            self._redis,
+                            prefix=self._prefix,
+                            run_id=self._run_id,
+                        )
+                        if latest_id in (None, last_id):
+                            return
                     continue
                 done = False
                 # Coalesce consecutive ``stream_text`` ops in a batch. Each

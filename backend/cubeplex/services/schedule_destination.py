@@ -105,11 +105,14 @@ async def resolve_im_destination_for_conversation(
 
     live = (
         await session.execute(
-            select(IMThreadLink).where(
+            select(IMThreadLink)
+            .where(
                 IMThreadLink.conversation_id == conversation_id,  # type: ignore[arg-type]
                 IMThreadLink.org_id == org_id,  # type: ignore[arg-type]
                 IMThreadLink.workspace_id == workspace_id,  # type: ignore[arg-type]
             )
+            .order_by(IMThreadLink.created_at, IMThreadLink.id)  # type: ignore[arg-type]
+            .limit(1)
         )
     ).scalar_one_or_none()
     if live is not None:
@@ -124,11 +127,14 @@ async def resolve_im_destination_for_conversation(
     if conv.topic_id is not None:
         topic_link = (
             await session.execute(
-                select(IMThreadLink).where(
+                select(IMThreadLink)
+                .where(
                     IMThreadLink.topic_id == conv.topic_id,  # type: ignore[arg-type]
                     IMThreadLink.org_id == org_id,  # type: ignore[arg-type]
                     IMThreadLink.workspace_id == workspace_id,  # type: ignore[arg-type]
                 )
+                .order_by(IMThreadLink.created_at, IMThreadLink.id)  # type: ignore[arg-type]
+                .limit(1)
             )
         ).scalar_one_or_none()
         if topic_link is not None:

@@ -1365,9 +1365,6 @@ class RunManager:
                         now=datetime.now(UTC),
                     )
                     if claimed and background_notice_id is not None:
-                        from cubeplex.im.run_handoff import (
-                            enqueue_im_background_notice_handoff,
-                        )
                         from cubeplex.services.background_task_delivery import (
                             BackgroundTaskDeliveryService,
                         )
@@ -1384,17 +1381,6 @@ class RunManager:
                         )
                         if not bound:
                             raise ExecutionRevokedError("background notice lost delivery authority")
-                        await enqueue_im_background_notice_handoff(
-                            admission_session,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                            conversation_id=conversation_id,
-                            actor_user_id=ctx.user_id,
-                            notice_id=background_notice_id,
-                            attempt_id=ctx.execution.attempt_id,
-                            admission_id=ctx.execution.admission_id,
-                            content=content,
-                        )
                     await admission_session.commit()
                 if not claimed:
                     await clear_active_run(
@@ -1453,6 +1439,59 @@ class RunManager:
     async def drain_durable_steering(self, run_id: str) -> None:
         """Prompt immediate delivery after an internal durable steer enqueue."""
         await self._steering_delivery.drain(run_id)
+
+    async def _acknowledge_background_notice_checkpoint(
+        self,
+        *,
+        ctx: RunContext,
+        conversation_id: str,
+        run_id: str,
+        attempt_id: str,
+        notice_id: str,
+        input_id: str,
+        content: str,
+    ) -> bool:
+        """Acknowledge initial notice checkpoint and atomically enqueue IM tailer handoff."""
+        from cubeplex.db.engine import async_session_maker as _notice_session_maker
+        from cubeplex.im.run_handoff import (
+            complete_im_background_notice_handoff,
+            prepare_im_background_notice_handoff,
+        )
+        from cubeplex.services.background_task_delivery import BackgroundTaskDeliveryService
+
+        async with _notice_session_maker() as _notice_session:
+            prepared = await prepare_im_background_notice_handoff(
+                _notice_session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                conversation_id=conversation_id,
+                actor_user_id=ctx.user_id,
+                notice_id=notice_id,
+            )
+            committed = await BackgroundTaskDeliveryService(
+                _notice_session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            ).acknowledge_checkpoint(
+                notice_id=notice_id,
+                run_id=run_id,
+                attempt_id=attempt_id,
+                input_id=input_id,
+                now=datetime.now(UTC),
+            )
+            if committed and prepared is not None:
+                target, account = prepared
+                await complete_im_background_notice_handoff(
+                    _notice_session,
+                    target=target,
+                    account=account,
+                    conversation_id=conversation_id,
+                    actor_user_id=ctx.user_id,
+                    notice_id=notice_id,
+                    content=content,
+                )
+            await _notice_session.commit()
+            return committed
 
     async def start_background_notice(
         self,
@@ -3232,26 +3271,15 @@ class RunManager:
                         if _background_initial and ctx.execution is not None:
                             _initial_input_id = (evt.message.metadata or {}).get("input_id")
                             if isinstance(notice_id, str) and isinstance(_initial_input_id, str):
-                                from cubeplex.db.engine import (
-                                    async_session_maker as _notice_session_maker,
+                                committed = await self._acknowledge_background_notice_checkpoint(
+                                    ctx=ctx,
+                                    conversation_id=conversation_id,
+                                    run_id=run_id,
+                                    attempt_id=ctx.execution.attempt_id,
+                                    notice_id=notice_id,
+                                    input_id=_initial_input_id,
+                                    content=content,
                                 )
-                                from cubeplex.services.background_task_delivery import (
-                                    BackgroundTaskDeliveryService,
-                                )
-
-                                async with _notice_session_maker() as _notice_session:
-                                    committed = await BackgroundTaskDeliveryService(
-                                        _notice_session,
-                                        org_id=ctx.org_id,
-                                        workspace_id=ctx.workspace_id,
-                                    ).acknowledge_checkpoint(
-                                        notice_id=notice_id,
-                                        run_id=run_id,
-                                        attempt_id=ctx.execution.attempt_id,
-                                        input_id=_initial_input_id,
-                                        now=datetime.now(UTC),
-                                    )
-                                    await _notice_session.commit()
                                 if committed:
                                     await self._drain_pre_execution_inputs(run_id, agent.session)
                                     await self._steering_delivery.open_input_gate(run_id)
@@ -3434,26 +3462,15 @@ class RunManager:
                             _notice_id = input_metadata.get("notice_id")
                             _input_id = input_metadata.get("input_id")
                             if isinstance(_notice_id, str) and isinstance(_input_id, str):
-                                from cubeplex.db.engine import (
-                                    async_session_maker as _notice_session_maker,
+                                await self._acknowledge_background_notice_checkpoint(
+                                    ctx=ctx,
+                                    conversation_id=conversation_id,
+                                    run_id=run_id,
+                                    attempt_id=ctx.execution.attempt_id,
+                                    notice_id=_notice_id,
+                                    input_id=_input_id,
+                                    content=content,
                                 )
-                                from cubeplex.services.background_task_delivery import (
-                                    BackgroundTaskDeliveryService,
-                                )
-
-                                async with _notice_session_maker() as _notice_session:
-                                    await BackgroundTaskDeliveryService(
-                                        _notice_session,
-                                        org_id=ctx.org_id,
-                                        workspace_id=ctx.workspace_id,
-                                    ).acknowledge_checkpoint(
-                                        notice_id=_notice_id,
-                                        run_id=run_id,
-                                        attempt_id=ctx.execution.attempt_id,
-                                        input_id=_input_id,
-                                        now=datetime.now(UTC),
-                                    )
-                                    await _notice_session.commit()
                         await self._require_execution_authority(ctx, run_id)
                         await self._begin_execution_finalization(ctx, run_id)
             except BaseException as _run_exc:

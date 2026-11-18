@@ -25,8 +25,9 @@ from cubeloop.providers.base import ReasoningControl
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlmodel import col
 
-from cubeplex.im.run_handoff import parse_background_notice_attempt_id
+from cubeplex.im.run_handoff import parse_background_notice_id
 from cubeplex.llm.snapshot import LLMSnapshot
 from cubeplex.models.background_task import BackgroundTaskEvent
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
@@ -175,8 +176,8 @@ async def process_one_queue_item(
             ).scalar_one_or_none()
 
         if conv_row is not None and (conv_row.topic_id is not None or conv_row.is_group_chat):
-            im_bound = (topic_row is not None and "im" in (topic_row.attributes or {})) or (
-                conv_row.topic_id is None and "im" in (conv_row.attributes or {})
+            im_bound = (topic_row is not None and "im" in (topic_row.attributes or {})) or "im" in (
+                conv_row.attributes or {}
             )
             if not im_bound:
                 logger.warning(
@@ -193,6 +194,14 @@ async def process_one_queue_item(
         topic_creator_user_id: str | None = (
             topic_row.creator_user_id if topic_row is not None else None
         )
+        conversation_creator_user_id: str | None = (
+            conv_row.creator_user_id if conv_row is not None else None
+        )
+        conversation_unavailable = (
+            conv_row is None
+            or conv_row.deleted_at is not None
+            or (topic_row is not None and bool(topic_row.is_archived))
+        )
         sandbox_mode: str | None = topic_row.sandbox_mode if topic_row is not None else None
         await session.commit()
         captured = {
@@ -208,6 +217,8 @@ async def process_one_queue_item(
             "is_group_chat": (conv_row.is_group_chat if conv_row is not None else False),
             "sandbox_mode": sandbox_mode,
             "topic_creator_user_id": topic_creator_user_id,
+            "conversation_creator_user_id": conversation_creator_user_id,
+            "conversation_unavailable": conversation_unavailable,
             "delivery_mode": account.delivery_mode,
         }
         captured_item = item
@@ -266,8 +277,8 @@ async def process_one_queue_item(
         # the still-unstarted admission or observe that run ownership already won.
         admitted = None
         execution_snapshot = None
-        expected_bg_attempt_id: str | None = None
-        bg_notice_uncommitted = False
+        bg_tailer_run_id: str | None = None
+        skip_bg_tailer = False
         async with session_maker() as session:
             live_account = await session.scalar(
                 select(IMConnectorAccount)
@@ -306,30 +317,6 @@ async def process_one_queue_item(
                     populate_existing=True,
                 )
                 is_human = candidate.inbound_message_id is not None
-                if (
-                    not is_human
-                    and admission is not None
-                    and admission.source_kind == "background_task"
-                ):
-                    receipt = await session.get(IMWebhookReceipt, candidate.receipt_id)
-                    if receipt is not None:
-                        expected_bg_attempt_id = parse_background_notice_attempt_id(
-                            receipt.platform_event_id,
-                            notice_id=admission.source_id,
-                        )
-                    bg_event = await session.get(BackgroundTaskEvent, admission.source_id)
-                    bg_notice_uncommitted = (
-                        bg_event is None
-                        or bg_event.state in ("pending", "discarded")
-                        or (
-                            bg_event.checkpoint_run_id is None
-                            and (
-                                admission.revoked_at is not None
-                                or admission.run_stop_requested_at is not None
-                                or admission.run_finished_at is not None
-                            )
-                        )
-                    )
                 source_matches = admission is not None and (
                     (
                         is_human
@@ -339,11 +326,6 @@ async def process_one_queue_item(
                     or (
                         not is_human
                         and admission.source_kind in ("schedule_occurrence", "trigger_occurrence")
-                    )
-                    or (
-                        not is_human
-                        and admission.source_kind == "background_task"
-                        and expected_bg_attempt_id is not None
                     )
                 )
                 if (
@@ -383,6 +365,42 @@ async def process_one_queue_item(
                     now=datetime.now(UTC),
                 )
                 candidate.execution_admission_id = admitted.admission.id
+            else:
+                receipt = await session.get(IMWebhookReceipt, candidate.receipt_id)
+                bg_notice_id = (
+                    parse_background_notice_id(receipt.platform_event_id)
+                    if receipt is not None
+                    else None
+                )
+                if bg_notice_id is not None:
+                    bg_event = await session.get(BackgroundTaskEvent, bg_notice_id)
+                    if (
+                        bg_event is None
+                        or bg_event.org_id != captured["org_id"]
+                        or bg_event.workspace_id != captured["workspace_id"]
+                        or bg_event.conversation_id != captured["conversation_id"]
+                        or bg_event.checkpoint_run_id is None
+                    ):
+                        raise ExecutionConflictError(
+                            "IM background notice handoff does not match a committed delivery"
+                        )
+                    bg_tailer_run_id = bg_event.checkpoint_run_id
+                    bg_admission = await session.scalar(
+                        select(ConversationExecutionAdmission).where(
+                            col(ConversationExecutionAdmission.org_id) == captured["org_id"],
+                            col(ConversationExecutionAdmission.workspace_id)
+                            == captured["workspace_id"],
+                            col(ConversationExecutionAdmission.run_id) == bg_tailer_run_id,
+                        )
+                    )
+                    skip_bg_tailer = bool(captured["conversation_unavailable"]) or (
+                        bg_admission is not None
+                        and (
+                            bg_admission.revoked_at is not None
+                            or bg_admission.run_stop_requested_at is not None
+                            or bg_admission.run_terminal_status == "cancelled"
+                        )
+                    )
 
             live_item = await session.get(
                 IMRunQueueItem,
@@ -394,76 +412,86 @@ async def process_one_queue_item(
                 return False
             await session.commit()
 
-        is_background_notice = (
-            admitted is not None and admitted.admission.source_kind == "background_task"
-        )
-        if admitted is not None:
-            admission = admitted.admission
-            superseded_or_uncommitted_bg = is_background_notice and (
-                admission.run_start_token != expected_bg_attempt_id or bg_notice_uncommitted
-            )
-            if superseded_or_uncommitted_bg or (
-                admission.run_start_token is None
-                and (
-                    admission.revoked_at is not None
-                    or admission.run_stop_requested_at is not None
-                    or admission.run_finished_at is not None
-                )
-            ):
+        if bg_tailer_run_id is not None:
+            rm_redis = getattr(run_manager, "_redis", None)
+            rm_prefix = getattr(run_manager, "_key_prefix", None)
+            if not skip_bg_tailer and rm_redis is not None and isinstance(rm_prefix, str):
+                from cubeplex.streams.run_events import get_run_meta
+
+                meta = await get_run_meta(rm_redis, prefix=rm_prefix, run_id=bg_tailer_run_id)
+                if meta is None or meta.status in ("cancelled", "stale"):
+                    skip_bg_tailer = True
+            if skip_bg_tailer:
                 logger.info(
-                    "[IM worker] completing queue item {} without starting/tailing run {}",
+                    "[IM worker] completing queue item {} without tailing stopped/expired run {}",
                     captured_item.id,
-                    admission.run_id,
+                    bg_tailer_run_id,
                 )
                 async with session_maker() as session:
                     await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
                     await mark_queue_item_completed(session, item_id=captured_item.id)
                     await session.commit()
                 return True
+            run_id = bg_tailer_run_id
+        else:
+            if admitted is not None:
+                admission = admitted.admission
+                if admission.run_start_token is None and (
+                    admission.revoked_at is not None
+                    or admission.run_stop_requested_at is not None
+                    or admission.run_finished_at is not None
+                ):
+                    logger.info(
+                        "[IM worker] completing queue item {} without starting revoked run {}",
+                        captured_item.id,
+                        admission.run_id,
+                    )
+                    async with session_maker() as session:
+                        await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
+                        await mark_queue_item_completed(session, item_id=captured_item.id)
+                        await session.commit()
+                    return True
 
-            if execution_snapshot is None:
-                async with session_maker() as session:
-                    execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
+                if execution_snapshot is None:
+                    async with session_maker() as session:
+                        execution_snapshot = await load_execution_snapshot(
+                            session, captured["org_id"]
+                        )
 
-        # The fingerprint is the request, not the resolved preset. Human IM
-        # messages and background notices are admitted with model_key unset
-        # (and background notices also leave reasoning unset); passing the
-        # resolved preset back into start_run makes resolve_user_run reject it.
-        # Schedule/trigger handoffs fingerprint their frozen execution config.
-        request_model_key = (
-            None
-            if admitted is None
-            or admitted.admission.source_kind == "user_message"
-            or is_background_notice
-            else admitted.execution.model_key
-        )
-        request_reasoning = (
-            None if admitted is None or is_background_notice else admitted.execution.reasoning
-        )
-        run_id = await run_manager.start_run(
-            conversation_id=captured["conversation_id"],
-            content=captured["content"],
-            attachments=attachment_ids,
-            ctx=RunContext(
-                user_id=captured["acting_user_id"],
-                org_id=captured["org_id"],
-                workspace_id=captured["workspace_id"],
+            # The fingerprint is the request, not the resolved preset. Human IM
+            # messages are admitted with model_key unset; passing the resolved
+            # key back into start_run makes resolve_user_run reject the run.
+            # Automatic handoffs fingerprint that frozen key on purpose.
+            request_model_key = (
+                None
+                if admitted is None or admitted.admission.source_kind == "user_message"
+                else admitted.execution.model_key
+            )
+            run_id = await run_manager.start_run(
                 conversation_id=captured["conversation_id"],
-                trigger="im",
-                topic_id=captured["topic_id"],
-                topic_title=captured["topic_title"],
-                is_group_chat=captured["is_group_chat"],
-                sandbox_mode=captured["sandbox_mode"],
-                topic_creator_user_id=(captured["topic_creator_user_id"]),
-                sender_display_name=captured["sender_display_name"],
-            ),
-            run_id=admitted.admission.run_id if admitted is not None else None,
-            model_key=request_model_key,
-            reasoning=request_reasoning,
-            cancel_pending_hitl=admitted is None,
-            llm_snapshot=execution_snapshot,
-            admission_id=admitted.admission.id if admitted is not None else None,
-        )
+                content=captured["content"],
+                attachments=attachment_ids,
+                ctx=RunContext(
+                    user_id=captured["acting_user_id"],
+                    org_id=captured["org_id"],
+                    workspace_id=captured["workspace_id"],
+                    conversation_id=captured["conversation_id"],
+                    trigger="im",
+                    topic_id=captured["topic_id"],
+                    topic_title=captured["topic_title"],
+                    is_group_chat=captured["is_group_chat"],
+                    sandbox_mode=captured["sandbox_mode"],
+                    topic_creator_user_id=captured["topic_creator_user_id"],
+                    conversation_creator_user_id=captured["conversation_creator_user_id"],
+                    sender_display_name=captured["sender_display_name"],
+                ),
+                run_id=admitted.admission.run_id if admitted is not None else None,
+                model_key=request_model_key,
+                reasoning=admitted.execution.reasoning if admitted is not None else None,
+                cancel_pending_hitl=admitted is None,
+                llm_snapshot=execution_snapshot,
+                admission_id=admitted.admission.id if admitted is not None else None,
+            )
     except Exception as exc:
         # ``RunManager.start_run`` raises a plain RuntimeError when the
         # conversation already has an active run. That's a normal UX
