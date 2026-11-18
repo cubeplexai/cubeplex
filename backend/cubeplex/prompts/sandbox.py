@@ -111,7 +111,8 @@ bare `sleep N` command stays in the foreground; do not use it to wait on a job. 
 result with `status=running` and `result_pending=true` is not the command's final \
 result. Continue independent work while it runs. When no independent work remains \
 and you need the result of one or more pending tasks (`notification=once`), call \
-`wait_for_tasks(task_ids=[...])` to suspend this turn — this is not an incomplete \
+`wait_for_tasks(task_ids=[...])` to suspend this turn, then reply to the user with a brief \
+status update without calling any more tools — this is not an incomplete \
 answer, and the system will automatically resume you when the completion notice \
 arrives. Check the exit code before claiming success. Do not run one-off status \
 checks (`ls`, `ps`, `pgrep`, log reads), `sleep` loops, or another `monitor` for \

@@ -1801,12 +1801,14 @@ def _make_wait_for_tasks_tool(
                     text=(
                         f"Waiting for background task(s): {', '.join(ids)}. "
                         "This turn is suspended and will resume automatically when a "
-                        "completion notice arrives."
+                        "completion notice arrives. Do not call any more tools; reply to "
+                        "the user with a brief status update explaining what is running "
+                        "in the background and that you will continue once it finishes."
                     )
                 )
             ],
             details={"status": "waiting", "task_ids": ids},
-            terminate=True,
+            terminate=False,
         )
 
     return AgentTool(
@@ -2348,6 +2350,7 @@ class SandboxMiddleware(Middleware):
         self._live_lock = asyncio.Lock()
         self._owner_id = f"run:{run_id}" if run_id else "run:local"
         self._lease_task: asyncio.Task[None] | None = None
+        self._wait_for_tasks_active = False
 
         caps = _sandbox_capabilities(sandbox)
         file_tools: list[AgentTool[Any]] = [
@@ -2723,17 +2726,11 @@ class SandboxMiddleware(Middleware):
                 org_id=org_id,
                 workspace_id=workspace_id,
             )
-            await service.record_observation_failure(
+            await service.record_start_failed(
                 task_id=binding.task_id,
                 owner_token=binding.owner_token,
                 now=now,
                 message=message,
-            )
-            await service.defer_owner(
-                task_id=binding.task_id,
-                owner_token=binding.owner_token,
-                now=now,
-                retry_at=now + timedelta(seconds=1),
             )
             await session.commit()
 
@@ -3105,6 +3102,15 @@ class SandboxMiddleware(Middleware):
         Because this runs before the tool body, a blocked command never reaches
         ``sandbox.execute`` — no sandbox side effects, TTL clock untouched.
         """
+        if self._wait_for_tasks_active:
+            return BeforeToolCallResult(
+                block=True,
+                reason=(
+                    "You already called wait_for_tasks to suspend this turn. "
+                    "Do not call any more tools; reply to the user with a brief "
+                    "text update now."
+                ),
+            )
         tool_name = getattr(ctx.tool_call, "name", None)
         if tool_name not in ("execute", "monitor"):
             return None
@@ -3190,6 +3196,8 @@ class SandboxMiddleware(Middleware):
             block for block in ctx.assistant_message.content if isinstance(block, ToolCall)
         ]
         if len(tool_calls) <= 1:
+            if not ctx.is_error and ctx.result.is_error is not True:
+                self._wait_for_tasks_active = True
             return None
         return AfterToolCallResult(
             content=[
