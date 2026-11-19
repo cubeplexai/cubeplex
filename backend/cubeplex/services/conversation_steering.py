@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -93,6 +94,8 @@ async def steer_conversation_run(
     redis: Redis,
     redis_key_prefix: str,
     run_manager: RunManager | None,
+    load_pending_hitl: Callable[[str], Awaitable[tuple[Any, str | None]]] = _load_pending_hitl,
+    get_active_run_fn: Callable[..., Awaitable[Any]] = get_active_run,
 ) -> SteerAttemptResult:
     """Enqueue a durable steer into a running or HITL-paused conversation run.
 
@@ -139,10 +142,10 @@ async def steer_conversation_run(
             steer_id=existing.client_steer_id,
         )
 
-    active_run = await get_active_run(
+    active_run = await get_active_run_fn(
         redis, prefix=redis_key_prefix, conversation_id=conversation_id
     )
-    pending_request, pending_run_id = await _load_pending_hitl(conversation_id)
+    pending_request, pending_run_id = await load_pending_hitl(conversation_id)
     pending_run_meta = (
         await get_run_meta(redis, prefix=redis_key_prefix, run_id=pending_run_id)
         if pending_run_id is not None
@@ -229,11 +232,11 @@ async def steer_conversation_run(
 
     await session.commit()
 
-    current_active_run = await get_active_run(
+    current_active_run = await get_active_run_fn(
         redis, prefix=redis_key_prefix, conversation_id=conversation_id
     )
     if hitl_question_id is not None:
-        current_pending, current_pending_run_id = await _load_pending_hitl(conversation_id)
+        current_pending, current_pending_run_id = await load_pending_hitl(conversation_id)
         pending_still_owns = (
             current_pending is not None
             and current_pending_run_id == target_run_id
