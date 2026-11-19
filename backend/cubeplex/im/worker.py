@@ -629,10 +629,10 @@ async def _process_one_queue_item_outcome(
             try:
                 run_id = await _start_run()
             except RuntimeError as exc:
-                if (
-                    "pending HITL request" in str(exc)
-                    and captured_item.inbound_message_id is not None
-                ):
+                if "pending HITL request" in str(exc):
+                    if captured_item.inbound_message_id is None:
+                        hitl_cancel_unrecoverable = True
+                        raise
                     cancel_status = await _cancel_pending_hitl_for_im_message(
                         session_maker=session_maker,
                         run_manager=run_manager,

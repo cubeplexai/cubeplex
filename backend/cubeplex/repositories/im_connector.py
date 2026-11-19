@@ -341,8 +341,20 @@ async def claim_pending_queue_item(
     earlier_active_exists = exists(
         select(col(earlier.id)).where(
             col(earlier.conversation_id) == IMRunQueueItem.conversation_id,
-            col(earlier.status).in_(("pending", "started")),
-            col(earlier.attempts) < max_attempts,
+            or_(
+                and_(
+                    col(earlier.status) == "pending",
+                    col(earlier.attempts) < max_attempts,
+                ),
+                and_(
+                    col(earlier.status) == "started",
+                    or_(
+                        col(earlier.attempts) < max_attempts,
+                        col(earlier.claim_lease_expires_at).is_(None),
+                        col(earlier.claim_lease_expires_at) >= now,
+                    ),
+                ),
+            ),
             or_(
                 col(earlier.created_at) < IMRunQueueItem.created_at,
                 and_(
@@ -385,7 +397,7 @@ async def claim_pending_queue_item(
     stmt = (
         stmt.order_by(IMRunQueueItem.created_at)  # type: ignore[arg-type]
         .limit(1)
-        .with_for_update(skip_locked=True)
+        .with_for_update(skip_locked=True, of=IMRunQueueItem)
     )
     item = (await session.execute(stmt)).scalar_one_or_none()
     if item is None:
