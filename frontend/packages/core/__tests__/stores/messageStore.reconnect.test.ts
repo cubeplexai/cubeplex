@@ -418,12 +418,94 @@ describe('messageStore transport drop', () => {
       isStreaming: false,
       streamingConversationId: CONV,
       currentRunId: 'run-hitl',
+      streamAgents: {},
       runLifecycle: { [CONV]: 'paused_hitl' },
     })
 
-    useMessageStore.getState().__applyEvent(delta('resumed reply', 'run-hitl'))
+    useMessageStore.getState().__applyEvent({
+      ...delta('subagent work', 'run-hitl'),
+      agent_id: 'subagent:tc-1',
+    })
 
     expect(useMessageStore.getState().isStreaming).toBe(true)
     expect(useMessageStore.getState().runLifecycle[CONV]).toBe('running')
+    expect(useMessageStore.getState().streamAgents.main).toBeDefined()
+  })
+
+  it('prevents a restricted recovery load from swallowing a foreground load', async () => {
+    let resolveRestricted!: (v: unknown) => void
+    vi.mocked(getConversationBootstrap)
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRestricted = resolve
+        }) as never,
+      )
+      .mockResolvedValueOnce({
+        bootstrap: {
+          messages: [
+            {
+              id: 'm-conv-a',
+              role: 'assistant',
+              content: [{ type: 'text', text: 'loaded A' }],
+            },
+          ],
+          oldest_seq: 1,
+          has_more: false,
+          todos: null,
+          active_run: null,
+          pending_hitl: null,
+          last_run_status: null,
+          execution_generation: 0,
+          stop_all: null,
+          run_control: null,
+          background_summary: {
+            has_inflight: false,
+            has_pending: false,
+            has_cleanup: false,
+            can_stop: false,
+          },
+          background_events: { items: [], next_cursor: null, has_more: false },
+        } as never,
+        etag: null,
+      })
+
+    const restrictedLoad = useMessageStore.getState().loadMessages(fakeClient, 'conv-a', {
+      force: true,
+      preserveOtherConversationStream: true,
+    })
+    await Promise.resolve()
+    // conv-b starts streaming while conv-a's restricted recovery is in flight
+    useMessageStore.setState({
+      isStreaming: true,
+      streamingConversationId: 'conv-b',
+      currentRunId: 'run-b',
+    })
+    // User navigates to conv-a (unrestricted foreground load)
+    const foregroundLoad = useMessageStore.getState().loadMessages(fakeClient, 'conv-a')
+    resolveRestricted({
+      bootstrap: {
+        messages: [],
+        oldest_seq: null,
+        has_more: false,
+        todos: null,
+        active_run: null,
+        pending_hitl: null,
+        last_run_status: null,
+        execution_generation: 0,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      },
+      etag: null,
+    })
+    await Promise.all([restrictedLoad, foregroundLoad])
+
+    expect(useMessageStore.getState().messages['conv-a']?.[0]?.id).toBe('m-conv-a')
   })
 })
