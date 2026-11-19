@@ -262,4 +262,41 @@ describe('HistoryAssistantMessage', () => {
       screen.queryByRole('button', { name: 'Reconnecting to this run' }),
     ).not.toBeInTheDocument()
   })
+
+  it('does not leak a newer run error payload into an older failed turn popover', async () => {
+    useMessageStore.setState({
+      errors: {
+        'conv-1': {
+          runId: 'run-newer',
+          data: { error_code: 'rate_limit', message: 'newer run rate limit' },
+        },
+      },
+    })
+    const olderFailed = {
+      id: 'msg-old-err',
+      role: 'assistant',
+      content: [],
+      stop_reason: 'error',
+      run_id: 'run-older',
+      error_message: 'older run boom',
+      timestamp: 1_700_000_005,
+    } as unknown as AssistantMessageType
+
+    render(
+      <HistoryAssistantMessage
+        message={olderFailed}
+        subagentDataMap={{}}
+        toolResultMap={{}}
+        conversationId="conv-1"
+        isRunAnchor
+      />,
+      { wrapper },
+    )
+    const chip = screen.getByRole('button', { name: 'This run failed' })
+    act(() => {
+      chip.click()
+    })
+    expect(await screen.findByText('older run boom')).toBeInTheDocument()
+    expect(screen.queryByText('newer run rate limit')).not.toBeInTheDocument()
+  })
 })

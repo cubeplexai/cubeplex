@@ -56,6 +56,7 @@ function errorEvent(message: string): AgentEvent {
 describe('messageStore transport drop', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(getConversationBootstrap).mockReset()
     useMessageStore.getState().clearStream()
     useMessageStore.setState({
       messages: { [CONV]: [] },
@@ -248,5 +249,181 @@ describe('messageStore transport drop', () => {
     expect(streamRun).not.toHaveBeenCalled()
     expect(useMessageStore.getState().streamConnection).toBeNull()
     expect(useMessageStore.getState().currentRunId).toBe('run-hitl')
+  })
+
+  it('retries transient bootstrap failure after 404 without wedging isStreaming', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(streamMessages).mockImplementation(
+        async function* (_c, _id, _content, _a, _s, opts) {
+          opts?.onRunId?.('run-404')
+          yield* []
+          throw new ApiError('Run not found', 404)
+        },
+      )
+      vi.mocked(getConversationBootstrap)
+        .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+        .mockResolvedValue({
+          bootstrap: {
+            messages: [
+              {
+                id: 'a-done',
+                role: 'assistant',
+                run_id: 'run-404',
+                stop_reason: 'stop',
+                content: [{ type: 'text', text: 'recovered' }],
+              },
+            ],
+            oldest_seq: 1,
+            has_more: false,
+            todos: null,
+            active_run: null,
+            pending_hitl: null,
+            last_run_status: 'completed',
+            execution_generation: 0,
+            stop_all: null,
+            run_control: null,
+            background_summary: {
+              has_inflight: false,
+              has_pending: false,
+              has_cleanup: false,
+              can_stop: false,
+            },
+            background_events: { items: [], next_cursor: null, has_more: false },
+          } as never,
+          etag: null,
+        })
+
+      const observedConnections: Array<string | null> = []
+      const unsub = useMessageStore.subscribe((s) => {
+        observedConnections.push(s.streamConnection)
+      })
+      const sendPromise = useMessageStore.getState().send(fakeClient, CONV, 'hello')
+      await Promise.resolve()
+      await Promise.resolve()
+      // Initial 404 should not flash reconnecting before attempting bootstrap,
+      // and should not issue a duplicate streamRun call on 404.
+      expect(observedConnections[0]).toBe('connected')
+      expect(streamRun).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1_500)
+      await sendPromise
+
+      unsub()
+      const state = useMessageStore.getState()
+      expect(state.isStreaming).toBe(false)
+      expect(state.streamConnection).toBeNull()
+      expect(state.messages[CONV]?.some((m) => m.id === 'a-done')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resets reconnect attempt after receiving events so completion EOF stays silent', async () => {
+    vi.useFakeTimers()
+    const observedConnections: Array<string | null> = []
+    const unsub = useMessageStore.subscribe((s) => {
+      observedConnections.push(s.streamConnection)
+    })
+    try {
+      vi.mocked(streamMessages).mockImplementation(
+        async function* (_c, _id, _content, _a, _s, opts) {
+          opts?.onRunId?.('run-long')
+          yield delta('part 1 ', 'run-long')
+        },
+      )
+      let call = 0
+      vi.mocked(streamRun).mockImplementation(async function* () {
+        call += 1
+        if (call === 1) {
+          // Proxy cuts idle stream once before run finishes
+          yield* []
+          return
+        }
+        if (call === 2) {
+          // Reconnect succeeds and delivers a new event, then ends cleanly at EOF
+          yield { ...delta('part 2', 'run-long'), event_id: '2-0' }
+          return
+        }
+      })
+      vi.mocked(getConversationBootstrap)
+        .mockResolvedValueOnce({
+          bootstrap: {
+            messages: [],
+            oldest_seq: null,
+            has_more: false,
+            todos: null,
+            active_run: { run_id: 'run-long', status: 'running' },
+            pending_hitl: null,
+            last_run_status: null,
+            execution_generation: 0,
+            stop_all: null,
+            run_control: null,
+            background_summary: {
+              has_inflight: false,
+              has_pending: false,
+              has_cleanup: false,
+              can_stop: false,
+            },
+            background_events: { items: [], next_cursor: null, has_more: false },
+          } as never,
+          etag: null,
+        })
+        .mockResolvedValueOnce({
+          bootstrap: {
+            messages: [
+              {
+                id: 'a-long',
+                role: 'assistant',
+                run_id: 'run-long',
+                stop_reason: 'stop',
+                content: [{ type: 'text', text: 'part 1 part 2' }],
+              },
+            ],
+            oldest_seq: 1,
+            has_more: false,
+            todos: null,
+            active_run: null,
+            pending_hitl: null,
+            last_run_status: 'completed',
+            execution_generation: 0,
+            stop_all: null,
+            run_control: null,
+            background_summary: {
+              has_inflight: false,
+              has_pending: false,
+              has_cleanup: false,
+              can_stop: false,
+            },
+            background_events: { items: [], next_cursor: null, has_more: false },
+          } as never,
+          etag: null,
+        })
+
+      const sendPromise = useMessageStore.getState().send(fakeClient, CONV, 'hello')
+      await vi.advanceTimersByTimeAsync(1_000)
+      await vi.advanceTimersByTimeAsync(1_000)
+      await sendPromise
+
+      expect(observedConnections).not.toContain('reconnecting')
+      expect(useMessageStore.getState().isStreaming).toBe(false)
+    } finally {
+      unsub()
+      vi.useRealTimers()
+    }
+  })
+
+  it('transitions paused_hitl watcher to streaming when resumed output arrives', () => {
+    useMessageStore.setState({
+      isStreaming: false,
+      streamingConversationId: CONV,
+      currentRunId: 'run-hitl',
+      runLifecycle: { [CONV]: 'paused_hitl' },
+    })
+
+    useMessageStore.getState().__applyEvent(delta('resumed reply', 'run-hitl'))
+
+    expect(useMessageStore.getState().isStreaming).toBe(true)
+    expect(useMessageStore.getState().runLifecycle[CONV]).toBe('running')
   })
 })

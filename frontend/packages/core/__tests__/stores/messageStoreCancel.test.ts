@@ -74,6 +74,9 @@ describe('messageStore.cancelStream', () => {
       isStreaming: false,
       streamingConversationId: null,
       currentRunId: null,
+      streamConnection: null,
+      cancellingConversationIds: {},
+      runLifecycle: {},
       pendingRunClientMessageId: null,
       pendingConfirmMap: {},
       pendingAsk: null,
@@ -403,5 +406,133 @@ describe('messageStore.cancelStream', () => {
       cancellingConversationIds: { conv1: true },
       runLifecycle: { conv1: 'stopping' },
     })
+  })
+
+  it('preserves a replacement stream during waitForConversationIdle reconciliation', async () => {
+    vi.useFakeTimers()
+    seedStreaming('conv-a', {})
+    vi.mocked(getConversationBootstrap)
+      .mockResolvedValueOnce({
+        bootstrap: {
+          ...idleBootstrap(),
+          active_run: { run_id: 'r1', status: 'running' },
+        },
+        etag: null,
+      })
+      .mockResolvedValue({
+        bootstrap: idleBootstrap(),
+        etag: null,
+      })
+
+    const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv-a')
+    await vi.waitFor(() => expect(getConversationBootstrap).toHaveBeenCalledTimes(1))
+
+    // User switches to conv-b and starts streaming while conv-a polls waitForConversationIdle
+    seedStreaming('conv-b', {
+      text: 'live in B',
+      blocks: [{ type: 'text', text: 'live in B' }],
+    })
+    useMessageStore.setState({ currentRunId: 'r2', streamConnection: 'connected' })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await cancelling
+
+    expect(useMessageStore.getState()).toMatchObject({
+      isStreaming: true,
+      streamingConversationId: 'conv-b',
+      currentRunId: 'r2',
+      streamConnection: 'connected',
+      cancellingConversationIds: {},
+      runLifecycle: { 'conv-a': 'idle' },
+      streamAgents: { main: { text: 'live in B' } },
+    })
+  })
+
+  it('clears paused HITL cards even if an in-flight bootstrap resolves mid-cancel', async () => {
+    let resolveCancel!: () => void
+    vi.mocked(cancelActiveRun).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCancel = () => resolve({ run_id: 'r1', accepted: true, cleanup_pending: true })
+      }),
+    )
+    useMessageStore.setState({
+      isStreaming: false,
+      streamingConversationId: 'conv1',
+      currentRunId: 'r1',
+      runLifecycle: { conv1: 'paused_hitl' },
+      pendingConfirmMap: {
+        'tc-1': {
+          question_id: 'q1',
+          command: 'rm -rf /tmp/test',
+          matched_pattern: 'rm *',
+          timeout_seconds: null,
+          requestedAt: Date.now(),
+          run_id: 'r1',
+        },
+      },
+    })
+
+    const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv1')
+    await Promise.resolve()
+
+    // Concurrent loadMessages resolves with pre-cancel pending_hitl mid-cancel
+    vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
+      bootstrap: {
+        ...idleBootstrap(),
+        pending_hitl: {
+          run_id: 'r1',
+          question_id: 'q1',
+          kind: 'sandbox_confirm',
+          requested_at: '2026-11-18T00:00:00Z',
+          tool_call_id: 'tc-1',
+          command: 'rm -rf /tmp/test',
+          matched_pattern: 'rm *',
+        },
+      } as never,
+      etag: null,
+    })
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv1', { force: true })
+    expect(useMessageStore.getState().pendingConfirmMap).toEqual({})
+
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      bootstrap: idleBootstrap(),
+      etag: null,
+    })
+    resolveCancel()
+    await cancelling
+
+    expect(useMessageStore.getState()).toMatchObject({
+      pendingConfirmMap: {},
+      cancellingConversationIds: {},
+      runLifecycle: { conv1: 'idle' },
+    })
+  })
+
+  it('does not abort waitForPendingRunId when bootstrap resolves during early cancel', async () => {
+    seedStreaming('conv1', {})
+    useMessageStore.setState({
+      currentRunId: null,
+      pendingRunClientMessageId: 'client-msg-early',
+    })
+
+    const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv1')
+    await Promise.resolve()
+
+    vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
+      bootstrap: {
+        ...idleBootstrap(),
+        active_run: { run_id: 'admitted-run', status: 'running' },
+      },
+      etag: null,
+    })
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv1', { force: true })
+
+    vi.mocked(getConversationBootstrap).mockResolvedValue({
+      bootstrap: idleBootstrap(),
+      etag: null,
+    })
+    await cancelling
+
+    expect(cancelActiveRun).toHaveBeenCalledWith(fakeClient, 'conv1', 'admitted-run')
   })
 })
