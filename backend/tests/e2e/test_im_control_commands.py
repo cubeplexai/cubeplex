@@ -833,6 +833,42 @@ async def test_wecom_steer_active_and_idle_fallback(
     fake_gateway.send_passive.assert_awaited_once()
     assert STEER_SUCCESS_REPLY in fake_gateway.send_passive.call_args.args[1]["markdown"]["content"]
 
+    # 1b. Redelivery of active steer after delivery is a no-op without double-steering
+    fake_gateway.send_passive.reset_mock()
+    await handle_inbound_callback(
+        raw_active,
+        account=acct,
+        session_maker=maker,
+        gateway=fake_gateway,
+        run_manager=app.state.run_manager,
+    )
+    fake_gateway.send_passive.assert_not_awaited()
+
+    # 1c. Unlinked WeCom user sending /steer is rejected with passive reply
+    fake_gateway.send_passive.reset_mock()
+    raw_unlinked = {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": f"req-wcs-unl-{acct.id[-6:]}"},
+        "body": {
+            "msgid": f"msg-wcs-unl-{acct.id[-6:]}",
+            "aibotid": acct.external_account_id,
+            "chatid": "wc_steer_chat",
+            "chattype": "group",
+            "from": {"userid": "ou_stranger_wc"},
+            "msgtype": "text",
+            "text": {"content": "/steer hijack"},
+        },
+    }
+    await handle_inbound_callback(
+        raw_unlinked,
+        account=acct,
+        session_maker=maker,
+        gateway=fake_gateway,
+        run_manager=app.state.run_manager,
+    )
+    fake_gateway.send_passive.assert_awaited_once()
+    assert "/link" in fake_gateway.send_passive.call_args.args[1]["markdown"]["content"]
+
     # 2. Idle fallback via WeCom
     raw_idle = {
         "cmd": "aibot_msg_callback",
