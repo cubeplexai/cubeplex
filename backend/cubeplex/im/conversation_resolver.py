@@ -244,7 +244,7 @@ async def resolve_im_conversation(
             org_id=account.org_id,
             workspace_id=account.workspace_id,
             creator_user_id=effective_user_id,
-            title=(title_hint[:80] or "IM conversation"),
+            title=(title_hint or "").strip()[:80],
             topic_id=topic_id,
             is_group_chat=is_shared,
             attributes=dict(im_attrs),

@@ -1338,3 +1338,53 @@ async def test_thread_scopes_in_isolated_group_share_topic_per_user(
     assert u1_t1.conversation_id != u1_t2.conversation_id
     assert u2_t1.topic_id is not None
     assert u2_t1.topic_id != u1_t1.topic_id
+
+
+async def test_empty_title_hint_stamped_by_first_real_message(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Pre-creating a thread conversation with empty title_hint (e.g. ``/model``)
+    leaves title empty so the first real message stamps it."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared", topic_mode="topic"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="t:om_model_first",
+            scope_kind="thread",
+            effective_user_id=_USER,
+            title_hint="",
+            origin="inbound",
+            channel_name="研发群",
+        )
+        await session.commit()
+
+    async with maker() as session:
+        conv1 = (
+            await session.execute(select(Conversation).where(Conversation.id == r1.conversation_id))
+        ).scalar_one()
+        assert conv1.title == ""
+
+    async with maker() as session:
+        r2 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="t:om_model_first",
+            scope_kind="thread",
+            effective_user_id=_USER,
+            title_hint="帮我看下这个报错",
+            origin="inbound",
+            channel_name="研发群",
+        )
+        await session.commit()
+
+    assert r2.conversation_id == r1.conversation_id
+    async with maker() as session:
+        conv2 = (
+            await session.execute(select(Conversation).where(Conversation.id == r2.conversation_id))
+        ).scalar_one()
+        assert conv2.title == "帮我看下这个报错"
