@@ -1180,13 +1180,20 @@ async def test_im_models_and_model_switch_persists_and_applies_to_worker(
         assert ingest_res.conversation_id is not None
 
         if mock_start_run.await_count == 0:
-            await process_one_queue_item(
+            ran = await process_one_queue_item(
                 session_maker=maker,
                 run_manager=app.state.run_manager,
                 on_run_started=None,
                 lease_seconds=60,
                 load_execution_snapshot=_load_snap,
             )
+            if not ran and mock_start_run.await_count == 0:
+                import asyncio
+
+                for _ in range(40):
+                    if mock_start_run.await_count > 0:
+                        break
+                    await asyncio.sleep(0.05)
         mock_start_run.assert_awaited_once()
         assert mock_start_run.await_args.kwargs["model_key"] == target_preset.key
 
