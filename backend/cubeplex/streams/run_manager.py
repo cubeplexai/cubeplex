@@ -1142,6 +1142,16 @@ class RunManager:
             redis_key_prefix=key_prefix,
         )
 
+    @property
+    def redis(self) -> Redis:
+        """Return the Redis client bound to this run manager."""
+        return self._redis
+
+    @property
+    def key_prefix(self) -> str:
+        """Return the Redis key prefix bound to this run manager."""
+        return self._key_prefix
+
     def _on_task_done(
         self,
         run_id: str,

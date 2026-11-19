@@ -25,10 +25,10 @@ CubePlex 为六个平台提供连接器代码。它们的成熟度 **并不** �
 | 平台                | 成熟度                                                                                            | 传递模式                 | 设置指南                      |
 | ------------------- | ------------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------- |
 | **Feishu / Lark**   | 最成熟——交互式流式卡片、消息加密、签名验证、原地卡片编辑和人工参与的按钮操作。                    | 长连接（默认）或 webhook | [Feishu / Lark](./feishu.md)  |
-| **Slack**           | 可用连接器——原地编辑消息、基于电子邮箱的自动身份解析、原生 `/link` / `/new` / `/reset` 斜杠命令。 | 网关（Socket Mode）      | [Slack](./slack.md)           |
-| **DingTalk**        | 可用连接器——基于电子邮箱的自动身份解析；文本 `/new` / `/reset` / `link`。                         | Stream                   | [DingTalk](./dingtalk.md)     |
-| **Microsoft Teams** | 可用连接器——在每个入站活动上验证 Azure Bot Framework JWT；需要可从公网访问的主机。                | Webhook                  | [Microsoft Teams](./teams.md) |
-| **Discord**         | 可用连接器——原生 `/new`、`/reset`、`/link` 斜杠命令。                                             | 网关                     | [Discord](./discord.md)       |
+| **Slack**           | 可用连接器——原地编辑消息、基于电子邮箱的自动身份解析、原生 `/link` / `/new` / `/reset` / `/stop` / `/steer` 斜杠命令。 | 网关（Socket Mode）      | [Slack](./slack.md)           |
+| **DingTalk**        | 可用连接器——基于电子邮箱的自动身份解析；文本 `/new` / `/reset` / `/stop` / `/steer` / `link`。                         | Stream                   | [DingTalk](./dingtalk.md)     |
+| **Microsoft Teams** | 可用连接器——在每个入站活动上验证 Azure Bot Framework JWT；需要可从公网访问的主机。                                    | Webhook                  | [Microsoft Teams](./teams.md) |
+| **Discord**         | 可用连接器——原生 `/new`、`/reset`、`/link`、`/stop`、`/steer` 斜杠命令。                                             | 网关                     | [Discord](./discord.md)       |
 | **企业微信**        | 可用智能机器人连接器——累积流式回复、原生图片/文件传输和手动身份关联。                              | Stream（WebSocket）      | [企业微信](./wecom.md)        |
 
 各平台支持的命令不同——参阅[对话命令](#conversation-commands)。
@@ -78,6 +78,8 @@ CubePlex 为六个平台提供连接器代码。它们的成熟度 **并不** �
 | --------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/link <email>`                   | 将聊天身份关联到 CubePlex 账户（参阅[身份关联](#identity-linking)）。          | 所有平台。在 Slack 和 Discord 上是原生斜杠命令；在 Feishu、DingTalk、Teams 和企业微信上是文本消息。中文别名 `绑定 <email>` 仅在 Feishu 上可用。                                                |
 | `/new`（别名 `/reset`、`新对话`） | 开始全新对话——移除当前聊天范围的对话绑定，使机器人在你的下一条消息时重新开始。 | 所有平台。在 Discord 和 Slack 上是原生斜杠命令；在 Feishu、DingTalk、Teams 和企业微信上是文本消息（Slack 中也可作为普通 `@bot /new` 消息）。中文别名 `新对话` 在所有接受文本形式的平台中可用。 |
+| `/stop`                           | 终止当前聊天范围正在进行的回复，不会清空已排队的后续消息。                     | 所有平台。在 Discord 和 Slack 上是原生斜杠命令；所有平台也均支持文本消息（群聊与 Slack 线程中发送 `@bot /stop`）。 |
+| `/steer <消息>`                   | 向当前正在进行的回复中途补充指令（若当前无活跃回复，则直接作为新消息发送）。共享群聊中仅发起当前回复的成员可中途补充。 | 所有平台。在 Discord 和 Slack 上是原生斜杠命令；所有平台也均支持文本消息（群聊与 Slack 线程中发送 `@bot /steer <消息>`）。 |
 
 :::note Slack 斜杠命令与线程
 Slack **自定义 slash command 无法在 message thread 内使用**（平台限制）。线程里请发普通消息 `@bot /new` / `@bot 新对话`；`/link` 请在私信或频道主时间线使用。详见 [Slack 设置 → 对话命令](./slack.md#对话命令)。

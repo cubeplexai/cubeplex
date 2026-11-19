@@ -97,6 +97,8 @@ DingTalk 机器人将以下内容识别为文本消息（在群组中请先 @ �
 |---|---|---|
 | `link <email>` | `/link <email>` | 将 DingTalk 身份关联到 CubePlex 账户（参阅[身份关联](./overview.md#identity-linking)）。 |
 | `/new` | `/reset`、`新对话` | 开始全新对话；下一条消息会开始一个新对话。 |
+| `/stop` | — | 终止当前正在进行的回复，不会清空已排队的后续消息。 |
+| `/steer <消息>` | — | 向当前正在进行的回复中途补充指令（若当前无活跃回复，则直接作为新消息发送）。 |
 
 `/new` 和 `/reset` 等效。按频道的对话行为遵循[频道绑定模式](./overview.md#channel-binding-modes)。
 

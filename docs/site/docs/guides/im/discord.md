@@ -105,6 +105,8 @@ On Discord these are registered as **native slash commands** (they appear in the
 |---|---|
 | `/new` | Start a fresh conversation; your next message begins a new one. |
 | `/reset` | Same as `/new` — drops the current conversation binding for this chat scope. |
+| `/stop` | Stop the currently active reply without clearing queued messages. |
+| `/steer <message>` | Inject a follow-up instruction into the active reply (or start a new one if idle). |
 | `/link <email>` | Link your Discord identity to your CubePlex account (see [Identity linking](./overview.md#identity-linking)). |
 
 `/new` and `/reset` are equivalent. Slash command responses are sent privately (ephemeral) to the person who ran them.

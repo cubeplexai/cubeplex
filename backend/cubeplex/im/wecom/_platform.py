@@ -97,7 +97,11 @@ class WecomPlatform:
             disconnected=kwargs.get("connection_closed"),
             terminal_disconnect=kwargs.get("terminal_disconnect"),
         )
-        gateway.configure_inbound(account=account, session_maker=kwargs["session_maker"])
+        gateway.configure_inbound(
+            account=account,
+            session_maker=kwargs["session_maker"],
+            run_manager=kwargs.get("run_manager"),
+        )
         gateways[account.id] = gateway
         try:
             await gateway.start()

@@ -172,6 +172,8 @@ signature = SHA256( timestamp + nonce + encrypt_key + raw_request_body )
 |---|---|---|
 | `/link <email>` | `绑定 <email>` | 将 Feishu 身份关联到 CubePlex 账户。 |
 | `/new` | `/reset`、`新对话` | 开始全新对话；下一条消息会开始一个新对话。 |
+| `/stop` | — | 终止当前正在进行的回复，不会清空已排队的后续消息。 |
+| `/steer <消息>` | — | 向当前正在进行的回复中途补充指令（若当前无活跃回复，则直接作为新消息发送）。 |
 
 ## 轮换凭据
 

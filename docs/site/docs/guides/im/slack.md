@@ -134,6 +134,8 @@ In the Slack app settings open **Slash Commands** and create each command you wa
 | `/link` | Link Slack identity to CubePlex | `you@example.com` |
 | `/new` | Start a fresh CubePlex conversation | *(empty)* |
 | `/reset` | Same as `/new` | *(empty)* |
+| `/stop` | Stop the currently active reply | *(empty)* |
+| `/steer` | Inject a follow-up instruction into the active reply | `Follow-up instruction` |
 
 With **Socket Mode** enabled you do **not** need a working public Request URL â€” events arrive over the socket. Slack may still require a placeholder URL when creating the command.
 
@@ -147,6 +149,8 @@ With **Socket Mode** enabled you do **not** need a working public Request URL â€
 | `/link <email>` | Link your Slack identity to your CubePlex account (see [Step 8](#step-8--link-your-identity)). Replies privately (ephemeral). |
 | `/new` | Start a fresh conversation; your next message begins a new one. Replies privately for the slash form. |
 | `/reset` | Same as `/new`. |
+| `/stop` | Stop the currently active reply without clearing queued messages. Replies privately for the slash form. |
+| `/steer <message>` | Inject a follow-up instruction into the active reply (or start a new one if idle). |
 
 ### Slash commands do not work in threads
 

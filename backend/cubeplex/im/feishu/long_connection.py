@@ -368,6 +368,30 @@ def build_event_handler(
                     )
                 return
 
+            from cubeplex.im.control_commands import maybe_handle_control_command
+
+            async def _reply_feishu(text: str) -> None:
+                if gate_connector is not None:
+                    await gate_connector.send_to_chat(event.channel_id, event.reply_to_id, text)
+
+            try:
+                if await maybe_handle_control_command(
+                    event,
+                    account=account,
+                    session_maker=session_maker,
+                    run_manager=run_manager,
+                    reply=_reply_feishu,
+                    identity_resolver=gate_connector,
+                    rejection_notifier=gate_connector,
+                ):
+                    return
+            except Exception:
+                logger.exception(
+                    "[Feishu LC] control command failed for {}",
+                    event.platform_event_id,
+                )
+                return
+
             try:
                 kwargs: dict[str, Any] = {}
                 if gate_connector is not None:

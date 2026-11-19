@@ -23,6 +23,7 @@ from cubeplex.credentials.dependencies import (
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.db.engine import async_session_maker
 from cubeplex.db.session import get_session
+from cubeplex.im.control_commands import maybe_handle_control_command
 from cubeplex.im.feishu.card_action_router import (
     InvalidAction,
     parse_action_payload,
@@ -304,6 +305,21 @@ async def feishu_events(
         )
         return Response(status_code=status.HTTP_200_OK)
 
+    async def _reply_feishu(text: str) -> None:
+        if gate_connector is not None:
+            await gate_connector.send_to_chat(event.channel_id, event.reply_to_id, text)
+
+    if await maybe_handle_control_command(
+        event,
+        account=account,
+        session_maker=async_session_maker,
+        run_manager=getattr(request.app.state, "run_manager", None),
+        reply=_reply_feishu,
+        identity_resolver=gate_connector,
+        rejection_notifier=gate_connector,
+    ):
+        return Response(status_code=status.HTTP_200_OK)
+
     # Resolve group display name for Topic titles (im.v1.chats.get) and
     # quoted parent message content (im.v1.message.get). Needs the live
     # client on gate_connector; no-ops when not applicable or on failure.
@@ -577,6 +593,21 @@ async def teams_messages(
             )
             if gate_connector is not None:
                 await gate_connector.send_to_chat(channel_id, None, format_reset_reply(outcome))
+        return Response(status_code=status.HTTP_200_OK)
+
+    async def _reply_teams(text: str) -> None:
+        if gate_connector is not None:
+            await gate_connector.send_to_chat(event.channel_id, None, text)
+
+    if await maybe_handle_control_command(
+        event,
+        account=account,
+        session_maker=async_session_maker,
+        run_manager=getattr(request.app.state, "run_manager", None),
+        reply=_reply_teams,
+        identity_resolver=gate_connector,
+        rejection_notifier=gate_connector,
+    ):
         return Response(status_code=status.HTTP_200_OK)
 
     maker: async_sessionmaker[AsyncSession] = async_session_maker

@@ -105,6 +105,8 @@ CubePlex 的网关连接会请求 **Message Content** 特权 Intent，以便机�
 |---|---|
 | `/new` | 开始一个全新的对话；你的下一条消息将开启新对话。 |
 | `/reset` | 与 `/new` 相同——解除当前聊天范围内的当前对话绑定。 |
+| `/stop` | 终止当前正在进行的回复，不会清空已排队的后续消息。 |
+| `/steer <消息>` | 向当前正在进行的回复中途补充指令（若当前无活跃回复，则直接作为新消息发送）。 |
 | `/link <email>` | 将 Discord 身份关联到 CubePlex 账户（请参阅[身份关联](./overview.md#identity-linking)）。 |
 
 `/new` 和 `/reset` 等效。斜杠命令的响应会仅向执行命令的用户私下发送（ephemeral）。

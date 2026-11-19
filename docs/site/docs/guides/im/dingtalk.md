@@ -97,6 +97,8 @@ The DingTalk bot recognizes these as text messages (in a group, @ the bot first)
 |---|---|---|
 | `link <email>` | `/link <email>` | Link your DingTalk identity to your CubePlex account (see [Identity linking](./overview.md#identity-linking)). |
 | `/new` | `/reset`, `新对话` | Start a fresh conversation; your next message begins a new one. |
+| `/stop` | — | Stop the currently active reply without clearing queued messages. |
+| `/steer <message>` | — | Inject a follow-up instruction into the active reply (or start a new one if idle). |
 
 `/new` and `/reset` are equivalent. Per-channel conversation behavior follows the [channel binding mode](./overview.md#channel-binding-modes).
 

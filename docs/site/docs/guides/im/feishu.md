@@ -172,6 +172,8 @@ The bot understands these in any chat it's in:
 |---|---|---|
 | `/link <email>` | `绑定 <email>` | Link your Feishu identity to your CubePlex account. |
 | `/new` | `/reset`, `新对话` | Start a fresh conversation; your next message begins a new one. |
+| `/stop` | — | Stop the currently active reply without clearing queued messages. |
+| `/steer <message>` | — | Inject a follow-up instruction into the active reply (or start a new one if idle). |
 
 ## Rotating credentials
 

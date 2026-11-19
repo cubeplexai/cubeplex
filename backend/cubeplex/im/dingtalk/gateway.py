@@ -189,6 +189,28 @@ class DingtalkGateway:
             is_dm=is_dm,
             http_client=self._shared_http,
         )
+        from cubeplex.im.control_commands import maybe_handle_control_command
+
+        async def _reply_dingtalk(text: str) -> None:
+            await gate_connector.send_to_chat(parsed.channel_id, None, text)
+
+        try:
+            if await maybe_handle_control_command(
+                parsed,
+                account=account,
+                session_maker=session_maker,
+                run_manager=self._run_manager,
+                reply=_reply_dingtalk,
+                identity_resolver=gate_connector,
+                rejection_notifier=gate_connector,
+            ):
+                return
+        except Exception:
+            logger.exception(
+                "[DingTalk] control command failed for {}",
+                parsed.platform_event_id,
+            )
+            return
         try:
             result = await ingest(
                 parsed,
