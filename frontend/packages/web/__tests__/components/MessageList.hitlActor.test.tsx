@@ -103,10 +103,13 @@ describe('HITL execution actor gating and 409 error recovery', () => {
       currentRunId: null,
     })
 
-    // Pre-hydration (user is null): must fail closed on Submit while keeping Cancel enabled.
+    // Pre-hydration (user is null): must fail closed on Submit without flashing non-actor copy.
     const view = render(<MessageList conversationId="conv-1" />, { wrapper })
     expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    expect(
+      screen.queryByText('Only Daibolin can submit an answer. You can cancel to continue.'),
+    ).toBeNull()
     view.unmount()
 
     // Non-actor participant: sees named guidance, cannot check radio or submit, can cancel.
