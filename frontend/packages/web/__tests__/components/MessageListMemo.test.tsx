@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { useMessageStore } from '@cubeplex/core'
 import en from '../../messages/en.json'
@@ -179,5 +179,87 @@ describe('HistoryAssistantMessage', () => {
     expect(screen.getByRole('button', { name: 'This run failed' })).toHaveTextContent(
       'Reply failed',
     )
+  })
+
+  it('renders only a single Reconnecting or Stopping chip on a live streaming turn', () => {
+    const stream = {
+      text: 'partial output',
+      thinking: '',
+      toolCalls: [],
+      toolResults: [],
+      blocks: [{ type: 'text' as const, text: 'partial output' }],
+      name: null,
+    }
+    useMessageStore.setState({
+      currentRunId: 'run-live',
+      streamConnection: 'reconnecting',
+      cancellingConversationIds: {},
+    })
+
+    const { rerender } = render(
+      <AssistantMessage stream={stream} isStreaming toolResultMap={{}} conversationId="conv-1" />,
+      { wrapper },
+    )
+    expect(screen.getAllByRole('button', { name: 'Reconnecting to this run' })).toHaveLength(1)
+
+    act(() => {
+      useMessageStore.setState({
+        cancellingConversationIds: { 'conv-1': true },
+      })
+    })
+    rerender(
+      <AssistantMessage stream={stream} isStreaming toolResultMap={{}} conversationId="conv-1" />,
+    )
+    expect(screen.getAllByRole('button', { name: 'This run is stopping' })).toHaveLength(1)
+  })
+
+  it('hides Reconnecting on a paused HITL anchor or legacy message without run_id', () => {
+    useMessageStore.setState({
+      currentRunId: 'run-paused',
+      streamConnection: 'reconnecting',
+      runLifecycle: { 'conv-1': 'paused_hitl' },
+    })
+    const pausedTurn = {
+      id: 'msg-paused',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Need your confirmation' }],
+      stop_reason: 'tool_use',
+      run_id: 'run-paused',
+      timestamp: 1_700_000_004,
+    } as unknown as AssistantMessageType
+
+    const { rerender } = render(
+      <HistoryAssistantMessage
+        message={pausedTurn}
+        subagentDataMap={{}}
+        toolResultMap={{}}
+        conversationId="conv-1"
+        isRunAnchor
+      />,
+      { wrapper },
+    )
+    expect(
+      screen.queryByRole('button', { name: 'Reconnecting to this run' }),
+    ).not.toBeInTheDocument()
+
+    act(() => {
+      useMessageStore.setState({
+        currentRunId: 'run-active',
+        streamConnection: 'reconnecting',
+        runLifecycle: { 'conv-1': 'running' },
+      })
+    })
+    rerender(
+      <HistoryAssistantMessage
+        message={baseMessage}
+        subagentDataMap={{}}
+        toolResultMap={{}}
+        conversationId="conv-1"
+        isRunAnchor
+      />,
+    )
+    expect(
+      screen.queryByRole('button', { name: 'Reconnecting to this run' }),
+    ).not.toBeInTheDocument()
   })
 })

@@ -97,6 +97,25 @@ describe('deriveRunChipStatus', () => {
         streamConnection: 'reconnecting',
       }),
     ).toBe(true)
+    expect(
+      isLiveRunChip({
+        isLiveStreaming: false,
+        isRunAnchor: true,
+        isPausedHitl: true,
+        messageRunId: 'run-1',
+        currentRunId: 'run-1',
+        streamConnection: 'reconnecting',
+      }),
+    ).toBe(false)
+    expect(
+      isLiveRunChip({
+        isLiveStreaming: false,
+        isRunAnchor: true,
+        messageRunId: '',
+        currentRunId: '',
+        streamConnection: 'reconnecting',
+      }),
+    ).toBe(false)
   })
 
   it('maps aborted and error history turns', () => {
