@@ -1709,16 +1709,23 @@ async def test_real_run_manager_async_cancel_paused_run_teardown_before_new_im_t
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import importlib
     import types
 
     import fakeredis.aioredis
     from cubeloop.hitl import AskRequest, HitlRequest, Option, Question
 
-    from cubeplex.agents.checkpointer import init_checkpointer, shared_checkpointer
+    from cubeplex.agents.checkpointer import (
+        close_shared_checkpointer,
+        init_checkpointer,
+        shared_checkpointer,
+    )
     from cubeplex.streams.run_events import create_run
     from cubeplex.streams.run_manager import RunManager
 
     maker, account = _seeded
+    db_engine_mod = importlib.import_module("cubeplex.db.engine")
+    monkeypatch.setattr(db_engine_mod, "async_session_maker", maker)
     await ingest_inbound_event(
         InboundEvent(
             platform="feishu",
@@ -1809,46 +1816,115 @@ async def test_real_run_manager_async_cancel_paused_run_teardown_before_new_im_t
         key_prefix=key_prefix,
         run_event_ttl_seconds=60,
     )
-    # Stub only the actual LLM loop launcher once start_run has cleared all
-    # checkpointer + Redis active-run guards.
+    # Stub only _execute_run so real cancel_paused_run + Redis + checkpointer + DB
+    # admission teardown execute end-to-end.
     started_runs: list[str] = []
 
     async def _noop_execute_run(*_args: object, **_kwargs: object) -> None:
         started_runs.append(str(_kwargs.get("run_id") or ""))
 
     monkeypatch.setattr(rm, "_execute_run", _noop_execute_run)
-    # RunManager.cancel_paused_run calls get_agent_for_conversation / history;
-    # patch _execute_cancel_paused_run's DB/history persistence only if needed,
-    # or let the real method run against the test DB!
+    try:
+        await ingest_inbound_event(
+            InboundEvent(
+                platform="feishu",
+                account_external_id="cli_wkrA",
+                platform_event_id="evW_real_rm_new",
+                channel_id="oc_chat",
+                scope_key="u:on_real_rm",
+                scope_kind="participant",
+                reply_to_id="om_real_2",
+                inbound_message_id="om_real_2",
+                sender_ref="on_real_rm",
+                sender_open_id="ou_real_rm",
+                text="new turn",
+            ),
+            account=account,
+            session_maker=maker,
+        )
+
+        processed = await process_one_queue_item(
+            session_maker=maker,
+            run_manager=rm,
+            on_run_started=None,
+            lease_seconds=300,
+            load_execution_snapshot=im_test_execution_snapshot,
+        )
+        assert processed is True
+        assert len(started_runs) == 1
+        async with shared_checkpointer() as cp:
+            assert await cp.load_pending(conv_id) is None
+        async with maker() as session:
+            completed_rows = list(
+                (
+                    await session.execute(
+                        select(IMRunQueueItem).where(
+                            IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                            IMRunQueueItem.status == "completed",  # type: ignore[arg-type]
+                        )
+                    )
+                ).scalars()
+            )
+            assert len(completed_rows) == 2
+    finally:
+        for task in list(rm._tasks.values()):
+            task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass
+        await close_shared_checkpointer()
+        await fake_redis.aclose()
+
+
+async def test_automatic_handoff_hitting_pending_hitl_charges_attempt(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    maker, account = _seeded
     await ingest_inbound_event(
         InboundEvent(
             platform="feishu",
             account_external_id="cli_wkrA",
-            platform_event_id="evW_real_rm_new",
+            platform_event_id="evW_auto_hitl",
             channel_id="oc_chat",
-            scope_key="u:on_real_rm",
+            scope_key="u:on_auto_hitl",
             scope_kind="participant",
-            reply_to_id="om_real_2",
-            inbound_message_id="om_real_2",
-            sender_ref="on_real_rm",
-            sender_open_id="ou_real_rm",
-            text="new turn",
+            reply_to_id="om_auto_1",
+            inbound_message_id="om_auto_1",
+            sender_ref="on_auto_hitl",
+            sender_open_id="ou_auto_hitl",
+            text="scheduled handoff",
         ),
         account=account,
         session_maker=maker,
     )
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(IMRunQueueItem).where(
+                    IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        item.inbound_message_id = None
+        item_id = item.id
+        conv_id = item.conversation_id
+        await session.commit()
+
+    class _HitlRejectRM:
+        async def start_run(self, **_kwargs: object) -> str:
+            raise RuntimeError(f"Conversation {conv_id} has a pending HITL request")
 
     processed = await process_one_queue_item(
         session_maker=maker,
-        run_manager=rm,
+        run_manager=_HitlRejectRM(),
         on_run_started=None,
         lease_seconds=300,
         load_execution_snapshot=im_test_execution_snapshot,
     )
-    assert processed is True
-    async with shared_checkpointer() as cp:
-        assert await cp.load_pending(conv_id) is None
-    # Drain any remaining background task launched by start_run.
-    for task in list(rm._tasks.values()):
-        await task
-    await fake_redis.aclose()
+    assert processed is False
+    async with maker() as session:
+        row = await session.get(IMRunQueueItem, item_id)
+        assert row is not None
+        assert row.status == "pending"
+        assert row.attempts == 1
