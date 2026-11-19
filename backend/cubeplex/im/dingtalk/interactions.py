@@ -14,6 +14,7 @@ async def handle_card_action(
     *,
     callback: dict[str, Any],
     run_manager: Any,
+    redis_key_prefix: str = "",
 ) -> None:
     """Route a DingTalk card button click to the resume path.
 
@@ -39,7 +40,20 @@ async def handle_card_action(
 
     _, kind, run_id, short_qid, answer_key, value = parts
 
-    operator_open_id: str = callback.get("userId", "")
+    operator_open_id = str(callback.get("userId") or "")
+    from cubeplex.im.outbound import verify_awaiting_responder
+
+    if not await verify_awaiting_responder(
+        redis_key_prefix=redis_key_prefix,
+        run_id=run_id,
+        operator_open_id=operator_open_id,
+    ):
+        logger.info(
+            "[DingTalk] card action rejected for non-matching responder: run={} user={}",
+            run_id,
+            operator_open_id,
+        )
+        return
 
     question_id = await resolve_full_question_id(run_id, short_qid)
 

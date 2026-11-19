@@ -96,6 +96,7 @@ class DingtalkGateway:
             await handle_card_action(
                 callback=raw,
                 run_manager=run_manager,
+                redis_key_prefix=self._redis_key_prefix,
             )
 
         client.register_callback_handler(

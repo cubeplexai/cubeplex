@@ -320,7 +320,6 @@ async def test_tailer_registers_responder_in_shared_mode() -> None:
         state=state,
         dispatcher=dispatcher,
         responder_open_id="ou_sender",
-        shared_mode=True,
     )
     await tailer.maybe_register_awaiting_responder(
         ev_payload={"type": "ask_user_request", "data": {"question_id": "q_shared"}}

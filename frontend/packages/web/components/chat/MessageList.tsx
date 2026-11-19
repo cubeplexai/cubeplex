@@ -189,6 +189,17 @@ function buildHistoricalToolResultMap(
   return map
 }
 
+function isHandledHitlConflict(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 409 &&
+    (err.code === 'resume_in_flight' ||
+      err.code === 'stale_answer' ||
+      err.code === 'conversation_moved' ||
+      err.code === 'not_execution_actor')
+  )
+}
+
 /**
  * Map the HITL answer-submit 4xx codes (defined in
  * ``backend/cubeplex/api/routes/v1/conversations.py``) to UI recovery actions:
@@ -197,11 +208,13 @@ function buildHistoricalToolResultMap(
  *     authoritative state.
  *   - ``stale_answer`` / ``conversation_moved`` — the question we answered is
  *     no longer current; reload to drop the stale card.
+ *   - ``not_execution_actor`` — caller did not start this turn; reload and
+ *     surface a toast without marking the assistant run itself as failed.
  *   - ``no_pending`` (404) — someone else answered (or the run was
  *     cancelled); clear the matching local card without a reload.
  *
- * Any other error is re-thrown so existing callers / error boundaries keep
- * behaving as before.
+ * 409 conflicts re-throw after reload so card components reset their local
+ * ``submitting`` / ``cancelling`` state.
  */
 async function handlePendingSubmitError(
   err: unknown,
@@ -212,6 +225,7 @@ async function handlePendingSubmitError(
     client: ReturnType<typeof createApiClient>,
     conversationId: string,
   ) => Promise<void>,
+  onConflict?: (code: string | null) => void,
 ): Promise<void> {
   useMessageStore.setState((state) => ({
     runLifecycle: { ...state.runLifecycle, [conversationId]: 'paused_hitl' },
@@ -226,23 +240,9 @@ async function handlePendingSubmitError(
   const client = createApiClient('')
   if (workspaceId) client.setWorkspaceId(workspaceId)
 
-  if (
-    err.status === 409 &&
-    (code === 'resume_in_flight' ||
-      code === 'stale_answer' ||
-      code === 'conversation_moved' ||
-      code === 'not_execution_actor')
-  ) {
+  if (isHandledHitlConflict(err)) {
     await loadMessages(client, conversationId)
-    useMessageStore.setState((s) => ({
-      errors: {
-        ...s.errors,
-        [conversationId]: {
-          runId: s.currentRunId ?? '',
-          data: { error_code: 'internal_error', message: err.message },
-        },
-      },
-    }))
+    onConflict?.(code)
     throw err
   }
   if (err.status === 404 && code === 'no_pending') {
@@ -262,6 +262,7 @@ async function handlePendingSubmitError(
 
 export function MessageList({ conversationId }: MessageListProps) {
   const t = useTranslations('chat')
+  const tAskUser = useTranslations('askUser')
   const {
     messages,
     isStreaming,
@@ -345,7 +346,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   }, [conversationId, loadMessages, workspaceId])
 
   const handleSandboxConfirm = useCallback(
-    async (toolCallId: string, decision: 'approve' | 'deny') => {
+    async (toolCallId: string, decision: 'approve' | 'deny' | 'cancel') => {
       const convId = streamingConversationId ?? conversationId
       const pending = pendingConfirmMap[toolCallId]
       if (!pending) return
@@ -355,6 +356,28 @@ export function MessageList({ conversationId }: MessageListProps) {
       useMessageStore.setState((state) => ({
         runLifecycle: { ...state.runLifecycle, [convId]: 'resuming_hitl' },
       }))
+      if (decision === 'cancel') {
+        try {
+          await cancelActiveRun(client, convId, pending.run_id)
+          useMessageStore.setState((s) => {
+            const next = { ...s.pendingConfirmMap }
+            delete next[toolCallId]
+            return { pendingConfirmMap: next, lastResolvedSandboxQuestionId: questionId }
+          })
+          await loadMessages(client, convId)
+        } catch (err) {
+          try {
+            await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
+          } catch (submitErr) {
+            if (!isHandledHitlConflict(submitErr)) {
+              console.error('Failed to cancel paused sandbox_confirm:', submitErr)
+              toast.error(t('cancelFailed'))
+            }
+            throw submitErr
+          }
+        }
+        return
+      }
       try {
         await submitSandboxConfirm(client, convId, questionId, decision)
         // Optimistic removal — sandbox_confirm_resolved SSE will also clean up.
@@ -373,10 +396,26 @@ export function MessageList({ conversationId }: MessageListProps) {
         // re-bootstraps + tails the new active_run.
         await loadMessages(client, convId)
       } catch (err) {
-        await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
+        await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages, (c) => {
+          toast.error(
+            c === 'not_execution_actor'
+              ? pending.actor_display_name
+                ? tAskUser('onlyActorCanApproveNamed', { name: pending.actor_display_name })
+                : tAskUser('onlyActorCanApprove')
+              : tAskUser('submitConflictToast'),
+          )
+        })
       }
     },
-    [conversationId, streamingConversationId, pendingConfirmMap, workspaceId, loadMessages],
+    [
+      conversationId,
+      streamingConversationId,
+      pendingConfirmMap,
+      workspaceId,
+      loadMessages,
+      t,
+      tAskUser,
+    ],
   )
 
   const handleAskUserSubmit = useCallback(
@@ -407,10 +446,18 @@ export function MessageList({ conversationId }: MessageListProps) {
         // Reattach to the resumed run stream — same reason as above.
         await loadMessages(client, convId)
       } catch (err) {
-        await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
+        await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages, (c) => {
+          toast.error(
+            c === 'not_execution_actor'
+              ? pendingAsk.actor_display_name
+                ? tAskUser('onlyActorCanAnswerNamed', { name: pendingAsk.actor_display_name })
+                : tAskUser('onlyActorCanAnswer')
+              : tAskUser('submitConflictToast'),
+          )
+        })
       }
     },
-    [conversationId, streamingConversationId, pendingAsk, workspaceId, loadMessages],
+    [conversationId, streamingConversationId, pendingAsk, workspaceId, loadMessages, tAskUser],
   )
 
   const handleAskUserCancel = useCallback(async () => {
@@ -430,8 +477,10 @@ export function MessageList({ conversationId }: MessageListProps) {
       try {
         await handlePendingSubmitError(err, convId, questionId, workspaceId, loadMessages)
       } catch (submitErr) {
-        console.error('Failed to cancel paused ask_user:', submitErr)
-        toast.error(t('cancelFailed'))
+        if (!isHandledHitlConflict(submitErr)) {
+          console.error('Failed to cancel paused ask_user:', submitErr)
+          toast.error(t('cancelFailed'))
+        }
         throw submitErr
       }
     }

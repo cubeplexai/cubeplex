@@ -31,7 +31,7 @@ interface ToolCallGroupProps {
   messageCreatedAt?: string
   agentId?: string | null
   pendingConfirmMap?: Record<string, PendingConfirm>
-  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
+  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny' | 'cancel') => Promise<void>
   renderThinking?: (block: ThinkingBlock, opts: { isLast: boolean }) => ReactNode
 }
 

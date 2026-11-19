@@ -646,13 +646,15 @@ async def test_im_resume_resolves_non_creator_actor_in_shared_group_chat(
         meta = await get_run_meta(run_manager._redis, prefix=run_manager._key_prefix, run_id=run_id)
         assert meta is not None and meta.status == "completed"
     finally:
+        from sqlmodel import col
+
         from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 
         await run_manager.cancel_all()
         await cleanup_run_rows(db_session, conversation_id)
         await db_session.execute(
             delete(ConversationExecutionAdmission).where(
-                ConversationExecutionAdmission.actor_user_id == sender_b_id  # type: ignore[arg-type]
+                col(ConversationExecutionAdmission.actor_user_id) == sender_b_id
             )
         )
         conv_restore = await db_session.get(Conversation, conversation_id)

@@ -82,18 +82,6 @@ class DiscordPlatform:
             supports_inline_image=False,
         )
 
-        shared_mode = False
-        _sm = kwargs.get("session_maker")
-        if _sm is not None:
-            from cubeplex.im.types import is_shared_mode_for_tailer
-
-            shared_mode = await is_shared_mode_for_tailer(
-                _sm,
-                queue_item.account_id,
-                queue_item.channel_id,
-                queue_item.conversation_id,
-            )
-
         tailer = OutboundRunTailer(
             redis=app.state.redis,
             key_prefix=app.state.redis_key_prefix,
@@ -103,7 +91,6 @@ class DiscordPlatform:
             dispatcher=op_dispatcher,
             artifact_dispatcher=artifact_disp,
             responder_open_id=queue_item.sender_open_id,
-            shared_mode=shared_mode,
         )
         asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 

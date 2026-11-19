@@ -219,7 +219,7 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
   const t = useTranslations('askUser')
   const currentUserId = useAuthStore((s) => s.user?.id ?? null)
   const canAnswer =
-    !pending.actor_user_id || !currentUserId || pending.actor_user_id === currentUserId
+    !pending.actor_user_id || (currentUserId !== null && pending.actor_user_id === currentUserId)
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
     const init: Record<string, string | string[]> = {}
     for (const q of pending.questions) {
