@@ -454,6 +454,7 @@ async def test_revoked_queued_message_completes_without_starting_or_tailing(
         on_run_started=None,
         lease_seconds=300,
         load_execution_snapshot=im_test_execution_snapshot,
+        active_run_defer_seconds=0.0,
     )
     assert admitted is False
 
@@ -1173,3 +1174,296 @@ async def test_worker_leaves_row_for_reclaim_on_start_run_failure(
         assert item.claim_lease_expires_at is None
         assert item.attempts == 1
         assert rcpt.status == "pending"
+
+
+async def test_busy_conversation_does_not_head_of_line_block_other_conversations(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_hol_busy",
+            channel_id="oc_chat",
+            scope_key="u:on_hol_busy",
+            scope_kind="participant",
+            reply_to_id="om_hol_busy",
+            inbound_message_id="om_hol_busy",
+            sender_ref="on_hol_busy",
+            sender_open_id="ou_hol_busy",
+            text="stuck in busy conv",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_hol_free",
+            channel_id="oc_chat",
+            scope_key="u:on_hol_free",
+            scope_kind="participant",
+            reply_to_id="om_hol_free",
+            inbound_message_id="om_hol_free",
+            sender_ref="on_hol_free",
+            sender_open_id="ou_hol_free",
+            text="hello new topic",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+
+    async with maker() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(IMRunQueueItem)
+                    .where(IMRunQueueItem.account_id == account.id)  # type: ignore[arg-type]
+                    .order_by(IMRunQueueItem.created_at)  # type: ignore[arg-type]
+                )
+            ).scalars()
+        )
+        assert len(rows) == 2
+        busy_conv_id = rows[0].conversation_id
+        free_conv_id = rows[1].conversation_id
+        assert busy_conv_id != free_conv_id
+
+    class _SelectiveBusyRM:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def start_run(
+            self,
+            *,
+            conversation_id: str,
+            content: str,
+            attachments: list[str] | None,
+            ctx: RunContext,
+            run_id: str | None = None,
+            model_key: str | None = None,
+            reasoning: object | None = None,
+            cancel_pending_hitl: bool = False,
+            llm_snapshot: object | None = None,
+            admission_id: str | None = None,
+        ) -> str:
+            if conversation_id == busy_conv_id:
+                raise RuntimeError(f"Conversation {conversation_id} already has an active run")
+            self.calls.append({"conversation_id": conversation_id, "content": content})
+            return run_id or "run-free"
+
+    rm = _SelectiveBusyRM()
+
+    # First poll claims the busy conversation and defers it.
+    first = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=rm,
+        on_run_started=None,
+        lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
+    )
+    assert first is False
+    assert rm.calls == []
+
+    # Second poll skips the deferred busy conversation and processes the new topic.
+    second = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=rm,
+        on_run_started=None,
+        lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
+    )
+    assert second is True
+    assert len(rm.calls) == 1
+    assert rm.calls[0]["conversation_id"] == free_conv_id
+
+
+async def test_human_im_message_cancels_pending_hitl_regardless_of_sender(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    from cubeloop.hitl import AskRequest, HitlRequest, Option, Question
+
+    from cubeplex.agents.checkpointer import init_checkpointer, shared_checkpointer
+    from cubeplex.models.conversation_participant import ConversationParticipant
+    from cubeplex.models.im_connector import IMIdentityLink
+
+    maker, account = _seeded
+    async with maker() as session:
+        await im_seed_org_ws_user(
+            session,
+            org_id=account.org_id,
+            ws_id=account.workspace_id,
+            user_id=_OTHER_USER_ID,
+        )
+        session.add(
+            IMIdentityLink(
+                org_id=account.org_id,
+                workspace_id=account.workspace_id,
+                account_id=account.id,
+                im_user_id="on_other_sender",
+                user_id=_OTHER_USER_ID,
+            )
+        )
+        await session.commit()
+
+    # Seed an existing IM conversation with a paused HITL turn owned by _USER_ID.
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_hitl_seed",
+            channel_id="oc_chat",
+            scope_key="c:oc_hitl_group",
+            scope_kind="group",
+            reply_to_id="om_hitl_1",
+            inbound_message_id="om_hitl_1",
+            sender_ref="on_owner",
+            sender_open_id="ou_owner",
+            text="first turn",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        seed_item = (
+            await session.execute(
+                select(IMRunQueueItem).where(IMRunQueueItem.account_id == account.id)  # type: ignore[arg-type]
+            )
+        ).scalar_one()
+        conv_id = seed_item.conversation_id
+        seed_item.status = "completed"
+        rcpt = (
+            await session.execute(
+                select(IMWebhookReceipt).where(IMWebhookReceipt.id == seed_item.receipt_id)  # type: ignore[arg-type]
+            )
+        ).scalar_one()
+        rcpt.status = "completed"
+        snap = await im_test_execution_snapshot(session, account.org_id)
+        admitted_paused = await ConversationExecutionService(
+            session, org_id=account.org_id, workspace_id=account.workspace_id
+        ).admit_user_message(
+            conversation_id=conv_id,
+            actor_user_id=_USER_ID,
+            namespace="im",
+            source_id="seed-hitl-turn",
+            intent=UserMessageIntent(content="first turn"),
+            snapshot=snap,
+            now=datetime.now(UTC),
+        )
+        paused_run_id = admitted_paused.admission.run_id
+        assert paused_run_id is not None
+        await session.commit()
+
+    async with init_checkpointer() as cp:
+        await cp.save_pending_request(
+            conv_id,
+            HitlRequest(
+                question_id="q-im-1",
+                thread_id=None,
+                created_at=datetime.now(UTC).timestamp(),
+                payload=AskRequest(
+                    questions=[
+                        Question(
+                            key="confirm",
+                            prompt="Proceed?",
+                            options=[
+                                Option(value="yes", label="Yes"),
+                                Option(value="no", label="No"),
+                            ],
+                        )
+                    ]
+                ),
+            ),
+            run_id=paused_run_id,
+        )
+
+    # A different member sends a new message in the same conversation.
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_hitl_override",
+            channel_id="oc_chat",
+            scope_key="c:oc_hitl_group",
+            scope_kind="group",
+            reply_to_id="om_hitl_2",
+            inbound_message_id="om_hitl_2",
+            sender_ref="on_other_sender",
+            sender_open_id="ou_other_sender",
+            text="new message overriding hitl",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        override_item = (
+            await session.execute(
+                select(IMRunQueueItem).where(
+                    IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                    IMRunQueueItem.status == "pending",  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        override_item.actor_user_id = _OTHER_USER_ID
+        session.add(
+            ConversationParticipant(
+                org_id=account.org_id,
+                workspace_id=account.workspace_id,
+                conversation_id=conv_id,
+                user_id=_OTHER_USER_ID,
+            )
+        )
+        await session.commit()
+
+    class _HitlAwareRM:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+            self.cancelled: list[tuple[str, str, str]] = []
+
+        async def cancel_paused_run(
+            self, *, conversation_id: str, run_id: str, ctx: RunContext
+        ) -> None:
+            async with shared_checkpointer() as cp:
+                await cp.save_pending_request(conversation_id, None)
+            self.cancelled.append((conversation_id, run_id, ctx.user_id))
+
+        async def notify_run_stop(self, run_id: str) -> None:
+            del run_id
+
+        async def start_run(
+            self,
+            *,
+            conversation_id: str,
+            content: str,
+            attachments: list[str] | None,
+            ctx: RunContext,
+            run_id: str | None = None,
+            model_key: str | None = None,
+            reasoning: object | None = None,
+            cancel_pending_hitl: bool = False,
+            llm_snapshot: object | None = None,
+            admission_id: str | None = None,
+        ) -> str:
+            async with shared_checkpointer() as cp:
+                pending = await cp.load_pending(conversation_id)
+            if pending is not None:
+                raise RuntimeError(
+                    f"Conversation {conversation_id} has a pending HITL request "
+                    f"(question_id={pending[0].question_id}); "
+                    f"answer or cancel before starting a new turn"
+                )
+            self.calls.append({"conversation_id": conversation_id, "user_id": ctx.user_id})
+            return run_id or "run-new"
+
+    rm = _HitlAwareRM()
+    processed = await process_one_queue_item(
+        session_maker=maker,
+        run_manager=rm,
+        on_run_started=None,
+        lease_seconds=300,
+        load_execution_snapshot=im_test_execution_snapshot,
+    )
+    assert processed is True
+    assert rm.cancelled == [(conv_id, paused_run_id, _OTHER_USER_ID)]
+    assert rm.calls == [{"conversation_id": conv_id, "user_id": _OTHER_USER_ID}]

@@ -249,4 +249,8 @@ class IMRunQueueItem(CubeplexBase, OrgScopedMixin, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    available_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     attempts: int = Field(default=0, sa_column_kwargs={"server_default": text("0")})

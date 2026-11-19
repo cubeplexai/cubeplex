@@ -81,6 +81,52 @@ ConnectionLeaseValidator = Callable[[str], Awaitable[bool]]
 LoadExecutionSnapshot = Callable[[AsyncSession, str], Awaitable[LLMSnapshot]]
 
 
+async def _cancel_pending_hitl_for_im_message(
+    *,
+    session_maker: async_sessionmaker[Any],
+    run_manager: _RunStarter,
+    captured: dict[str, Any],
+) -> bool:
+    """Explicitly cancel a pending HITL turn before starting a new human IM message."""
+    if not hasattr(run_manager, "cancel_paused_run"):
+        return False
+    from cubeplex.agents.checkpointer import shared_checkpointer
+    from cubeplex.services.execution_signals import signal_stopped_runs
+
+    async with shared_checkpointer() as cp:
+        pending_run_id = await cp.load_pending_run_id(captured["conversation_id"])
+    if pending_run_id is None:
+        return True
+
+    async with session_maker() as session:
+        exec_service = ConversationExecutionService(
+            session,
+            org_id=captured["org_id"],
+            workspace_id=captured["workspace_id"],
+        )
+        try:
+            stopped = await exec_service.stop_run(
+                conversation_id=captured["conversation_id"],
+                run_id=pending_run_id,
+                actor_user_id=captured["acting_user_id"],
+                now=datetime.now(UTC),
+            )
+            await session.commit()
+        except LookupError:
+            await session.rollback()
+            stopped = None
+
+    await signal_stopped_runs(
+        run_manager,  # type: ignore[arg-type]
+        conversation_id=captured["conversation_id"],
+        run_ids=(stopped.run_id if stopped is not None else pending_run_id,),
+        user_id=captured["acting_user_id"],
+        org_id=captured["org_id"],
+        workspace_id=captured["workspace_id"],
+    )
+    return True
+
+
 async def process_one_queue_item(
     *,
     session_maker: async_sessionmaker[Any],
@@ -91,6 +137,7 @@ async def process_one_queue_item(
     resolve_inbound_attachments: ResolveInboundAttachments | None = None,
     deliverable_connection_ids: DeliverableConnectionIds | None = None,
     validate_connection_lease: ConnectionLeaseValidator | None = None,
+    active_run_defer_seconds: float = 2.0,
 ) -> bool:
     """Claim and process at most one queue row. Returns True iff a row was processed."""
     async with session_maker() as session:
@@ -507,41 +554,58 @@ async def process_one_queue_item(
                 if admitted is None or admitted.admission.source_kind == "user_message"
                 else admitted.execution.model_key
             )
-            run_id = await run_manager.start_run(
-                conversation_id=captured["conversation_id"],
-                content=captured["content"],
-                attachments=attachment_ids,
-                ctx=RunContext(
-                    user_id=captured["acting_user_id"],
-                    org_id=captured["org_id"],
-                    workspace_id=captured["workspace_id"],
+
+            async def _start_run() -> str:
+                return await run_manager.start_run(
                     conversation_id=captured["conversation_id"],
-                    trigger="im",
-                    topic_id=captured["topic_id"],
-                    topic_title=captured["topic_title"],
-                    is_group_chat=captured["is_group_chat"],
-                    sandbox_mode=captured["sandbox_mode"],
-                    topic_creator_user_id=captured["topic_creator_user_id"],
-                    conversation_creator_user_id=captured["conversation_creator_user_id"],
-                    sender_display_name=captured["sender_display_name"],
-                ),
-                run_id=admitted.admission.run_id if admitted is not None else None,
-                model_key=request_model_key,
-                reasoning=admitted.execution.reasoning if admitted is not None else None,
-                cancel_pending_hitl=admitted is None,
-                llm_snapshot=execution_snapshot,
-                admission_id=admitted.admission.id if admitted is not None else None,
-            )
+                    content=captured["content"],
+                    attachments=attachment_ids,
+                    ctx=RunContext(
+                        user_id=captured["acting_user_id"],
+                        org_id=captured["org_id"],
+                        workspace_id=captured["workspace_id"],
+                        conversation_id=captured["conversation_id"],
+                        trigger="im",
+                        topic_id=captured["topic_id"],
+                        topic_title=captured["topic_title"],
+                        is_group_chat=captured["is_group_chat"],
+                        sandbox_mode=captured["sandbox_mode"],
+                        topic_creator_user_id=captured["topic_creator_user_id"],
+                        conversation_creator_user_id=captured["conversation_creator_user_id"],
+                        sender_display_name=captured["sender_display_name"],
+                    ),
+                    run_id=admitted.admission.run_id if admitted is not None else None,
+                    model_key=request_model_key,
+                    reasoning=admitted.execution.reasoning if admitted is not None else None,
+                    cancel_pending_hitl=admitted is None,
+                    llm_snapshot=execution_snapshot,
+                    admission_id=admitted.admission.id if admitted is not None else None,
+                )
+
+            try:
+                run_id = await _start_run()
+            except RuntimeError as exc:
+                if (
+                    "pending HITL request" in str(exc)
+                    and captured_item.inbound_message_id is not None
+                    and await _cancel_pending_hitl_for_im_message(
+                        session_maker=session_maker,
+                        run_manager=run_manager,
+                        captured=captured,
+                    )
+                ):
+                    run_id = await _start_run()
+                else:
+                    raise
     except Exception as exc:
         # ``RunManager.start_run`` raises a plain RuntimeError when the
         # conversation already has an active run. That's a normal UX
         # scenario (user sends a follow-up while the first reply is
         # still rendering, ~5–60s typical), NOT a failed inbound —
         # rewinding to pending without consuming an attempt lets the
-        # next poll re-claim once the first run finishes. At default
-        # poll=1s, max_attempts=5, charging the attempt would park the
-        # follow-up as ``failed`` in ~5s even though the conversation
-        # just needed a few seconds to finish.
+        # next poll re-claim once the first run finishes. Deferring
+        # ``available_at`` prevents a busy conversation from head-of-line
+        # blocking other conversations/topics in the queue.
         if isinstance(exc, RuntimeError) and (
             "already has an active run" in str(exc) or "pending HITL request" in str(exc)
         ):
@@ -550,7 +614,11 @@ async def process_one_queue_item(
                 captured_item.id,
             )
             async with session_maker() as session:
-                await rewind_queue_item_no_attempt_charge(session, item_id=captured_item.id)
+                await rewind_queue_item_no_attempt_charge(
+                    session,
+                    item_id=captured_item.id,
+                    defer_seconds=active_run_defer_seconds,
+                )
                 await session.commit()
             return False
         logger.opt(exception=True).warning(
