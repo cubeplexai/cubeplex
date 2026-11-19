@@ -174,6 +174,8 @@ The bot understands these in any chat it's in:
 | `/new` | `/reset`, `新对话` | Start a fresh conversation; your next message begins a new one. |
 | `/stop` | — | Stop the currently active reply without clearing queued messages. |
 | `/steer <message>` | — | Inject a follow-up instruction into the active reply (or start a new one if idle). |
+| `/models` | — | List available model presets and mark the active one for this conversation. |
+| `/model <name>` | — | Switch the conversation's model preset for subsequent messages. |
 
 ## Rotating credentials
 

@@ -50,6 +50,8 @@ the bot's workspace. Membership is checked again for every message.
 - Send `/new`, `/reset`, or `新对话` to start a fresh conversation for the current scope.
 - Send `/stop` to stop the currently active reply without clearing queued messages.
 - Send `/steer <message>` to inject a follow-up instruction into the active reply (or start a new one if idle).
+- Send `/models` to list available model presets and see which one is active for the current conversation.
+- Send `/model <name>` to switch the current conversation's model preset for subsequent messages.
 
 Replies stream into the original WeCom message when its reply window is available. Longer or
 delayed runs fall back to a proactive final message.

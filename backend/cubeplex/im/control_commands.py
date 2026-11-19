@@ -1,4 +1,4 @@
-"""Shared ``/stop`` and ``/steer`` command parsing and execution for IM."""
+"""Shared ``/stop``, ``/steer``, ``/models``, and ``/model`` command parsing and execution for IM."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from cubeplex.im.bot_settings import load_bot_settings, wants_topic
 from cubeplex.im.conversation_resolver import (
     _ensure_conversation_participant,
     _ensure_topic_participant,
+    resolve_im_conversation,
 )
 from cubeplex.im.identity import (
     IdentityResolver,
@@ -28,6 +29,7 @@ from cubeplex.im.identity import (
     resolve_or_reject,
 )
 from cubeplex.im.types import InboundEvent
+from cubeplex.llm.snapshot import ModelPreset, _load_presets
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.conversation_execution import ConversationExecutionAdmission
 from cubeplex.models.im_connector import IMConnectorAccount, IMThreadLink, IMWebhookReceipt
@@ -42,6 +44,8 @@ if TYPE_CHECKING:
 
 _STOP_RE = _re.compile(r"^\s*/stop\s*$", _re.IGNORECASE)
 _STEER_RE = _re.compile(r"^\s*/steer(?:$|\s+(?P<body>.*))$", _re.IGNORECASE | _re.DOTALL)
+_MODELS_RE = _re.compile(r"^\s*/models\s*$", _re.IGNORECASE)
+_MODEL_RE = _re.compile(r"^\s*/model(?:$|\s+(?P<body>.*))$", _re.IGNORECASE)
 
 STOP_NO_ACTIVE_REPLY = "ℹ️ 当前没有正在进行的回复。"
 STOP_SUCCESS_REPLY = "⏹️ 已停止当前回复。"
@@ -54,6 +58,7 @@ STEER_ACTOR_CONFLICT_REPLY = (
 STEER_QUEUE_FULL_REPLY = "⚠️ 当前补充消息队列已满，请稍后再试或发送 /stop 终止当前回复。"
 STEER_TOO_LARGE_REPLY = "⚠️ 补充内容过长，请精简后再试。"
 STEER_IDLE_FALLBACK_SLASH_REPLY = "ℹ️ 当前没有正在进行的回复，已作为新消息发送。"
+MODELS_EMPTY_REPLY = "⚠️ 当前组织尚未配置可用模型预设。"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,14 +73,31 @@ class SteerCommand:
     content: str
 
 
-ControlCommand = StopCommand | SteerCommand
+@dataclass(frozen=True, slots=True)
+class ListModelsCommand:
+    """Parsed ``/models`` command."""
+
+
+@dataclass(frozen=True, slots=True)
+class SwitchModelCommand:
+    """Parsed ``/model [model]`` command."""
+
+    model: str
+
+
+ControlCommand = StopCommand | SteerCommand | ListModelsCommand | SwitchModelCommand
 
 
 def parse_control_command(text: str) -> ControlCommand | None:
-    """Parse ``/stop`` or ``/steer <content>`` from normalized IM message text."""
+    """Parse ``/stop``, ``/steer``, ``/models``, or ``/model`` from IM message text."""
     raw = text or ""
     if _STOP_RE.match(raw):
         return StopCommand()
+    if _MODELS_RE.match(raw):
+        return ListModelsCommand()
+    model_match = _MODEL_RE.match(raw)
+    if model_match is not None:
+        return SwitchModelCommand(model=(model_match.group("body") or "").strip())
     match = _STEER_RE.match(raw)
     if match is not None:
         body = (match.group("body") or "").strip()
@@ -370,6 +392,139 @@ async def _commit_terminal_receipt(
     return True
 
 
+def _resolve_active_model_key(
+    presets: tuple[ModelPreset, ...],
+    configured_key: str | None,
+) -> str | None:
+    if configured_key and any(p.key == configured_key for p in presets):
+        return configured_key
+    default_preset = next((p for p in presets if p.is_default), None)
+    return default_preset.key if default_preset is not None else None
+
+
+def _match_model_preset(
+    presets: tuple[ModelPreset, ...],
+    arg: str,
+) -> ModelPreset | None:
+    exact = next((p for p in presets if p.key == arg), None)
+    if exact is not None:
+        return exact
+    lowered = arg.lower()
+    ci_key = next((p for p in presets if p.key.lower() == lowered), None)
+    if ci_key is not None:
+        return ci_key
+    primary_matches = [p for p in presets if p.primary.lower() == lowered]
+    if len(primary_matches) == 1:
+        return primary_matches[0]
+    return None
+
+
+async def execute_list_models_command(
+    *,
+    session: AsyncSession,
+    account: IMConnectorAccount,
+    effective_user_id: str,
+    channel_id: str,
+    scope_key: str,
+    scope_kind: str,
+) -> str:
+    """Format the org's available model presets and mark the active conversation model."""
+    presets, _ = await _load_presets(session, account.org_id)
+    if not presets:
+        return MODELS_EMPTY_REPLY
+
+    conv = await find_live_im_conversation(
+        session,
+        account,
+        channel_id=channel_id,
+        scope_key=scope_key,
+        scope_kind=scope_kind,
+        effective_user_id=effective_user_id,
+    )
+    active_key = _resolve_active_model_key(presets, conv.model_key if conv is not None else None)
+    lines = ["🤖 可用模型预设："]
+    for p in presets:
+        badges: list[str] = []
+        if p.is_default:
+            badges.append("默认")
+        if p.key == active_key:
+            badges.append("当前使用")
+        badge_str = f" [{' · '.join(badges)}]" if badges else ""
+        desc_str = f" — {p.description}" if p.description else ""
+        lines.append(f"• {p.key} ({p.primary}){badge_str}{desc_str}")
+    lines.append("")
+    lines.append("发送 `/model <名称>` 切换当前会话模型。")
+    return "\n".join(lines)
+
+
+async def execute_switch_model_command(
+    *,
+    session: AsyncSession,
+    account: IMConnectorAccount,
+    effective_user_id: str,
+    channel_id: str,
+    scope_key: str,
+    scope_kind: str,
+    model_arg: str,
+    channel_name: str | None = None,
+) -> str:
+    """Switch the current IM conversation's ``model_key`` (creating it if needed)."""
+    presets, _ = await _load_presets(session, account.org_id)
+    arg = model_arg.strip()
+    if not arg:
+        conv = await find_live_im_conversation(
+            session,
+            account,
+            channel_id=channel_id,
+            scope_key=scope_key,
+            scope_kind=scope_kind,
+            effective_user_id=effective_user_id,
+        )
+        active_key = _resolve_active_model_key(
+            presets, conv.model_key if conv is not None else None
+        )
+        current_label = active_key or "未配置"
+        return (
+            f"ℹ️ 当前使用模型：{current_label}\n用法：/model <模型名称>（发送 /models 查看可用模型）"
+        )
+
+    if not presets:
+        return MODELS_EMPTY_REPLY
+
+    target = _match_model_preset(presets, arg)
+    if target is None:
+        return f"⚠️ 未找到模型预设「{arg}」，请发送 /models 查看可用模型。"
+
+    conv = await find_live_im_conversation(
+        session,
+        account,
+        channel_id=channel_id,
+        scope_key=scope_key,
+        scope_kind=scope_kind,
+        effective_user_id=effective_user_id,
+    )
+    if conv is None:
+        resolved = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=channel_id,
+            scope_key=scope_key,
+            scope_kind=scope_kind,
+            effective_user_id=effective_user_id,
+            title_hint="",
+            origin="inbound",
+            channel_name=channel_name,
+        )
+        conv = await session.get(Conversation, resolved.conversation_id)
+        if conv is None:
+            raise LookupError(f"Conversation {resolved.conversation_id} not found after resolve")
+
+    conv.model_key = target.key
+    conv.updated_at = datetime.now(UTC)
+    await session.flush()
+    return f"✅ 已将当前会话模型切换为「{target.key}」（{target.primary}），后续消息将使用该模型。"
+
+
 async def maybe_handle_control_command(
     event: InboundEvent,
     *,
@@ -479,6 +634,56 @@ async def maybe_handle_control_command(
             else:
                 await session.commit()
             await _safe_reply(reply, reply_text)
+            return True
+
+        if isinstance(cmd, ListModelsCommand):
+            list_reply = await execute_list_models_command(
+                session=session,
+                account=live_account,
+                effective_user_id=effective_user_id,
+                channel_id=event.channel_id,
+                scope_key=event.scope_key,
+                scope_kind=event.scope_kind,
+            )
+            committed = await _commit_terminal_receipt(
+                session,
+                account=live_account,
+                platform_event_id=event.platform_event_id,
+                receipt_status="completed",
+            )
+            if committed:
+                await _safe_reply(reply, list_reply)
+            return True
+
+        if isinstance(cmd, SwitchModelCommand):
+            receipt = IMWebhookReceipt(
+                org_id=live_account.org_id,
+                workspace_id=live_account.workspace_id,
+                account_id=live_account.id,
+                platform_event_id=event.platform_event_id,
+                status="completed",
+            )
+            session.add(receipt)
+            try:
+                await session.flush()
+            except IntegrityError as exc:
+                await session.rollback()
+                if _is_receipt_unique_violation(exc):
+                    return True
+                raise
+
+            switch_reply = await execute_switch_model_command(
+                session=session,
+                account=live_account,
+                effective_user_id=effective_user_id,
+                channel_id=event.channel_id,
+                scope_key=event.scope_key,
+                scope_kind=event.scope_kind,
+                model_arg=cmd.model,
+                channel_name=event.channel_name,
+            )
+            await session.commit()
+            await _safe_reply(reply, switch_reply)
             return True
 
         # SteerCommand

@@ -1,5 +1,5 @@
 # backend/cubeplex/im/discord/commands.py
-"""Discord slash commands: /new, /reset, /link, /stop, and /steer."""
+"""Discord slash commands: /new, /reset, /link, /stop, /steer, /models, and /model."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from loguru import logger
 
 
 async def register_commands(bot: commands.Bot) -> None:
-    """Register /new, /reset, /link, /stop, and /steer slash commands."""
+    """Register /new, /reset, /link, /stop, /steer, /models, and /model slash commands."""
 
     @bot.tree.command(name="new", description="Start a new conversation")
     async def cmd_new(interaction: discord.Interaction) -> None:
@@ -32,6 +32,23 @@ async def register_commands(bot: commands.Bot) -> None:
     @discord.app_commands.describe(message="Follow-up instruction for the active reply")
     async def cmd_steer(interaction: discord.Interaction, message: str) -> None:
         await _handle_steer(interaction, bot, message=message)
+
+    @bot.tree.command(name="models", description="List available model presets")
+    async def cmd_models(interaction: discord.Interaction) -> None:
+        await _handle_control_slash(
+            interaction, bot, text="/models", failure_reply="获取模型列表失败。"
+        )
+
+    @bot.tree.command(name="model", description="Switch the conversation model preset")
+    @discord.app_commands.describe(model="Model preset key or primary model")
+    async def cmd_model(interaction: discord.Interaction, model: str | None = None) -> None:
+        arg = (model or "").strip()
+        await _handle_control_slash(
+            interaction,
+            bot,
+            text=f"/model {arg}" if arg else "/model",
+            failure_reply="切换模型失败。",
+        )
 
     try:
         synced = await bot.tree.sync()
@@ -168,7 +185,13 @@ async def _resolve_discord_scope(
     return channel_id, sender_ref, scope_key, scope_kind
 
 
-async def _handle_stop(interaction: discord.Interaction, bot: commands.Bot) -> None:
+async def _handle_control_slash(
+    interaction: discord.Interaction,
+    bot: commands.Bot,
+    *,
+    text: str,
+    failure_reply: str,
+) -> None:
     from cubeplex.im.control_commands import maybe_handle_control_command
     from cubeplex.im.types import InboundEvent
     from cubeplex.models.im_connector import IMConnectorAccount
@@ -204,13 +227,13 @@ async def _handle_stop(interaction: discord.Interaction, bot: commands.Bot) -> N
         scope_kind=scope_kind,
         sender_ref=sender_ref,
         sender_open_id=sender_ref,
-        text="/stop",
+        text=text,
         reply_to_id=None,
         inbound_message_id="",
     )
 
-    async def _reply(text: str) -> None:
-        await interaction.followup.send(text, ephemeral=True)
+    async def _reply(reply_text: str) -> None:
+        await interaction.followup.send(reply_text, ephemeral=True)
 
     try:
         await maybe_handle_control_command(
@@ -222,8 +245,12 @@ async def _handle_stop(interaction: discord.Interaction, bot: commands.Bot) -> N
             require_linked_member=True,
         )
     except Exception:
-        logger.opt(exception=True).warning("[Discord] /stop slash handler failed")
-        await interaction.followup.send("停止当前回复失败。", ephemeral=True)
+        logger.opt(exception=True).warning("[Discord] {} slash handler failed", text.split()[0])
+        await interaction.followup.send(failure_reply, ephemeral=True)
+
+
+async def _handle_stop(interaction: discord.Interaction, bot: commands.Bot) -> None:
+    await _handle_control_slash(interaction, bot, text="/stop", failure_reply="停止当前回复失败。")
 
 
 async def _handle_steer(

@@ -660,4 +660,201 @@ async def test_discord_register_commands_wires_stop_and_steer() -> None:
 
     bot = SimpleNamespace(tree=_FakeTree(), get_cog=AsyncMock())
     await register_commands(bot)  # type: ignore[arg-type]
-    assert {"new", "reset", "link", "stop", "steer"} <= set(registered)
+    assert {"new", "reset", "link", "stop", "steer", "models", "model"} <= set(registered)
+
+
+def test_parse_model_commands_variants() -> None:
+    from cubeplex.im.control_commands import ListModelsCommand, SwitchModelCommand
+
+    assert parse_control_command("/models") == ListModelsCommand()
+    assert parse_control_command("  /MODELS \n") == ListModelsCommand()
+    assert parse_control_command("/models extra") is None
+    assert parse_control_command("/model") == SwitchModelCommand(model="")
+    assert parse_control_command("  /model  ") == SwitchModelCommand(model="")
+    assert parse_control_command("/MODEL  pro ") == SwitchModelCommand(model="pro")
+    assert parse_control_command("/model openai/gpt-4o") == SwitchModelCommand(
+        model="openai/gpt-4o"
+    )
+    assert parse_control_command("/modeling") is None
+
+
+def test_model_matching_and_active_key_resolution() -> None:
+    from cubeplex.im.control_commands import _match_model_preset, _resolve_active_model_key
+    from cubeplex.llm.snapshot import ModelPreset
+
+    presets = (
+        ModelPreset(
+            key="flash",
+            primary="openai/gpt-4o-mini",
+            fallbacks=(),
+            kind="tier",
+            is_default=True,
+        ),
+        ModelPreset(
+            key="pro",
+            primary="anthropic/claude-sonnet-4",
+            fallbacks=(),
+            kind="tier",
+            is_default=False,
+        ),
+        ModelPreset(
+            key="dup-a",
+            primary="openai/gpt-4o",
+            fallbacks=(),
+            kind="custom",
+            is_default=False,
+        ),
+        ModelPreset(
+            key="dup-b",
+            primary="openai/gpt-4o",
+            fallbacks=(),
+            kind="custom",
+            is_default=False,
+        ),
+    )
+
+    assert _resolve_active_model_key(presets, None) == "flash"
+    assert _resolve_active_model_key(presets, "pro") == "pro"
+    assert _resolve_active_model_key(presets, "deleted") == "flash"
+
+    assert _match_model_preset(presets, "pro") == presets[1]
+    assert _match_model_preset(presets, "PRO") == presets[1]
+    assert _match_model_preset(presets, "anthropic/claude-sonnet-4") == presets[1]
+    assert _match_model_preset(presets, "openai/gpt-4o") is None
+    assert _match_model_preset(presets, "missing") is None
+
+
+async def test_execute_list_and_switch_model_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from cubeplex.im.control_commands import (
+        MODELS_EMPTY_REPLY,
+        execute_list_models_command,
+        execute_switch_model_command,
+    )
+    from cubeplex.llm.snapshot import ModelPreset
+
+    presets = (
+        ModelPreset(
+            key="flash",
+            primary="openai/gpt-4o-mini",
+            fallbacks=(),
+            kind="tier",
+            is_default=True,
+        ),
+        ModelPreset(
+            key="pro",
+            primary="anthropic/claude-sonnet-4",
+            fallbacks=(),
+            kind="tier",
+            is_default=False,
+            description="Reasoning",
+        ),
+    )
+
+    loaded_presets: tuple[ModelPreset, ...] = ()
+
+    async def _fake_load_presets(
+        _session: object, _org_id: str
+    ) -> tuple[tuple[ModelPreset, ...], dict[str, str]]:
+        return loaded_presets, {}
+
+    conv_obj: SimpleNamespace | None = None
+
+    async def _fake_find_live(*_args: object, **_kwargs: object) -> object:
+        return conv_obj
+
+    created_conv = SimpleNamespace(id="conv-created", model_key=None, updated_at=datetime.now())
+
+    async def _fake_resolve_im(*_args: object, **_kwargs: object) -> object:
+        return SimpleNamespace(conversation_id="conv-created")
+
+    class _FakeSession:
+        async def get(self, _cls: object, pk: str) -> object:
+            return created_conv if pk == "conv-created" else None
+
+        async def flush(self) -> None:
+            return None
+
+    monkeypatch.setattr("cubeplex.im.control_commands._load_presets", _fake_load_presets)
+    monkeypatch.setattr("cubeplex.im.control_commands.find_live_im_conversation", _fake_find_live)
+    monkeypatch.setattr("cubeplex.im.control_commands.resolve_im_conversation", _fake_resolve_im)
+
+    acct = SimpleNamespace(id="acct-1", org_id="org-1", workspace_id="ws-1")
+    sess = _FakeSession()
+
+    assert (
+        await execute_list_models_command(
+            session=sess,  # type: ignore[arg-type]
+            account=acct,  # type: ignore[arg-type]
+            effective_user_id="u1",
+            channel_id="ch1",
+            scope_key="dm",
+            scope_kind="dm",
+        )
+        == MODELS_EMPTY_REPLY
+    )
+
+    loaded_presets = presets
+    listed = await execute_list_models_command(
+        session=sess,  # type: ignore[arg-type]
+        account=acct,  # type: ignore[arg-type]
+        effective_user_id="u1",
+        channel_id="ch1",
+        scope_key="dm",
+        scope_kind="dm",
+    )
+    assert "flash (openai/gpt-4o-mini) [默认 · 当前使用]" in listed
+    assert "pro (anthropic/claude-sonnet-4) — Reasoning" in listed
+
+    usage = await execute_switch_model_command(
+        session=sess,  # type: ignore[arg-type]
+        account=acct,  # type: ignore[arg-type]
+        effective_user_id="u1",
+        channel_id="ch1",
+        scope_key="dm",
+        scope_kind="dm",
+        model_arg="",
+    )
+    assert "当前使用模型：flash" in usage
+
+    not_found = await execute_switch_model_command(
+        session=sess,  # type: ignore[arg-type]
+        account=acct,  # type: ignore[arg-type]
+        effective_user_id="u1",
+        channel_id="ch1",
+        scope_key="dm",
+        scope_kind="dm",
+        model_arg="unknown",
+    )
+    assert "未找到模型预设「unknown」" in not_found
+
+    switched = await execute_switch_model_command(
+        session=sess,  # type: ignore[arg-type]
+        account=acct,  # type: ignore[arg-type]
+        effective_user_id="u1",
+        channel_id="ch1",
+        scope_key="dm",
+        scope_kind="dm",
+        model_arg="PRO",
+    )
+    assert "已将当前会话模型切换为「pro」" in switched
+    assert created_conv.model_key == "pro"
+
+
+async def test_slack_register_commands_wires_models_and_model() -> None:
+    from cubeplex.im.slack.commands import register_commands
+
+    registered: list[str] = []
+
+    class _FakeApp:
+        def command(self, name: str) -> object:
+            def _dec(fn: object) -> object:
+                registered.append(name)
+                return fn
+
+            return _dec
+
+    register_commands(_FakeApp(), account_id="acct-1", workspace_id="ws-1", session_maker=object())
+    assert {"/link", "/new", "/reset", "/stop", "/steer", "/models", "/model"} <= set(registered)

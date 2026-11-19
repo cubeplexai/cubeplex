@@ -99,6 +99,8 @@ The DingTalk bot recognizes these as text messages (in a group, @ the bot first)
 | `/new` | `/reset`, `新对话` | Start a fresh conversation; your next message begins a new one. |
 | `/stop` | — | Stop the currently active reply without clearing queued messages. |
 | `/steer <message>` | — | Inject a follow-up instruction into the active reply (or start a new one if idle). |
+| `/models` | — | List available model presets and mark the active one for this conversation. |
+| `/model <name>` | — | Switch the conversation's model preset for subsequent messages. |
 
 `/new` and `/reset` are equivalent. Per-channel conversation behavior follows the [channel binding mode](./overview.md#channel-binding-modes).
 
