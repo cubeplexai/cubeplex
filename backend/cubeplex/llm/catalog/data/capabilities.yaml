@@ -99,6 +99,13 @@ xai-compat:
   supports_images: true
 
 openrouter-compat:
+  reasoning:
+    mode_payloads:
+      "off": { extra_body: { reasoning: { exclude: true } } }
+      "on": { extra_body: { reasoning: { exclude: false } } }
+    effort_path: extra_body.reasoning.effort
+    effort_values: { minimal: low, low: low, medium: medium, high: high, max: high }
+    apply_effort_when_off: false
   temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
   supports_tools: true
   supports_images: true

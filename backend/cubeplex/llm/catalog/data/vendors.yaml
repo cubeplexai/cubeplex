@@ -224,6 +224,7 @@
   models:
     - { model_id: "google/gemma-4-31b-it:free", display_name: Gemma 4 31B (free), context_window: 262000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: "stepfun/step-3.5-flash:free", display_name: StepFun 3.5 Flash (free), context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: "baidu/ernie-5.5-flash-preview:free", display_name: Ernie 5.5 Flash (free), context_window: 1000000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
 
 - vendor: together-ai
   display_name: Together AI
