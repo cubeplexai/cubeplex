@@ -81,16 +81,17 @@ function useTurnRunChip(opts: {
     currentRunId,
     streamConnection,
   })
+  const appliesError = conversationErrorApplies(errorEntry, {
+    messageRunId: opts.runId,
+    isLive: opts.isLive,
+    isRunAnchor,
+  })
   const status = deriveRunChipStatus({
     isLive: live,
     cancelling,
     streamConnection,
     stopReason: opts.stopReason,
-    hasError: conversationErrorApplies(errorEntry, {
-      messageRunId: opts.runId,
-      isLive: opts.isLive,
-      isRunAnchor,
-    }),
+    hasError: appliesError,
     isStaleLastRun: Boolean(opts.isLastRun && lastRunStatus === 'stale'),
   })
   const onRetry =
@@ -104,7 +105,12 @@ function useTurnRunChip(opts: {
         }
       : undefined
   const chipRunId = opts.isLive ? (opts.runId ?? currentRunId) : (opts.runId ?? null)
-  return { status, error: errorEntry?.data ?? null, onRetry, runId: chipRunId }
+  return {
+    status,
+    error: appliesError ? (errorEntry?.data ?? null) : null,
+    onRetry,
+    runId: chipRunId,
+  }
 }
 
 function formatDuration(ms: number): string {

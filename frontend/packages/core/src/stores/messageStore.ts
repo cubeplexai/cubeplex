@@ -305,6 +305,8 @@ export interface MessageStore {
       throwOnError?: boolean
       preserveLoadedHistory?: boolean
       preserveOtherConversationStream?: boolean
+      expectedRunId?: string
+      prefetchedBootstrap?: Awaited<ReturnType<typeof getConversationBootstrap>>
     },
   ): Promise<void>
   /** Fetch one older window using ``oldestSeqByConv[conversationId]`` as the
@@ -538,6 +540,7 @@ async function reconcileAfterStop(
     try {
       await get().loadMessages(client, conversationId, {
         force: true,
+        preserveOtherConversationStream: true,
         throwOnError: true,
       })
       return true
@@ -1085,10 +1088,26 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     Boolean(convId) &&
     Boolean(convId && state.retryEvents[convId]) &&
     (event.type === 'text_delta' || event.type === 'reasoning' || event.type === 'tool_call')
+  const resumesPausedStream =
+    convId !== null &&
+    !state.isStreaming &&
+    !state.cancellingConversationIds[convId] &&
+    (state.runLifecycle[convId] === 'paused_hitl' ||
+      state.runLifecycle[convId] === 'resuming_hitl') &&
+    (event.type === 'text_delta' ||
+      event.type === 'reasoning' ||
+      event.type === 'tool_call' ||
+      event.type === 'tool_call_delta')
   const base = {
     ...(lastAppliedEventId ? { lastAppliedEventId } : {}),
     ...(shouldClearRetry && convId
       ? { retryEvents: { ...state.retryEvents, [convId]: null } }
+      : {}),
+    ...(resumesPausedStream && convId
+      ? {
+          isStreaming: true,
+          runLifecycle: { ...state.runLifecycle, [convId]: 'running' as const },
+        }
       : {}),
   }
 
@@ -1779,6 +1798,7 @@ async function consumeRunStream(
   set: (partial: Partial<MessageStore> | ((state: MessageStore) => Partial<MessageStore>)) => void,
   get: () => MessageStore,
   signal?: AbortSignal,
+  initialStreamError?: unknown,
 ): Promise<void> {
   const { batchedSet, flush } = createBatcher(
     set as (updater: (s: MessageStore) => Partial<MessageStore>) => void,
@@ -1790,6 +1810,23 @@ async function consumeRunStream(
   let processed = 0
   let cursor = lastEventId
   let attempt = 0
+  let pendingInitialError = initialStreamError
+
+  const resetOwnedIdle = (): void => {
+    set((s) =>
+      ownsStreamingConversation(s, conversationId) && s.currentRunId === runId
+        ? {
+            isStreaming: false,
+            streamingConversationId: null,
+            currentRunId: null,
+            pendingRunClientMessageId: null,
+            statusPhase: null,
+            streamConnection: null,
+            runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
+          }
+        : {},
+    )
+  }
 
   try {
     while (!signal?.aborted) {
@@ -1798,171 +1835,177 @@ async function consumeRunStream(
         return
       }
       let streamError: unknown = null
-      try {
-        for await (const event of streamRun(
-          client,
-          conversationId,
-          runId,
-          cursor ?? undefined,
-          signal,
-          () => {
-            if (get().currentRunId === runId) {
+      if (pendingInitialError !== undefined) {
+        streamError = pendingInitialError
+        pendingInitialError = undefined
+      } else {
+        try {
+          for await (const event of streamRun(
+            client,
+            conversationId,
+            runId,
+            cursor ?? undefined,
+            signal,
+            () => {
+              if (get().currentRunId === runId) {
+                set({ streamConnection: 'connected' })
+              }
+            },
+          )) {
+            const state = get()
+            if (state.currentRunId !== runId) {
+              shouldFinalize = false
+              return
+            }
+            if (state.streamConnection !== 'connected') {
               set({ streamConnection: 'connected' })
             }
-          },
-        )) {
-          const state = get()
-          if (state.currentRunId !== runId) {
-            shouldFinalize = false
-            return
-          }
-          if (state.streamConnection !== 'connected') {
-            set({ streamConnection: 'connected' })
-          }
-          if (event.event_id && state.lastAppliedEventId) {
-            if (compareEventIds(event.event_id, state.lastAppliedEventId) <= 0) continue
-          }
+            if (event.event_id && state.lastAppliedEventId) {
+              if (compareEventIds(event.event_id, state.lastAppliedEventId) <= 0) continue
+            }
+            attempt = 0
 
-          if (event.type === 'artifact') {
-            const artifactData = event.data as unknown as ArtifactEventData
-            applyArtifactSseEvent(conversationId, artifactData.artifact)
-          } else if (event.type === 'citation') {
-            const citationData = event.data as unknown as import('../types').CitationData
-            useCitationStore.getState().addCitation(conversationId, citationData)
-          } else if (event.type === 'model_retry') {
-            get().setRetryEvent(conversationId, event as RetryEvent)
-            set((s) => ({
-              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
-            }))
-            continue
-          } else if (event.type === 'model_failover') {
-            // Append to the per-conversation banner list. Keep advancing the
-            // applied-event cursor here so the next reattach doesn't replay it.
-            get().clearRetryEvent(conversationId)
-            const failoverEvent: FailoverEvent = {
-              ...(event as FailoverEvent),
-              run_id: (event as FailoverEvent).run_id ?? runId,
-            }
-            get().appendFailoverEvent(conversationId, failoverEvent)
-            set((s) => ({
-              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
-            }))
-            continue
-          } else if (event.type === 'error') {
-            if (get().cancellingConversationIds[conversationId]) {
-              continue
-            }
-            const errData = event.data as ErrorEventData
-            flush()
-            get().clearRetryEvent(conversationId)
-            let didTerminal = false
-            sawTerminalError = true
-            set((s) => {
-              const owns = ownsStreamingConversation(s, conversationId)
-              if (owns) didTerminal = true
-              return {
-                messages: {
-                  ...s.messages,
-                  [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
-                },
-                errors: {
-                  ...s.errors,
-                  [conversationId]: { runId: s.currentRunId ?? '', data: errData },
-                },
-                pendingSteers: {
-                  ...s.pendingSteers,
-                  [conversationId]: failedPendingSteers(s, conversationId),
-                },
-                ...(owns
-                  ? {
-                      streamAgents: {},
-                      toolStartedMap: {},
-                      toolResultMap: {},
-                      isStreaming: false,
-                      pendingConfirmMap: {},
-                      pendingAsk: null,
-                      streamingConversationId: null,
-                      currentRunId: null,
-                      pendingRunClientMessageId: null,
-                      statusPhase: null,
-                      streamConnection: null,
-                      runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
-                      lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
-                    }
-                  : {}),
-              }
-            })
-            if (didTerminal) maybeMarkUnreadOnTerminal(get, conversationId)
-            break
-          } else if (event.type === 'done') {
-            get().clearRetryEvent(conversationId)
-            const usage = (event.data as Record<string, unknown>).usage as
-              import('../types').UsageSummary | undefined
-            const paused = (event.data as Record<string, unknown>).paused === true
-            // Only advance the shared event cursor / usage while we still own
-            // the stream — a superseded reattach must not clobber the live send.
-            if (ownsStreamingConversation(get(), conversationId)) {
-              const usageUpdate: Partial<MessageStore> = {
-                lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
-              }
-              if (usage) {
-                usageUpdate.turnUsage = {
-                  ...get().turnUsage,
-                  [conversationId]: usage.turn,
-                }
-                usageUpdate.sessionUsage = {
-                  ...get().sessionUsage,
-                  [conversationId]: usage.session,
-                }
-                usageUpdate.contextWindow = {
-                  ...get().contextWindow,
-                  [conversationId]: usage.context_window,
-                }
-                usageUpdate.contextTokens = {
-                  ...get().contextTokens,
-                  [conversationId]: usage.context_tokens ?? null,
-                }
-              }
-              set(usageUpdate)
-              // paused: the run task is over but the conversation is parked
-              // on a pending HITL question — keep pendingAsk / pendingConfirmMap
-              // alive so the card stays visible until the user answers or cancels.
-              if (paused) {
-                sawPausedDone = true
-              } else {
-                sawDone = true
-              }
-            }
-            break
-          } else if (event.type === 'injected_message') {
-            const d = event.data as InjectedMessageData
-            // Flush batched stream mutations so the commit reads fully-applied
-            // streamAgents, not a stale snapshot.
-            flush()
-            if (ownsStreamingConversation(get(), conversationId)) {
+            if (event.type === 'artifact') {
+              const artifactData = event.data as unknown as ArtifactEventData
+              applyArtifactSseEvent(conversationId, artifactData.artifact)
+            } else if (event.type === 'citation') {
+              const citationData = event.data as unknown as import('../types').CitationData
+              useCitationStore.getState().addCitation(conversationId, citationData)
+            } else if (event.type === 'model_retry') {
+              get().setRetryEvent(conversationId, event as RetryEvent)
               set((s) => ({
                 lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
               }))
-              get().__commitTurnAndInject(conversationId, d)
+              continue
+            } else if (event.type === 'model_failover') {
+              // Append to the per-conversation banner list. Keep advancing the
+              // applied-event cursor here so the next reattach doesn't replay it.
+              get().clearRetryEvent(conversationId)
+              const failoverEvent: FailoverEvent = {
+                ...(event as FailoverEvent),
+                run_id: (event as FailoverEvent).run_id ?? runId,
+              }
+              get().appendFailoverEvent(conversationId, failoverEvent)
+              set((s) => ({
+                lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+              }))
+              continue
+            } else if (event.type === 'error') {
+              if (get().cancellingConversationIds[conversationId]) {
+                continue
+              }
+              const errData = event.data as ErrorEventData
+              flush()
+              get().clearRetryEvent(conversationId)
+              let didTerminal = false
+              sawTerminalError = true
+              set((s) => {
+                const owns = ownsStreamingConversation(s, conversationId)
+                if (owns) didTerminal = true
+                return {
+                  messages: {
+                    ...s.messages,
+                    [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
+                  },
+                  errors: {
+                    ...s.errors,
+                    [conversationId]: { runId: s.currentRunId ?? '', data: errData },
+                  },
+                  pendingSteers: {
+                    ...s.pendingSteers,
+                    [conversationId]: failedPendingSteers(s, conversationId),
+                  },
+                  ...(owns
+                    ? {
+                        streamAgents: {},
+                        toolStartedMap: {},
+                        toolResultMap: {},
+                        isStreaming: false,
+                        pendingConfirmMap: {},
+                        pendingAsk: null,
+                        streamingConversationId: null,
+                        currentRunId: null,
+                        pendingRunClientMessageId: null,
+                        statusPhase: null,
+                        streamConnection: null,
+                        runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
+                        lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+                      }
+                    : {}),
+                }
+              })
+              if (didTerminal) maybeMarkUnreadOnTerminal(get, conversationId)
+              break
+            } else if (event.type === 'done') {
+              get().clearRetryEvent(conversationId)
+              const usage = (event.data as Record<string, unknown>).usage as
+                import('../types').UsageSummary | undefined
+              const paused = (event.data as Record<string, unknown>).paused === true
+              // Only advance the shared event cursor / usage while we still own
+              // the stream — a superseded reattach must not clobber the live send.
+              if (ownsStreamingConversation(get(), conversationId)) {
+                const usageUpdate: Partial<MessageStore> = {
+                  lastAppliedEventId: nextEventId(get().lastAppliedEventId, event.event_id),
+                }
+                if (usage) {
+                  usageUpdate.turnUsage = {
+                    ...get().turnUsage,
+                    [conversationId]: usage.turn,
+                  }
+                  usageUpdate.sessionUsage = {
+                    ...get().sessionUsage,
+                    [conversationId]: usage.session,
+                  }
+                  usageUpdate.contextWindow = {
+                    ...get().contextWindow,
+                    [conversationId]: usage.context_window,
+                  }
+                  usageUpdate.contextTokens = {
+                    ...get().contextTokens,
+                    [conversationId]: usage.context_tokens ?? null,
+                  }
+                }
+                set(usageUpdate)
+                // paused: the run task is over but the conversation is parked
+                // on a pending HITL question — keep pendingAsk / pendingConfirmMap
+                // alive so the card stays visible until the user answers or cancels.
+                if (paused) {
+                  sawPausedDone = true
+                } else {
+                  sawDone = true
+                }
+              }
+              break
+            } else if (event.type === 'injected_message') {
+              const d = event.data as InjectedMessageData
+              // Flush batched stream mutations so the commit reads fully-applied
+              // streamAgents, not a stale snapshot.
+              flush()
+              if (ownsStreamingConversation(get(), conversationId)) {
+                set((s) => ({
+                  lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+                }))
+                get().__commitTurnAndInject(conversationId, d)
+              }
+              continue
             }
-            continue
-          }
 
-          if (!ownsStreamingConversation(get(), conversationId)) {
+            if (!ownsStreamingConversation(get(), conversationId)) {
+              shouldFinalize = false
+              return
+            }
+            batchedSet((s) => applyStreamEvent(s, event))
+            if (++processed % YIELD_EVERY === 0) {
+              await yieldToEventLoop()
+            }
+          }
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') {
             shouldFinalize = false
             return
           }
-          batchedSet((s) => applyStreamEvent(s, event))
-          if (++processed % YIELD_EVERY === 0) {
-            await yieldToEventLoop()
-          }
+          streamError = err
         }
-      } catch (err) {
-        if ((err as Error).name === 'AbortError') {
-          shouldFinalize = false
-          return
-        }
-        streamError = err
       }
       if (sawDone || sawPausedDone || sawTerminalError) break
       if (get().currentRunId !== runId || get().cancellingConversationIds[conversationId]) {
@@ -1971,12 +2014,38 @@ async function consumeRunStream(
       }
       cursor = get().lastAppliedEventId ?? undefined
       if (streamError instanceof ApiError && streamError.status === 404) {
-        shouldFinalize = false
-        set({ streamConnection: null })
-        queueMicrotask(() => {
-          void get().loadMessages(client, conversationId, { force: true })
-        })
-        return
+        if (
+          signal?.aborted ||
+          get().currentRunId !== runId ||
+          !ownsStreamingConversation(get(), conversationId)
+        ) {
+          shouldFinalize = false
+          return
+        }
+        try {
+          await get().loadMessages(client, conversationId, {
+            force: true,
+            preserveOtherConversationStream: true,
+            throwOnError: true,
+            expectedRunId: runId,
+          })
+          shouldFinalize = false
+          return
+        } catch (reconcileErr) {
+          if ((reconcileErr as Error).name === 'AbortError') {
+            shouldFinalize = false
+            return
+          }
+          if (
+            reconcileErr instanceof ApiError &&
+            (reconcileErr.status === 404 || reconcileErr.status === 403)
+          ) {
+            shouldFinalize = false
+            resetOwnedIdle()
+            return
+          }
+          streamError = reconcileErr
+        }
       }
       attempt += 1
       if (streamError !== null || attempt > 1) {
@@ -1997,13 +2066,25 @@ async function consumeRunStream(
         return
       }
       try {
-        const { bootstrap } = await getConversationBootstrap(client, conversationId)
-        if (bootstrap && bootstrap.active_run?.run_id !== runId) {
+        const response = await getConversationBootstrap(client, conversationId)
+        const { bootstrap } = response
+        if (
+          signal?.aborted ||
+          get().currentRunId !== runId ||
+          !ownsStreamingConversation(get(), conversationId)
+        ) {
           shouldFinalize = false
-          set({ streamConnection: null })
-          queueMicrotask(() => {
-            void get().loadMessages(client, conversationId, { force: true })
+          return
+        }
+        if (bootstrap && bootstrap.active_run?.run_id !== runId) {
+          await get().loadMessages(client, conversationId, {
+            force: true,
+            preserveOtherConversationStream: true,
+            throwOnError: true,
+            expectedRunId: runId,
+            prefetchedBootstrap: response,
           })
+          shouldFinalize = false
           return
         }
       } catch (err) {
@@ -2011,6 +2092,14 @@ async function consumeRunStream(
           shouldFinalize = false
           return
         }
+        if (err instanceof ApiError && (err.status === 404 || err.status === 403)) {
+          shouldFinalize = false
+          resetOwnedIdle()
+          return
+        }
+        set({
+          streamConnection: browserIsOnline() ? 'reconnecting' : 'disconnected',
+        })
       }
     }
   } finally {
@@ -2022,12 +2111,13 @@ async function consumeRunStream(
         await finalizeCompletedStream(get, set, conversationId)
       }
     }
-    if (
-      sawDone ||
-      sawPausedDone ||
-      sawTerminalError ||
-      (!get().isStreaming && get().pendingRunClientMessageId === null)
-    ) {
+    const after = get()
+    const stillOwnsOrIdle =
+      (after.currentRunId === null || after.currentRunId === runId) &&
+      (after.streamingConversationId === null ||
+        after.streamingConversationId === conversationId) &&
+      after.pendingRunClientMessageId === null
+    if (stillOwnsOrIdle && (sawDone || sawPausedDone || sawTerminalError || !after.isStreaming)) {
       set({ streamConnection: null })
     }
   }
@@ -2399,12 +2489,27 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       throwOnError?: boolean
       preserveLoadedHistory?: boolean
       preserveOtherConversationStream?: boolean
+      expectedRunId?: string
+      prefetchedBootstrap?: Awaited<ReturnType<typeof getConversationBootstrap>>
     },
   ) {
     const force = options?.force === true
     const conditional = options?.conditional === true && !force
     const state = get()
     if (!force && state.isStreaming && state.streamingConversationId === conversationId) return
+    const shouldSkipForConcurrentStream = (s: MessageStore): boolean => {
+      if (
+        options?.preserveOtherConversationStream &&
+        s.streamingConversationId !== null &&
+        s.streamingConversationId !== conversationId
+      ) {
+        return true
+      }
+      if (options?.expectedRunId !== undefined && s.currentRunId !== options.expectedRunId) {
+        return true
+      }
+      return false
+    }
     const requestKey = JSON.stringify([
       useAuthStore.getState().user?.id,
       client.baseUrl,
@@ -2432,17 +2537,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           conditional && get().messages[conversationId] !== undefined
             ? (get().bootstrapEtags[requestKey] ?? undefined)
             : undefined
-        const response = await getConversationBootstrap(client, conversationId, etag)
+        const response =
+          options?.prefetchedBootstrap ??
+          (await getConversationBootstrap(client, conversationId, etag))
         const { bootstrap } = response
         if (bootstrap === null) return
         const current = get()
-        if (
-          options?.preserveOtherConversationStream &&
-          current.streamingConversationId !== null &&
-          current.streamingConversationId !== conversationId
-        ) {
-          return
-        }
+        if (shouldSkipForConcurrentStream(current)) return
         if (!force && current.isStreaming && current.streamingConversationId === conversationId)
           return
 
@@ -2464,13 +2565,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             messages,
           )
           const refreshed = get()
-          if (
-            options?.preserveOtherConversationStream &&
-            refreshed.streamingConversationId !== null &&
-            refreshed.streamingConversationId !== conversationId
-          ) {
-            return
-          }
+          if (shouldSkipForConcurrentStream(refreshed)) return
           if (
             !force &&
             refreshed.isStreaming &&
@@ -2525,6 +2620,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         // will land the ask_user_resolved any moment now anyway.
         const pending = bootstrap.pending_hitl ?? null
         const currentState = get()
+        const nextCancelling = bootstrap.run_control?.cleanup_pending
+          ? true
+          : !bootstrap.active_run && !bootstrap.pending_hitl
+            ? false
+            : Boolean(currentState.cancellingConversationIds[conversationId])
         // If the user just answered this exact question, the backend's
         // `save_pending_request(None)` may not have committed yet when
         // bootstrap fetched — DB pending_hitl is stale. Skip the re-seed
@@ -2536,10 +2636,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           pending !== null &&
           pending.kind === 'sandbox_confirm' &&
           pending.question_id === currentState.lastResolvedSandboxQuestionId
-        const skipSeed = alreadyAnsweredThisQuestion || alreadyResolvedThisConfirm
+        const skipSeed =
+          !nextCancelling && (alreadyAnsweredThisQuestion || alreadyResolvedThisConfirm)
         let seedPendingAsk: PendingAsk | null = null
         let seedPendingConfirmMap: Record<string, PendingConfirm> = {}
-        if (pending && pending.kind === 'ask_user' && !skipSeed) {
+        if (!nextCancelling && pending && pending.kind === 'ask_user' && !skipSeed) {
           const requestedAt = Date.parse(pending.requested_at)
           seedPendingAsk = {
             question_id: pending.question_id,
@@ -2548,7 +2649,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
             run_id: pending.run_id,
           }
-        } else if (pending && pending.kind === 'sandbox_confirm' && !skipSeed) {
+        } else if (!nextCancelling && pending && pending.kind === 'sandbox_confirm' && !skipSeed) {
           const requestedAt = Date.parse(pending.requested_at)
           seedPendingConfirmMap = {
             [pending.tool_call_id]: {
@@ -2574,11 +2675,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         // TTL has its pendingAsk seeded but the card stays hidden.
         const pendingHitlRunId = bootstrap.pending_hitl?.run_id ?? null
         const hasPendingHitl = pendingHitlRunId !== null
-        const nextCancelling = bootstrap.run_control?.cleanup_pending
-          ? true
-          : !bootstrap.active_run && !bootstrap.pending_hitl
-            ? false
-            : Boolean(get().cancellingConversationIds[conversationId])
         const streamRunId = nextCancelling
           ? null
           : (bootstrap.active_run?.run_id ?? pendingHitlRunId)
@@ -2589,7 +2685,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         // and `pendingConfirmMap` are the truth signals here. We keep
         // `streamingConversationId` set so MessageList's `pendingAsk &&
         // streamingConversationId === conversationId` gate still fires.
-        const isResumingHitl = hasPendingHitl && bootstrap.active_run?.status === 'running'
+        const isResumingHitl =
+          (hasPendingHitl && bootstrap.active_run?.status === 'running') ||
+          (skipSeed && Boolean(bootstrap.active_run))
         const isPaused =
           !isResumingHitl && (bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl)
         const isStreamingActive = streamingActive && !isPaused
@@ -2665,7 +2763,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             createdAt: row.created_at,
           }))
 
+        let didApplyBootstrapState = false
+        let preservedPendingAdmission = false
         set((s) => {
+          if (shouldSkipForConcurrentStream(s)) return {}
+          didApplyBootstrapState = true
+          const awaitingPendingCancelRunId =
+            nextCancelling &&
+            s.streamingConversationId === conversationId &&
+            s.pendingRunClientMessageId !== null &&
+            s.currentRunId === null
+          preservedPendingAdmission = awaitingPendingCancelRunId
           const serverSteerIds = new Set(serverPendingSteers.map((pending) => pending.steerId))
           const unmatchedSubmitting = (s.pendingSteers[conversationId] ?? []).filter(
             (pending) =>
@@ -2798,11 +2906,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             cancellingConversationIds: nextCancelling
               ? { ...s.cancellingConversationIds, [conversationId]: true }
               : withoutConversationFlag(s.cancellingConversationIds, conversationId),
-            isStreaming: isStreamingActive,
-            streamingConversationId: streamingActive ? conversationId : null,
-            currentRunId: streamRunId,
+            isStreaming: awaitingPendingCancelRunId ? s.isStreaming : isStreamingActive,
+            streamingConversationId: awaitingPendingCancelRunId
+              ? s.streamingConversationId
+              : streamingActive
+                ? conversationId
+                : null,
+            currentRunId: awaitingPendingCancelRunId
+              ? (bootstrap.active_run?.run_id ?? s.currentRunId)
+              : streamRunId,
             streamConnection: isStreamingActive ? 'connected' : null,
-            pendingRunClientMessageId: null,
+            pendingRunClientMessageId: awaitingPendingCancelRunId
+              ? s.pendingRunClientMessageId
+              : null,
             lastAppliedEventId: streamCursor,
             statusPhase: null,
             turnUsage: newTurnUsage,
@@ -2811,6 +2927,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             contextTokens: newContextTokens,
           }
         })
+
+        if (!didApplyBootstrapState) return
 
         if (tailRunId !== null) {
           activeStreamController?.abort()
@@ -2833,7 +2951,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               }
             })
           })
-        } else {
+        } else if (!preservedPendingAdmission) {
           activeStreamController?.abort()
           activeStreamController = null
         }
@@ -3302,9 +3420,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         ownsStreamingConversation(get(), conversationId) &&
         !get().cancellingConversationIds[conversationId]
       ) {
-        set({
-          streamConnection: browserIsOnline() ? 'reconnecting' : 'disconnected',
-        })
+        const isNotFound = err instanceof ApiError && err.status === 404
+        if (!isNotFound) {
+          set({
+            streamConnection: browserIsOnline() ? 'reconnecting' : 'disconnected',
+          })
+        }
         await consumeRunStream(
           client,
           conversationId,
@@ -3313,6 +3434,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           set,
           get,
           controller.signal,
+          isNotFound ? err : undefined,
         )
         return
       }
@@ -3638,15 +3760,22 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       throw err
     }
 
-    if (!ownsStreamingConversation(get(), conversationId)) {
+    const replacedByOtherConversation =
+      get().streamingConversationId !== null && get().streamingConversationId !== conversationId
+    if (replacedByOtherConversation) {
       const isIdle = await waitForConversationIdle(client, conversationId, get)
       if (!isIdle) return
+      if (!(await reconcileAfterStop(client, conversationId, get))) return
       set((s) => ({
         cancellingConversationIds: withoutConversationFlag(
           s.cancellingConversationIds,
           conversationId,
         ),
         runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
+        pendingSteers: {
+          ...s.pendingSteers,
+          [conversationId]: failedPendingSteers(s, conversationId),
+        },
       }))
       return
     }
@@ -3658,19 +3787,33 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const isIdle = await waitForConversationIdle(client, conversationId, get)
       if (!isIdle) return
       if (!(await reconcileAfterStop(client, conversationId, get))) return
-      set((s) => ({
-        cancellingConversationIds: withoutConversationFlag(
-          s.cancellingConversationIds,
-          conversationId,
-        ),
-        pendingSteers: {
-          ...s.pendingSteers,
-          [conversationId]: (s.pendingSteers[conversationId] ?? []).map((pending) => ({
-            ...pending,
-            state: 'failed',
-          })),
-        },
-      }))
+      set((s) => {
+        const otherOwns =
+          s.streamingConversationId !== null && s.streamingConversationId !== conversationId
+        return {
+          cancellingConversationIds: withoutConversationFlag(
+            s.cancellingConversationIds,
+            conversationId,
+          ),
+          runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
+          ...(otherOwns
+            ? {}
+            : {
+                pendingConfirmMap: {},
+                pendingAsk: null,
+                streamingConversationId: null,
+                currentRunId: null,
+                streamConnection: null,
+              }),
+          pendingSteers: {
+            ...s.pendingSteers,
+            [conversationId]: (s.pendingSteers[conversationId] ?? []).map((pending) => ({
+              ...pending,
+              state: 'failed',
+            })),
+          },
+        }
+      })
       return
     }
 
@@ -3696,7 +3839,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       await finalizeCompletedStream(get, set, conversationId, 'aborted')
     } else {
       set((s) => {
-        if (!ownsStreamingConversation(s, conversationId)) {
+        const otherOwns =
+          s.streamingConversationId !== null && s.streamingConversationId !== conversationId
+        if (otherOwns) {
           return {
             pendingSteers: {
               ...s.pendingSteers,
@@ -3731,6 +3876,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         s.cancellingConversationIds,
         conversationId,
       ),
+      runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
       pendingSteers: {
         ...s.pendingSteers,
         [conversationId]: (s.pendingSteers[conversationId] ?? []).map((pending) => ({
