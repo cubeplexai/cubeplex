@@ -13,8 +13,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+from sqlmodel import col
 
 from cubeplex.models.conversation import Conversation
 from cubeplex.models.im_connector import (
@@ -335,12 +337,28 @@ async def claim_pending_queue_item(
         if receipt is not None:
             receipt.status = "failed"
             session.add(receipt)
+    earlier = aliased(IMRunQueueItem)
+    earlier_active_exists = exists(
+        select(col(earlier.id)).where(
+            col(earlier.conversation_id) == IMRunQueueItem.conversation_id,
+            col(earlier.status).in_(("pending", "started")),
+            col(earlier.attempts) < max_attempts,
+            or_(
+                col(earlier.created_at) < IMRunQueueItem.created_at,
+                and_(
+                    col(earlier.created_at) == IMRunQueueItem.created_at,
+                    col(earlier.id) < IMRunQueueItem.id,
+                ),
+            ),
+        )
+    )
     stmt = select(IMRunQueueItem).join(
         IMConnectorAccount,
         IMConnectorAccount.id == IMRunQueueItem.account_id,  # type: ignore[arg-type]
     )
     stmt = stmt.where(
         IMRunQueueItem.attempts < max_attempts,  # type: ignore[arg-type]
+        ~earlier_active_exists,
         or_(
             and_(
                 IMRunQueueItem.status == "pending",  # type: ignore[arg-type]

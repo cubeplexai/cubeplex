@@ -19,7 +19,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from cubeloop.providers.base import ReasoningControl
 from loguru import logger
@@ -81,22 +81,29 @@ ConnectionLeaseValidator = Callable[[str], Awaitable[bool]]
 LoadExecutionSnapshot = Callable[[AsyncSession, str], Awaitable[LLMSnapshot]]
 
 
+class _HitlCleanupPendingError(RuntimeError):
+    """Raised when HITL cancellation was accepted but async teardown is still in flight."""
+
+
 async def _cancel_pending_hitl_for_im_message(
     *,
     session_maker: async_sessionmaker[Any],
     run_manager: _RunStarter,
     captured: dict[str, Any],
-) -> bool:
+) -> Literal["cleared", "pending", "failed"]:
     """Explicitly cancel a pending HITL turn before starting a new human IM message."""
-    if not hasattr(run_manager, "cancel_paused_run"):
-        return False
+    if not (hasattr(run_manager, "cancel_paused_run") and hasattr(run_manager, "notify_run_stop")):
+        return "failed"
     from cubeplex.agents.checkpointer import shared_checkpointer
     from cubeplex.services.execution_signals import signal_stopped_runs
 
     async with shared_checkpointer() as cp:
-        pending_run_id = await cp.load_pending_run_id(captured["conversation_id"])
+        pending_tuple = await cp.load_pending(captured["conversation_id"])
+    if pending_tuple is None:
+        return "cleared"
+    _, pending_run_id = pending_tuple
     if pending_run_id is None:
-        return True
+        return "failed"
 
     async with session_maker() as session:
         exec_service = ConversationExecutionService(
@@ -114,17 +121,26 @@ async def _cancel_pending_hitl_for_im_message(
             await session.commit()
         except LookupError:
             await session.rollback()
-            stopped = None
+            return "failed"
 
     await signal_stopped_runs(
         run_manager,  # type: ignore[arg-type]
         conversation_id=captured["conversation_id"],
-        run_ids=(stopped.run_id if stopped is not None else pending_run_id,),
+        run_ids=(stopped.run_id,),
         user_id=captured["acting_user_id"],
         org_id=captured["org_id"],
         workspace_id=captured["workspace_id"],
     )
-    return True
+    tasks = getattr(run_manager, "_tasks", None)
+    cleanup_task = tasks.get(stopped.run_id) if isinstance(tasks, dict) else None
+    if cleanup_task is not None:
+        with suppress(TimeoutError, Exception):
+            async with asyncio.timeout(3):
+                await asyncio.shield(cleanup_task)
+
+    async with shared_checkpointer() as cp:
+        remaining = await cp.load_pending(captured["conversation_id"])
+    return "cleared" if remaining is None else "pending"
 
 
 async def process_one_queue_item(
@@ -140,6 +156,33 @@ async def process_one_queue_item(
     active_run_defer_seconds: float = 2.0,
 ) -> bool:
     """Claim and process at most one queue row. Returns True iff a row was processed."""
+    outcome = await _process_one_queue_item_outcome(
+        session_maker=session_maker,
+        run_manager=run_manager,
+        on_run_started=on_run_started,
+        lease_seconds=lease_seconds,
+        load_execution_snapshot=load_execution_snapshot,
+        resolve_inbound_attachments=resolve_inbound_attachments,
+        deliverable_connection_ids=deliverable_connection_ids,
+        validate_connection_lease=validate_connection_lease,
+        active_run_defer_seconds=active_run_defer_seconds,
+    )
+    return outcome == "processed"
+
+
+async def _process_one_queue_item_outcome(
+    *,
+    session_maker: async_sessionmaker[Any],
+    run_manager: _RunStarter,
+    on_run_started: RunStartedCallback | None,
+    lease_seconds: int,
+    load_execution_snapshot: LoadExecutionSnapshot,
+    resolve_inbound_attachments: ResolveInboundAttachments | None = None,
+    deliverable_connection_ids: DeliverableConnectionIds | None = None,
+    validate_connection_lease: ConnectionLeaseValidator | None = None,
+    active_run_defer_seconds: float = 2.0,
+) -> Literal["processed", "deferred", "idle"]:
+    """Claim and process at most one queue row, returning its scheduling outcome."""
     async with session_maker() as session:
         item = await claim_pending_queue_item(
             session,
@@ -149,7 +192,7 @@ async def process_one_queue_item(
             ),
         )
         if item is None:
-            return False
+            return "idle"
         account = (
             await session.execute(
                 select(IMConnectorAccount).where(
@@ -171,7 +214,7 @@ async def process_one_queue_item(
             await mark_queue_item_completed(session, item_id=item.id)
             await mark_receipt_failed(session, receipt_id=item.receipt_id)
             await session.commit()
-            return True
+            return "processed"
         # Look up the sender → cubeplex user override. ``im_identity_links``
         # is populated by the inbound gate when sender resolves to a
         # workspace member; if missing we fall back to ``acting_user_id``.
@@ -236,7 +279,7 @@ async def process_one_queue_item(
                 await mark_queue_item_completed(session, item_id=item.id)
                 await mark_receipt_failed(session, receipt_id=item.receipt_id)
                 await session.commit()
-                return True
+                return "processed"
 
         topic_creator_user_id: str | None = (
             topic_row.creator_user_id if topic_row is not None else None
@@ -316,8 +359,9 @@ async def process_one_queue_item(
             async with session_maker() as session:
                 await rewind_queue_item_no_attempt_charge(session, item_id=captured_item.id)
                 await session.commit()
-            return False
+            return "idle"
 
+    hitl_cancel_unrecoverable = False
     try:
         # Serialize the final handoff with connector disable/delete. The account
         # lock is held through admission binding, so deletion can either cancel
@@ -340,11 +384,11 @@ async def process_one_queue_item(
                     captured_item.id,
                     captured_item.account_id,
                 )
-                return False
+                return "idle"
 
             candidate = await session.get(IMRunQueueItem, captured_item.id)
             if candidate is None:
-                return False
+                return "idle"
             if not live_account.enabled:
                 logger.info(
                     "[IM worker] dropping queue item {} — account {} was disabled before start",
@@ -354,9 +398,9 @@ async def process_one_queue_item(
                 await mark_queue_item_completed(session, item_id=captured_item.id)
                 await mark_receipt_failed(session, receipt_id=captured["receipt_id"])
                 await session.commit()
-                return True
+                return "processed"
             if candidate.status != "started":
-                return False
+                return "idle"
             if candidate.execution_admission_id is not None:
                 admission = await session.get(
                     ConversationExecutionAdmission,
@@ -495,7 +539,7 @@ async def process_one_queue_item(
                 populate_existing=True,
             )
             if live_item is None or live_item.status != "started":
-                return False
+                return "idle"
             await session.commit()
 
         if bg_tailer_run_id is not None:
@@ -517,7 +561,7 @@ async def process_one_queue_item(
                     await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
                     await mark_queue_item_completed(session, item_id=captured_item.id)
                     await session.commit()
-                return True
+                return "processed"
             run_id = bg_tailer_run_id
         else:
             if admitted is not None:
@@ -536,7 +580,7 @@ async def process_one_queue_item(
                         await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
                         await mark_queue_item_completed(session, item_id=captured_item.id)
                         await session.commit()
-                    return True
+                    return "processed"
 
                 if execution_snapshot is None:
                     async with session_maker() as session:
@@ -588,26 +632,34 @@ async def process_one_queue_item(
                 if (
                     "pending HITL request" in str(exc)
                     and captured_item.inbound_message_id is not None
-                    and await _cancel_pending_hitl_for_im_message(
+                ):
+                    cancel_status = await _cancel_pending_hitl_for_im_message(
                         session_maker=session_maker,
                         run_manager=run_manager,
                         captured=captured,
                     )
-                ):
-                    run_id = await _start_run()
+                    if cancel_status == "cleared":
+                        run_id = await _start_run()
+                    elif cancel_status == "pending":
+                        raise _HitlCleanupPendingError(str(exc)) from exc
+                    else:
+                        hitl_cancel_unrecoverable = True
+                        raise
                 else:
                     raise
     except Exception as exc:
         # ``RunManager.start_run`` raises a plain RuntimeError when the
-        # conversation already has an active run. That's a normal UX
-        # scenario (user sends a follow-up while the first reply is
-        # still rendering, ~5–60s typical), NOT a failed inbound —
-        # rewinding to pending without consuming an attempt lets the
-        # next poll re-claim once the first run finishes. Deferring
-        # ``available_at`` prevents a busy conversation from head-of-line
-        # blocking other conversations/topics in the queue.
-        if isinstance(exc, RuntimeError) and (
-            "already has an active run" in str(exc) or "pending HITL request" in str(exc)
+        # conversation already has an active run (or HITL cleanup is still
+        # settling). Rewinding without consuming an attempt and deferring
+        # ``available_at`` lets other conversations/topics drain without
+        # head-of-line blocking. Unrecoverable HITL rejections fall through to
+        # bounded ``mark_queue_item_for_retry_or_fail`` instead of spinning.
+        if isinstance(exc, _HitlCleanupPendingError) or (
+            isinstance(exc, RuntimeError)
+            and (
+                "already has an active run" in str(exc)
+                or ("pending HITL request" in str(exc) and not hitl_cancel_unrecoverable)
+            )
         ):
             logger.info(
                 "[IM worker] queue item {} waiting on active run (no attempt charge)",
@@ -620,7 +672,7 @@ async def process_one_queue_item(
                     defer_seconds=active_run_defer_seconds,
                 )
                 await session.commit()
-            return False
+            return "deferred" if active_run_defer_seconds > 0 else "idle"
         logger.opt(exception=True).warning(
             "[IM worker] start_run failed for queue item {}; leaving for re-claim",
             captured_item.id,
@@ -636,11 +688,11 @@ async def process_one_queue_item(
             if parked:
                 await mark_receipt_failed(session, receipt_id=captured["receipt_id"])
             await session.commit()
-        # Return False so the worker loop's idle-sleep branch fires —
+        # Return "idle" so the worker loop's idle-sleep branch fires —
         # otherwise the loop would immediately re-claim the rewound row
         # within milliseconds, hammering a downstream service that just
         # failed (thundering herd against a transient outage).
-        return False
+        return "idle"
 
     # Mark the queue row + receipt terminal BEFORE invoking the
     # ``on_run_started`` hook. ``start_run`` has already executed (LLM
@@ -670,7 +722,7 @@ async def process_one_queue_item(
                 run_id,
                 captured_item.id,
             )
-    return True
+    return "processed"
 
 
 class IMRunQueueWorker:
@@ -702,9 +754,10 @@ class IMRunQueueWorker:
         self._stopping = False
 
     async def _loop(self) -> None:
+        deferred_streak = 0
         while not self._stopping:
             try:
-                ran = await process_one_queue_item(
+                outcome = await _process_one_queue_item_outcome(
                     session_maker=self._session_maker,
                     run_manager=self._run_manager,
                     on_run_started=self._on_run_started,
@@ -716,14 +769,15 @@ class IMRunQueueWorker:
                 )
             except Exception:
                 logger.opt(exception=True).warning("[IM worker] poll error")
-                ran = False
-            # ``ran=False`` covers both "queue was empty" and "start_run
-            # raised" (process_one_queue_item returns False in both cases —
-            # the latter intentionally so the failure path sleeps the
-            # poll_interval instead of immediately re-claiming the same
-            # row, which would hammer a downstream service that just
-            # failed (thundering herd, defeating max_attempts).
-            if not ran:
+                outcome = "idle"
+            if outcome == "deferred":
+                deferred_streak += 1
+                if deferred_streak < 10:
+                    continue
+                deferred_streak = 0
+            else:
+                deferred_streak = 0
+            if outcome != "processed":
                 await asyncio.sleep(self._poll_interval)
 
     def start(self) -> None:
