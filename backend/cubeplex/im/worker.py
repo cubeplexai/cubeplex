@@ -92,10 +92,10 @@ async def _cancel_pending_hitl_for_im_message(
     captured: dict[str, Any],
 ) -> Literal["cleared", "pending", "failed"]:
     """Explicitly cancel a pending HITL turn before starting a new human IM message."""
-    if not (hasattr(run_manager, "cancel_paused_run") and hasattr(run_manager, "notify_run_stop")):
+    cancel_paused_run = getattr(run_manager, "cancel_paused_run", None)
+    if not callable(cancel_paused_run):
         return "failed"
     from cubeplex.agents.checkpointer import shared_checkpointer
-    from cubeplex.services.execution_signals import signal_stopped_runs
 
     async with shared_checkpointer() as cp:
         pending_tuple = await cp.load_pending(captured["conversation_id"])
@@ -123,24 +123,41 @@ async def _cancel_pending_hitl_for_im_message(
             await session.rollback()
             return "failed"
 
-    await signal_stopped_runs(
-        run_manager,  # type: ignore[arg-type]
-        conversation_id=captured["conversation_id"],
-        run_ids=(stopped.run_id,),
+    ctx = RunContext(
         user_id=captured["acting_user_id"],
         org_id=captured["org_id"],
         workspace_id=captured["workspace_id"],
+        conversation_id=captured["conversation_id"],
     )
-    tasks = getattr(run_manager, "_tasks", None)
-    cleanup_task = tasks.get(stopped.run_id) if isinstance(tasks, dict) else None
-    if cleanup_task is not None:
-        with suppress(TimeoutError, Exception):
-            async with asyncio.timeout(3):
-                await asyncio.shield(cleanup_task)
+    try:
+        await cancel_paused_run(
+            conversation_id=captured["conversation_id"],
+            run_id=stopped.run_id,
+            ctx=ctx,
+        )
+    except Exception:
+        recover_stopped = getattr(run_manager, "recover_stopped_run", None)
+        if not callable(recover_stopped):
+            return "failed"
+        try:
+            recovered = await recover_stopped(stopped.admission.id)
+        except Exception:
+            return "failed"
+        if not recovered:
+            return "failed"
+
+    await_teardown = getattr(run_manager, "await_run_teardown", None)
+    teardown_done = (
+        bool(await await_teardown(stopped.run_id, timeout=3.0))
+        if callable(await_teardown)
+        else True
+    )
 
     async with shared_checkpointer() as cp:
         remaining = await cp.load_pending(captured["conversation_id"])
-    return "cleared" if remaining is None else "pending"
+    if remaining is None:
+        return "cleared"
+    return "failed" if teardown_done else "pending"
 
 
 async def process_one_queue_item(

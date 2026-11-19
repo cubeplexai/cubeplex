@@ -2086,6 +2086,19 @@ class RunManager:
         task.add_done_callback(lambda completed: self._on_task_done(run_id, completed))
         return run_id
 
+    async def await_run_teardown(self, run_id: str, *, timeout: float = 3.0) -> bool:
+        """Await an in-flight local task for ``run_id`` up to ``timeout`` seconds."""
+        task = self._tasks.get(run_id)
+        if task is None:
+            return True
+        if not task.done():
+            try:
+                async with asyncio.timeout(timeout):
+                    await asyncio.shield(task)
+            except Exception:
+                pass
+        return task.done()
+
     async def recover_stopped_run(self, admission_id: str) -> bool:
         """Wake no-model cleanup of a stopped pause or checkpoint-completed run."""
         from cubeloop.checkpointer.postgres.models import CubeloopRun

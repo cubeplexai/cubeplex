@@ -395,7 +395,7 @@ async def claim_pending_queue_item(
             )
         )
     stmt = (
-        stmt.order_by(IMRunQueueItem.created_at)  # type: ignore[arg-type]
+        stmt.order_by(IMRunQueueItem.created_at, IMRunQueueItem.id)  # type: ignore[arg-type]
         .limit(1)
         .with_for_update(skip_locked=True, of=IMRunQueueItem)
     )
