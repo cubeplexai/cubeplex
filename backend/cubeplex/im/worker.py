@@ -123,12 +123,45 @@ async def _cancel_pending_hitl_for_im_message(
             await session.rollback()
             return "failed"
 
+    async def _await_teardown() -> str:
+        await_teardown = getattr(run_manager, "await_run_teardown", None)
+        if not callable(await_teardown):
+            return "not_local"
+        res = await await_teardown(stopped.run_id, timeout=3.0)
+        if isinstance(res, str):
+            return res
+        return "completed" if res else "timed_out"
+
+    async def _is_remote_run_active() -> bool:
+        rm_redis = getattr(run_manager, "_redis", None)
+        rm_prefix = getattr(run_manager, "_key_prefix", None)
+        if rm_redis is None or not isinstance(rm_prefix, str):
+            return False
+        from cubeplex.streams.run_events import get_active_run
+
+        active = await get_active_run(
+            rm_redis,
+            prefix=rm_prefix,
+            conversation_id=captured["conversation_id"],
+        )
+        return active is not None and active.run_id == stopped.run_id
+
+    async def _try_recover() -> bool:
+        recover_stopped = getattr(run_manager, "recover_stopped_run", None)
+        if not callable(recover_stopped):
+            return False
+        try:
+            return bool(await recover_stopped(stopped.admission.id))
+        except Exception:
+            return False
+
     ctx = RunContext(
         user_id=captured["acting_user_id"],
         org_id=captured["org_id"],
         workspace_id=captured["workspace_id"],
         conversation_id=captured["conversation_id"],
     )
+    recovered_via_fallback = False
     try:
         await cancel_paused_run(
             conversation_id=captured["conversation_id"],
@@ -136,28 +169,31 @@ async def _cancel_pending_hitl_for_im_message(
             ctx=ctx,
         )
     except Exception:
-        recover_stopped = getattr(run_manager, "recover_stopped_run", None)
-        if not callable(recover_stopped):
-            return "failed"
-        try:
-            recovered = await recover_stopped(stopped.admission.id)
-        except Exception:
-            return "failed"
-        if not recovered:
+        recovered_via_fallback = await _try_recover()
+        if not recovered_via_fallback:
+            async with shared_checkpointer() as cp:
+                if await cp.load_pending(captured["conversation_id"]) is None:
+                    return "cleared"
             return "failed"
 
-    await_teardown = getattr(run_manager, "await_run_teardown", None)
-    teardown_done = (
-        bool(await await_teardown(stopped.run_id, timeout=3.0))
-        if callable(await_teardown)
-        else True
-    )
-
+    teardown_state = await _await_teardown()
     async with shared_checkpointer() as cp:
         remaining = await cp.load_pending(captured["conversation_id"])
     if remaining is None:
         return "cleared"
-    return "failed" if teardown_done else "pending"
+
+    if teardown_state == "completed" and not recovered_via_fallback:
+        if await _try_recover():
+            teardown_state = await _await_teardown()
+            async with shared_checkpointer() as cp:
+                if await cp.load_pending(captured["conversation_id"]) is None:
+                    return "cleared"
+
+    if teardown_state == "timed_out":
+        return "pending"
+    if teardown_state == "not_local" and await _is_remote_run_active():
+        return "pending"
+    return "failed"
 
 
 async def process_one_queue_item(
@@ -701,10 +737,16 @@ async def _process_one_queue_item_outcome(
         # stays 'pending' forever and operators can't tell in-flight from
         # parked rows.
         async with session_maker() as session:
-            parked = await mark_queue_item_for_retry_or_fail(session, item_id=captured_item.id)
+            parked = await mark_queue_item_for_retry_or_fail(
+                session,
+                item_id=captured_item.id,
+                defer_seconds=active_run_defer_seconds if hitl_cancel_unrecoverable else 0.0,
+            )
             if parked:
                 await mark_receipt_failed(session, receipt_id=captured["receipt_id"])
             await session.commit()
+        if hitl_cancel_unrecoverable and not parked and active_run_defer_seconds > 0:
+            return "deferred"
         # Return "idle" so the worker loop's idle-sleep branch fires —
         # otherwise the loop would immediately re-claim the rewound row
         # within milliseconds, hammering a downstream service that just

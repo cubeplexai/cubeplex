@@ -1772,9 +1772,10 @@ async def test_real_run_manager_async_cancel_paused_run_teardown_before_new_im_t
         ).scalar_one()
         rcpt.status = "completed"
         snap = await im_test_execution_snapshot(session, account.org_id)
-        admitted_paused = await ConversationExecutionService(
+        exec_svc = ConversationExecutionService(
             session, org_id=account.org_id, workspace_id=account.workspace_id
-        ).admit_user_message(
+        )
+        admitted_paused = await exec_svc.admit_user_message(
             conversation_id=conv_id,
             actor_user_id=_USER_ID,
             namespace="im",
@@ -1785,9 +1786,19 @@ async def test_real_run_manager_async_cancel_paused_run_teardown_before_new_im_t
         )
         paused_run_id = admitted_paused.admission.run_id
         assert paused_run_id is not None
+        assert await exec_svc.claim_run_start(
+            admission_id=admitted_paused.admission.id,
+            attempt_id="attempt-real-rm-1",
+            now=datetime.now(UTC),
+        )
+        assert await exec_svc.record_run_started(
+            admission_id=admitted_paused.admission.id,
+            attempt_id="attempt-real-rm-1",
+            now=datetime.now(UTC),
+        )
         await session.commit()
 
-    fake_redis = fakeredis.aioredis.FakeRedis()
+    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     key_prefix = "test-im-worker-real-rm"
     await create_run(
         fake_redis,
@@ -1800,6 +1811,7 @@ async def test_real_run_manager_async_cancel_paused_run_teardown_before_new_im_t
         ttl_seconds=60,
     )
     async with init_checkpointer() as cp:
+        await cp.claim_run(conv_id, paused_run_id)
         await cp.save_pending_request(
             conv_id,
             HitlRequest(
@@ -2076,5 +2088,230 @@ async def test_failed_hitl_cancel_teardown_charges_attempt(
             assert row is not None
             assert row.status == "pending"
             assert row.attempts == 1
+    finally:
+        await close_shared_checkpointer()
+
+
+async def test_worker_loop_drains_ready_item_without_sleeping_after_deferred(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    import asyncio
+
+    from cubeplex.im.worker import IMRunQueueWorker
+
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_loop_busy",
+            channel_id="oc_chat",
+            scope_key="u:on_loop_busy",
+            scope_kind="participant",
+            reply_to_id="om_loop_1",
+            inbound_message_id="om_loop_1",
+            sender_ref="on_loop_busy",
+            sender_open_id="ou_loop_busy",
+            text="busy",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_loop_ready",
+            channel_id="oc_chat",
+            scope_key="u:on_loop_ready",
+            scope_kind="participant",
+            reply_to_id="om_loop_2",
+            inbound_message_id="om_loop_2",
+            sender_ref="on_loop_ready",
+            sender_open_id="ou_loop_ready",
+            text="ready",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(IMRunQueueItem)
+                    .where(IMRunQueueItem.account_id == account.id)  # type: ignore[arg-type]
+                    .order_by(IMRunQueueItem.created_at)  # type: ignore[arg-type]
+                )
+            ).scalars()
+        )
+        busy_conv = rows[0].conversation_id
+        ready_conv = rows[1].conversation_id
+
+    done_event = asyncio.Event()
+    started: list[str] = []
+
+    class _LoopRM:
+        async def start_run(self, **kwargs: object) -> str:
+            conv_id = str(kwargs["conversation_id"])
+            if conv_id == busy_conv:
+                raise RuntimeError(f"Conversation {conv_id} already has an active run")
+            started.append(conv_id)
+            done_event.set()
+            return str(kwargs.get("run_id") or "run-ready")
+
+    worker = IMRunQueueWorker(
+        session_maker=maker,
+        run_manager=_LoopRM(),
+        on_run_started=None,
+        load_execution_snapshot=im_test_execution_snapshot,
+        poll_interval=60.0,  # Large poll_interval proves no sleep after deferred!
+    )
+    worker.start()
+    try:
+        await asyncio.wait_for(done_event.wait(), timeout=2.0)
+    finally:
+        await worker.stop()
+    assert started == [ready_conv]
+
+
+async def test_hitl_cancel_recovers_via_recover_stopped_run_when_cancel_conflicts(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    from cubeloop.hitl import AskRequest, HitlRequest, Option, Question
+
+    from cubeplex.agents.checkpointer import (
+        close_shared_checkpointer,
+        init_checkpointer,
+        shared_checkpointer,
+    )
+    from cubeplex.streams.run_manager import ResumeConflict
+
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_hitl_rec_1",
+            channel_id="oc_chat",
+            scope_key="u:on_hitl_rec",
+            scope_kind="participant",
+            reply_to_id="om_hitl_rec_1",
+            inbound_message_id="om_hitl_rec_1",
+            sender_ref="on_hitl_rec",
+            sender_open_id="ou_hitl_rec",
+            text="first",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        seed_item = (
+            await session.execute(
+                select(IMRunQueueItem).where(
+                    IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        conv_id = seed_item.conversation_id
+        seed_item.status = "completed"
+        rcpt = (
+            await session.execute(
+                select(IMWebhookReceipt).where(
+                    IMWebhookReceipt.id == seed_item.receipt_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        rcpt.status = "completed"
+        snap = await im_test_execution_snapshot(session, account.org_id)
+        admitted_paused = await ConversationExecutionService(
+            session, org_id=account.org_id, workspace_id=account.workspace_id
+        ).admit_user_message(
+            conversation_id=conv_id,
+            actor_user_id=_USER_ID,
+            namespace="im",
+            source_id="seed-hitl-rec",
+            intent=UserMessageIntent(content="first"),
+            snapshot=snap,
+            now=datetime.now(UTC),
+        )
+        paused_run_id = admitted_paused.admission.run_id
+        assert paused_run_id is not None
+        await session.commit()
+
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_hitl_rec_2",
+            channel_id="oc_chat",
+            scope_key="u:on_hitl_rec",
+            scope_kind="participant",
+            reply_to_id="om_hitl_rec_2",
+            inbound_message_id="om_hitl_rec_2",
+            sender_ref="on_hitl_rec",
+            sender_open_id="ou_hitl_rec",
+            text="second",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+
+    class _RecoveringRM:
+        def __init__(self) -> None:
+            self.recovered_admissions: list[str] = []
+            self.started: list[str] = []
+
+        async def cancel_paused_run(
+            self, *, conversation_id: str, run_id: str, ctx: RunContext
+        ) -> None:
+            del conversation_id, run_id, ctx
+            raise ResumeConflict("errored meta")
+
+        async def recover_stopped_run(self, admission_id: str) -> bool:
+            self.recovered_admissions.append(admission_id)
+            async with shared_checkpointer() as cp:
+                await cp.save_pending_request(conv_id, None)
+            return True
+
+        async def start_run(self, **kwargs: object) -> str:
+            async with shared_checkpointer() as cp:
+                if await cp.load_pending(conv_id) is not None:
+                    raise RuntimeError(f"Conversation {conv_id} has a pending HITL request")
+            run_id = str(kwargs.get("run_id") or "run-recovered")
+            self.started.append(run_id)
+            return run_id
+
+    rm = _RecoveringRM()
+    try:
+        async with init_checkpointer() as cp:
+            await cp.save_pending_request(
+                conv_id,
+                HitlRequest(
+                    question_id="q-rec",
+                    thread_id=None,
+                    created_at=datetime.now(UTC).timestamp(),
+                    payload=AskRequest(
+                        questions=[
+                            Question(
+                                key="confirm",
+                                prompt="Proceed?",
+                                options=[Option(value="yes", label="Yes")],
+                            )
+                        ]
+                    ),
+                ),
+                run_id=paused_run_id,
+            )
+
+        processed = await process_one_queue_item(
+            session_maker=maker,
+            run_manager=rm,
+            on_run_started=None,
+            lease_seconds=300,
+            load_execution_snapshot=im_test_execution_snapshot,
+        )
+        assert processed is True
+        assert rm.recovered_admissions == [admitted_paused.admission.id]
+        assert len(rm.started) == 1
     finally:
         await close_shared_checkpointer()
