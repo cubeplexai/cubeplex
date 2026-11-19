@@ -392,13 +392,24 @@ async def _commit_terminal_receipt(
     return True
 
 
+def _is_preset_enabled(preset: ModelPreset, enabled_refs: set[str] | None) -> bool:
+    return enabled_refs is None or all(ref in enabled_refs for ref in preset.chain)
+
+
 def _resolve_active_model_key(
     presets: tuple[ModelPreset, ...],
     configured_key: str | None,
+    *,
+    enabled_refs: set[str] | None = None,
 ) -> str | None:
-    if configured_key and any(p.key == configured_key for p in presets):
+    if configured_key and any(
+        p.key == configured_key and _is_preset_enabled(p, enabled_refs) for p in presets
+    ):
         return configured_key
-    default_preset = next((p for p in presets if p.is_default), None)
+    default_preset = next(
+        (p for p in presets if p.is_default and _is_preset_enabled(p, enabled_refs)),
+        None,
+    )
     return default_preset.key if default_preset is not None else None
 
 
@@ -459,7 +470,12 @@ async def execute_list_models_command(
         scope_kind=scope_kind,
         effective_user_id=effective_user_id,
     )
-    active_key = _resolve_active_model_key(presets, conv.model_key if conv is not None else None)
+    enabled_refs = await _load_enabled_model_refs(session, account.org_id)
+    active_key = _resolve_active_model_key(
+        presets,
+        conv.model_key if conv is not None else None,
+        enabled_refs=enabled_refs,
+    )
     lines = ["🤖 可用模型预设："]
     for p in presets:
         badges: list[str] = []
@@ -467,6 +483,8 @@ async def execute_list_models_command(
             badges.append("默认")
         if p.key == active_key:
             badges.append("当前使用")
+        if not _is_preset_enabled(p, enabled_refs):
+            badges.append("不可用")
         badge_str = f" [{' · '.join(badges)}]" if badges else ""
         desc_str = f" — {p.description}" if p.description else ""
         lines.append(f"• {p.key} ({p.primary}){badge_str}{desc_str}")
@@ -488,6 +506,7 @@ async def execute_switch_model_command(
 ) -> str:
     """Switch the current IM conversation's ``model_key`` (creating it if needed)."""
     presets, _ = await _load_presets(session, account.org_id)
+    enabled_refs = await _load_enabled_model_refs(session, account.org_id)
     arg = model_arg.strip()
     if not arg:
         conv = await find_live_im_conversation(
@@ -499,7 +518,9 @@ async def execute_switch_model_command(
             effective_user_id=effective_user_id,
         )
         active_key = _resolve_active_model_key(
-            presets, conv.model_key if conv is not None else None
+            presets,
+            conv.model_key if conv is not None else None,
+            enabled_refs=enabled_refs,
         )
         current_label = active_key or "未配置"
         return (
@@ -513,8 +534,7 @@ async def execute_switch_model_command(
     if target is None:
         return f"⚠️ 未找到模型预设「{arg}」，请发送 /models 查看可用模型。"
 
-    enabled_refs = await _load_enabled_model_refs(session, account.org_id)
-    if any(ref not in enabled_refs for ref in target.chain):
+    if not _is_preset_enabled(target, enabled_refs):
         return f"⚠️ 模型预设「{target.key}」包含已禁用或不可用的模型，暂时无法切换。"
 
     conv = await find_live_im_conversation(
@@ -540,6 +560,17 @@ async def execute_switch_model_command(
         conv = await session.get(Conversation, resolved.conversation_id)
         if conv is None:
             raise LookupError(f"Conversation {resolved.conversation_id} not found after resolve")
+    else:
+        locked = (
+            await session.execute(
+                select(Conversation)
+                .where(col(Conversation.id) == conv.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if locked is not None:
+            conv = locked
 
     conv.model_key = target.key
     conv.updated_at = datetime.now(UTC)

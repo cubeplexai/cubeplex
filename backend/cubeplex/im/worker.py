@@ -364,7 +364,12 @@ async def process_one_queue_item(
                 from cubeplex.models.conversation import Conversation
 
                 execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
-                conv = await session.get(Conversation, captured["conversation_id"])
+                conv = await session.scalar(
+                    select(Conversation)
+                    .where(Conversation.id == captured["conversation_id"])
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
                 conv_model_key = conv.model_key if conv is not None else None
                 if conv_model_key:
                     from cubeplex.llm.errors import BrokenPresetError, UnknownPresetError
