@@ -457,6 +457,7 @@ async def mark_queue_item_for_retry_or_fail(
     *,
     item_id: str,
     max_attempts: int = 5,
+    defer_seconds: float = 0.0,
 ) -> bool:
     """Handle a queue row whose ``start_run`` raised.
 
@@ -483,10 +484,15 @@ async def mark_queue_item_for_retry_or_fail(
     ).scalar_one()
     if item.attempts >= max_attempts:
         item.status = "failed"
+        item.claim_lease_expires_at = None
+        item.available_at = None
         session.add(item)
         return True
     item.status = "pending"
     item.claim_lease_expires_at = None
+    item.available_at = (
+        datetime.now(UTC) + timedelta(seconds=defer_seconds) if defer_seconds > 0 else None
+    )
     session.add(item)
     return False
 
