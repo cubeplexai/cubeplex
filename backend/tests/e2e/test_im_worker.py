@@ -1284,7 +1284,11 @@ async def test_human_im_message_cancels_pending_hitl_regardless_of_sender(
 ) -> None:
     from cubeloop.hitl import AskRequest, HitlRequest, Option, Question
 
-    from cubeplex.agents.checkpointer import init_checkpointer, shared_checkpointer
+    from cubeplex.agents.checkpointer import (
+        close_shared_checkpointer,
+        init_checkpointer,
+        shared_checkpointer,
+    )
     from cubeplex.models.conversation_participant import ConversationParticipant
     from cubeplex.models.im_connector import IMIdentityLink
 
@@ -1461,16 +1465,19 @@ async def test_human_im_message_cancels_pending_hitl_regardless_of_sender(
             return run_id or "run-new"
 
     rm = _HitlAwareRM()
-    processed = await process_one_queue_item(
-        session_maker=maker,
-        run_manager=rm,
-        on_run_started=None,
-        lease_seconds=300,
-        load_execution_snapshot=im_test_execution_snapshot,
-    )
-    assert processed is True
-    assert rm.cancelled == [(conv_id, paused_run_id, _OTHER_USER_ID)]
-    assert rm.calls == [{"conversation_id": conv_id, "user_id": _OTHER_USER_ID}]
+    try:
+        processed = await process_one_queue_item(
+            session_maker=maker,
+            run_manager=rm,
+            on_run_started=None,
+            lease_seconds=300,
+            load_execution_snapshot=im_test_execution_snapshot,
+        )
+        assert processed is True
+        assert rm.cancelled == [(conv_id, paused_run_id, _OTHER_USER_ID)]
+        assert rm.calls == [{"conversation_id": conv_id, "user_id": _OTHER_USER_ID}]
+    finally:
+        await close_shared_checkpointer()
 
 
 async def test_deferred_busy_conversation_preserves_per_conversation_fifo(
@@ -1625,7 +1632,7 @@ async def test_unrecoverable_pending_hitl_uses_bounded_retries(
 ) -> None:
     from cubeloop.hitl import AskRequest, HitlRequest, Option, Question
 
-    from cubeplex.agents.checkpointer import init_checkpointer
+    from cubeplex.agents.checkpointer import close_shared_checkpointer, init_checkpointer
 
     maker, account = _seeded
     await ingest_inbound_event(
@@ -1689,20 +1696,23 @@ async def test_unrecoverable_pending_hitl_uses_bounded_retries(
         async def start_run(self, **_kwargs: object) -> str:
             raise RuntimeError(f"Conversation {conv_id} has a pending HITL request")
 
-    processed = await process_one_queue_item(
-        session_maker=maker,
-        run_manager=_RejectHitlRM(),
-        on_run_started=None,
-        lease_seconds=300,
-        load_execution_snapshot=im_test_execution_snapshot,
-    )
-    assert processed is False
-    async with maker() as session:
-        row = await session.get(IMRunQueueItem, item_id)
-        assert row is not None
-        assert row.status == "pending"
-        # Attempt MUST be charged so max_attempts bounds unrecoverable HITL rows.
-        assert row.attempts == 1
+    try:
+        processed = await process_one_queue_item(
+            session_maker=maker,
+            run_manager=_RejectHitlRM(),
+            on_run_started=None,
+            lease_seconds=300,
+            load_execution_snapshot=im_test_execution_snapshot,
+        )
+        assert processed is False
+        async with maker() as session:
+            row = await session.get(IMRunQueueItem, item_id)
+            assert row is not None
+            assert row.status == "pending"
+            # Attempt MUST be charged so max_attempts bounds unrecoverable HITL rows.
+            assert row.attempts == 1
+    finally:
+        await close_shared_checkpointer()
 
 
 async def test_real_run_manager_async_cancel_paused_run_teardown_before_new_im_turn(
@@ -1928,3 +1938,143 @@ async def test_automatic_handoff_hitting_pending_hitl_charges_attempt(
         assert row is not None
         assert row.status == "pending"
         assert row.attempts == 1
+
+
+async def test_failed_hitl_cancel_teardown_charges_attempt(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    from cubeloop.hitl import AskRequest, HitlRequest, Option, Question
+
+    from cubeplex.agents.checkpointer import close_shared_checkpointer, init_checkpointer
+    from cubeplex.streams.run_manager import ResumeConflict
+
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_hitl_fail_cancel_1",
+            channel_id="oc_chat",
+            scope_key="u:on_hitl_fc",
+            scope_kind="participant",
+            reply_to_id="om_hitl_fc_1",
+            inbound_message_id="om_hitl_fc_1",
+            sender_ref="on_hitl_fc",
+            sender_open_id="ou_hitl_fc",
+            text="first",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        seed_item = (
+            await session.execute(
+                select(IMRunQueueItem).where(
+                    IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        conv_id = seed_item.conversation_id
+        seed_item.status = "completed"
+        rcpt = (
+            await session.execute(
+                select(IMWebhookReceipt).where(
+                    IMWebhookReceipt.id == seed_item.receipt_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        rcpt.status = "completed"
+        snap = await im_test_execution_snapshot(session, account.org_id)
+        admitted_paused = await ConversationExecutionService(
+            session, org_id=account.org_id, workspace_id=account.workspace_id
+        ).admit_user_message(
+            conversation_id=conv_id,
+            actor_user_id=_USER_ID,
+            namespace="im",
+            source_id="seed-hitl-fc",
+            intent=UserMessageIntent(content="first"),
+            snapshot=snap,
+            now=datetime.now(UTC),
+        )
+        paused_run_id = admitted_paused.admission.run_id
+        assert paused_run_id is not None
+        await session.commit()
+
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_hitl_fail_cancel_2",
+            channel_id="oc_chat",
+            scope_key="u:on_hitl_fc",
+            scope_kind="participant",
+            reply_to_id="om_hitl_fc_2",
+            inbound_message_id="om_hitl_fc_2",
+            sender_ref="on_hitl_fc",
+            sender_open_id="ou_hitl_fc",
+            text="second",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        item2 = (
+            await session.execute(
+                select(IMRunQueueItem).where(
+                    IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                    IMRunQueueItem.status == "pending",  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        item2_id = item2.id
+
+    class _ConflictCancelRM:
+        async def cancel_paused_run(
+            self, *, conversation_id: str, run_id: str, ctx: RunContext
+        ) -> None:
+            del conversation_id, run_id, ctx
+            raise ResumeConflict("stale active slot")
+
+        async def recover_stopped_run(self, admission_id: str) -> bool:
+            del admission_id
+            return False
+
+        async def start_run(self, **_kwargs: object) -> str:
+            raise RuntimeError(f"Conversation {conv_id} has a pending HITL request")
+
+    try:
+        async with init_checkpointer() as cp:
+            await cp.save_pending_request(
+                conv_id,
+                HitlRequest(
+                    question_id="q-fc",
+                    thread_id=None,
+                    created_at=datetime.now(UTC).timestamp(),
+                    payload=AskRequest(
+                        questions=[
+                            Question(
+                                key="confirm",
+                                prompt="Proceed?",
+                                options=[Option(value="yes", label="Yes")],
+                            )
+                        ]
+                    ),
+                ),
+                run_id=paused_run_id,
+            )
+
+        processed = await process_one_queue_item(
+            session_maker=maker,
+            run_manager=_ConflictCancelRM(),
+            on_run_started=None,
+            lease_seconds=300,
+            load_execution_snapshot=im_test_execution_snapshot,
+        )
+        assert processed is False
+        async with maker() as session:
+            row = await session.get(IMRunQueueItem, item2_id)
+            assert row is not None
+            assert row.status == "pending"
+            assert row.attempts == 1
+    finally:
+        await close_shared_checkpointer()
