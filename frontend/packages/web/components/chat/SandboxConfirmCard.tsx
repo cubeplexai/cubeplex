@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useTranslations } from 'next-intl'
 import { Check, X, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { PendingConfirm } from '@cubeplex/core'
+import { useAuthStore, type PendingConfirm } from '@cubeplex/core'
 
 interface SandboxConfirmCardProps {
   pending: PendingConfirm
@@ -12,6 +13,10 @@ interface SandboxConfirmCardProps {
 }
 
 export function SandboxConfirmCard({ pending, onApprove, onDeny }: SandboxConfirmCardProps) {
+  const t = useTranslations('askUser')
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null)
+  const canAnswer =
+    !pending.actor_user_id || !currentUserId || pending.actor_user_id === currentUserId
   const [submitting, setSubmitting] = useState<'approve' | 'deny' | null>(null)
   const [secondsLeft, setSecondsLeft] = useState<number | null>(() => {
     if (pending.timeout_seconds === null) return null
@@ -26,7 +31,7 @@ export function SandboxConfirmCard({ pending, onApprove, onDeny }: SandboxConfir
   }, [secondsLeft])
 
   const handle = async (decision: 'approve' | 'deny') => {
-    if (submitting) return
+    if (!canAnswer || submitting) return
     setSubmitting(decision)
     try {
       if (decision === 'approve') await onApprove()
@@ -53,11 +58,18 @@ export function SandboxConfirmCard({ pending, onApprove, onDeny }: SandboxConfir
           Matched rule: <code className="font-mono">{pending.matched_pattern}</code>
         </p>
       )}
+      {!canAnswer && (
+        <p className="mb-3 text-xs text-muted-foreground">
+          {pending.actor_display_name
+            ? t('onlyActorCanApproveNamed', { name: pending.actor_display_name })
+            : t('onlyActorCanApprove')}
+        </p>
+      )}
       <div className="flex gap-2">
         <Button
           size="sm"
           className="gap-1 bg-success-solid hover:bg-success-solid/90 text-primary-foreground"
-          disabled={!!submitting}
+          disabled={!canAnswer || !!submitting}
           onClick={() => handle('approve')}
         >
           <Check className="h-3.5 w-3.5" />
@@ -67,7 +79,7 @@ export function SandboxConfirmCard({ pending, onApprove, onDeny }: SandboxConfir
           size="sm"
           variant="outline"
           className="gap-1 border-danger-border text-danger-fg hover:bg-danger-surface"
-          disabled={!!submitting}
+          disabled={!canAnswer || !!submitting}
           onClick={() => handle('deny')}
         >
           <X className="h-3.5 w-3.5" />

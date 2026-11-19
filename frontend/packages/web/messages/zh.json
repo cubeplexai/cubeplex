@@ -340,7 +340,11 @@
     "cancel": "取消",
     "cancelling": "取消中…",
     "customPlaceholder": "请输入",
-    "customInput": "{label}的自定义回答"
+    "customInput": "{label}的自定义回答",
+    "onlyActorCanAnswer": "仅本轮发起人可提交回答，你可取消后继续对话。",
+    "onlyActorCanAnswerNamed": "仅 {name} 可提交回答，你可取消后继续对话。",
+    "onlyActorCanApprove": "仅本轮发起人可审批此命令。",
+    "onlyActorCanApproveNamed": "仅 {name} 可审批此命令。"
   },
   "avatar": {
     "adminPanel": "管理后台",

@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import type { AskOption, PendingAsk, AskQuestion } from '@cubeplex/core'
+import { useAuthStore, type AskOption, type PendingAsk, type AskQuestion } from '@cubeplex/core'
 
 interface AskUserCardProps {
   pending: PendingAsk
@@ -74,11 +74,13 @@ function CustomAnswerInput({
   questionKey,
   option,
   value,
+  disabled,
   onChange,
 }: {
   questionKey: string
   option: AskOption
   value: string
+  disabled?: boolean
   onChange: (text: string) => void
 }) {
   const t = useTranslations('askUser')
@@ -88,7 +90,8 @@ function CustomAnswerInput({
       aria-label={t('customInput', { label: option.label })}
       placeholder={t('customPlaceholder')}
       value={value}
-      autoFocus
+      disabled={disabled}
+      autoFocus={!disabled}
       onChange={(e) => onChange(e.target.value)}
       className="ml-6 h-8 text-sm"
     />
@@ -99,12 +102,14 @@ function QuestionField({
   question,
   value,
   custom,
+  disabled,
   onChange,
   onCustomChange,
 }: {
   question: AskQuestion
   value: string | string[]
   custom: Record<string, string>
+  disabled?: boolean
   onChange: (v: string | string[]) => void
   onCustomChange: (optionValue: string, text: string) => void
 }) {
@@ -114,6 +119,7 @@ function QuestionField({
         <Label className="text-sm font-medium text-foreground">{question.prompt}</Label>
         <Input
           value={typeof value === 'string' ? value : ''}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
           className="h-8 text-sm"
         />
@@ -134,6 +140,7 @@ function QuestionField({
                 <Checkbox
                   id={`${question.key}-${opt.value}`}
                   checked={checked}
+                  disabled={disabled}
                   onCheckedChange={(nextChecked) => {
                     const next = nextChecked
                       ? [...selected, opt.value]
@@ -153,6 +160,7 @@ function QuestionField({
                   questionKey={question.key}
                   option={opt}
                   value={custom[customAnswerKey(question.key, opt.value)] ?? ''}
+                  disabled={disabled}
                   onChange={(text) => onCustomChange(opt.value, text)}
                 />
               ) : null}
@@ -169,6 +177,7 @@ function QuestionField({
       <Label className="text-sm font-medium text-foreground">{question.prompt}</Label>
       <RadioGroup
         value={typeof value === 'string' ? value : ''}
+        disabled={disabled}
         onValueChange={(v) => onChange(v)}
         className="flex flex-col gap-1"
       >
@@ -177,7 +186,11 @@ function QuestionField({
           return (
             <div key={opt.value} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
-                <RadioGroupItem value={opt.value} id={`${question.key}-${opt.value}`} />
+                <RadioGroupItem
+                  value={opt.value}
+                  id={`${question.key}-${opt.value}`}
+                  disabled={disabled}
+                />
                 <Label
                   htmlFor={`${question.key}-${opt.value}`}
                   className="cursor-pointer text-sm text-foreground"
@@ -190,6 +203,7 @@ function QuestionField({
                   questionKey={question.key}
                   option={opt}
                   value={custom[customAnswerKey(question.key, opt.value)] ?? ''}
+                  disabled={disabled}
                   onChange={(text) => onCustomChange(opt.value, text)}
                 />
               ) : null}
@@ -203,6 +217,9 @@ function QuestionField({
 
 export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
   const t = useTranslations('askUser')
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null)
+  const canAnswer =
+    !pending.actor_user_id || !currentUserId || pending.actor_user_id === currentUserId
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(() => {
     const init: Record<string, string | string[]> = {}
     for (const q of pending.questions) {
@@ -243,9 +260,10 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
   const hasUnfilledRequired = pending.questions.some((q) =>
     blocksSubmit(q, answers[q.key] ?? (q.multi_select ? [] : ''), customAnswers),
   )
+  const inputsDisabled = !canAnswer || submitting || cancelling
 
   const handleSubmit = async () => {
-    if (submitting || hasUnfilledRequired) return
+    if (!canAnswer || submitting || hasUnfilledRequired) return
     const payload: Record<string, string | string[]> = {}
     for (const q of pending.questions) {
       payload[q.key] = submittedAnswer(
@@ -283,6 +301,7 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
               question={q}
               value={answers[q.key] ?? (q.multi_select ? [] : '')}
               custom={customAnswers}
+              disabled={inputsDisabled}
               onChange={(v) => setAnswer(q.key, v)}
               onCustomChange={(optionValue, text) => setCustomAnswer(q.key, optionValue, text)}
             />
@@ -295,11 +314,18 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
           </span>
         )}
       </div>
+      {!canAnswer && (
+        <p className="mt-2 pl-6 text-xs text-muted-foreground">
+          {pending.actor_display_name
+            ? t('onlyActorCanAnswerNamed', { name: pending.actor_display_name })
+            : t('onlyActorCanAnswer')}
+        </p>
+      )}
       <div className="mt-3 flex items-center gap-2 pl-6">
         <Button
           size="sm"
           className="gap-1"
-          disabled={submitting || cancelling || hasUnfilledRequired}
+          disabled={!canAnswer || submitting || cancelling || hasUnfilledRequired}
           onClick={handleSubmit}
         >
           <Send className="h-3.5 w-3.5" />

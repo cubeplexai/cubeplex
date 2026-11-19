@@ -272,3 +272,57 @@ async def test_register_awaiting_responder_clamps_ttl_max() -> None:
         ttl_seconds=10**9,
     )
     assert state["cb-:run:run_huge:awaiting_responder"] == ("ou_x", 24 * 60 * 60)
+
+
+@pytest.mark.asyncio
+async def test_tailer_registers_responder_in_shared_mode() -> None:
+    """Shared/group conversations still bind HITL answers to the turn's sender
+    (Option A: only the execution actor may answer) — skipping the Redis key in
+    shared_mode caused Feishu card clicks from every user, including the sender,
+    to fail with '这不是发给你的'.
+    """
+    from cubeplex.im.outbound import OutboundRunTailer
+    from cubeplex.im.types import RenderState
+
+    redis_writes: dict[str, tuple[str, int]] = {}
+
+    class _FakeRedis:
+        async def set(self, key: str, value: str, *, ex: int) -> None:
+            redis_writes[key] = (value, ex)
+
+    class _FakeCardKit:
+        async def create_entity(self, _: Any) -> str:
+            return "AAQA"
+
+        async def stream_text(self, **_: Any) -> None: ...
+        async def patch_card(self, **_: Any) -> None: ...
+        async def finalize(self, **_: Any) -> bool:
+            return True
+
+    class _FakeConnector:
+        async def on_processing_start(self, _: RenderState) -> None: ...
+        async def on_processing_complete(self, _: RenderState) -> None: ...
+        async def on_processing_failed(self, _: RenderState) -> None: ...
+        async def send_card_init_message(self, _: str) -> str | None:
+            return "om_x"
+
+        async def _send_emergency_text(self, _: str) -> str | None:
+            return None
+
+    state = RenderState(bot_name="CubePlex", run_id="run_shared")
+    connector = _FakeConnector()
+    dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
+    tailer = OutboundRunTailer(
+        redis=_FakeRedis(),
+        key_prefix="cb-",
+        run_id="run_shared",
+        connector=connector,
+        state=state,
+        dispatcher=dispatcher,
+        responder_open_id="ou_sender",
+        shared_mode=True,
+    )
+    await tailer.maybe_register_awaiting_responder(
+        ev_payload={"type": "ask_user_request", "data": {"question_id": "q_shared"}}
+    )
+    assert redis_writes["cb-:run:run_shared:awaiting_responder"] == ("ou_sender", 600)

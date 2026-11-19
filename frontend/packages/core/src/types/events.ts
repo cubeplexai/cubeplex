@@ -246,6 +246,8 @@ export interface SandboxConfirmRequestEvent extends AgentEvent {
     command: string
     matched_pattern: string | null
     timeout_seconds: number | null
+    actor_user_id?: string | null
+    actor_display_name?: string | null
   }
 }
 
@@ -284,6 +286,8 @@ export interface AskUserRequestEvent extends AgentEvent {
     question_id: string
     questions: AskQuestion[]
     timeout_seconds: number | null
+    actor_user_id?: string | null
+    actor_display_name?: string | null
   }
 }
 
@@ -314,6 +318,8 @@ export type PendingHitl =
       kind: 'ask_user'
       requested_at: string
       questions: AskQuestion[]
+      actor_user_id?: string | null
+      actor_display_name?: string | null
     }
   | {
       run_id: string
@@ -323,6 +329,8 @@ export type PendingHitl =
       tool_call_id: string
       command: string
       matched_pattern: string
+      actor_user_id?: string | null
+      actor_display_name?: string | null
     }
 
 export type StatusPhase = 'sandbox_creating' | 'sandbox_ready' | 'sandbox_failed'

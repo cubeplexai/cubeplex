@@ -65,11 +65,25 @@ def test_serialize_ask_user_pending() -> None:
 
 def test_serialize_sandbox_confirm_pending() -> None:
     p = _fake_approve_pending()
-    out = serialize_pending_hitl(p, run_id="r1")
+    out = serialize_pending_hitl(
+        p,
+        run_id="r1",
+        actor_user_id="usr-1",
+        actor_display_name="Alice",
+    )
     assert out["kind"] == "sandbox_confirm"
     assert out["tool_call_id"] == "tc1"
     assert out["command"] == "rm -rf /tmp/x"
     assert out["matched_pattern"] == "rm *"
+    assert out["actor_user_id"] == "usr-1"
+    assert out["actor_display_name"] == "Alice"
+
+
+def test_serialize_ask_user_pending_actor_fields_default_none() -> None:
+    p = _fake_ask_pending()
+    out = serialize_pending_hitl(p, run_id="r1")
+    assert out["actor_user_id"] is None
+    assert out["actor_display_name"] is None
 
 
 def test_serialize_handles_missing_details() -> None:

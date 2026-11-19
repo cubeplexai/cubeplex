@@ -602,13 +602,14 @@ class OutboundRunTailer:
         and after the dispatcher has run it. Idempotent — safe to call on
         every event; only writes Redis when the event is the right shape.
 
+        Applies in both isolated and shared/group conversations: only the
+        sender who triggered this run may answer its HITL card.
+
         The TTL is derived from the event's ``timeout_seconds`` (falling back
         to the default when absent or non-positive) so a 30-minute HITL pause
         doesn't outlive its responder binding and surface "这不是发给你的"
         on a still-valid answer.
         """
-        if self._shared_mode:
-            return
         etype = ev_payload.get("type")
         if etype not in ("ask_user_request", "sandbox_confirm_request"):
             return

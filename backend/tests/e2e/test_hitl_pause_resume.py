@@ -298,6 +298,91 @@ async def test_submit_returns_409_stale_answer_on_qid_mismatch(
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_exposes_actor_and_submit_returns_409_not_execution_actor(
+    member_client: tuple[httpx.AsyncClient, str],
+    stub_respond_task: AsyncMock,
+) -> None:
+    """When a paused run was admitted under another participant, bootstrap
+    exposes ``actor_user_id`` + ``actor_display_name`` on ``pending_hitl``, and
+    submitting an answer as a non-owning participant returns 409
+    ``not_execution_actor``."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from sqlalchemy import delete
+
+    from cubeplex.db import async_session_maker
+    from cubeplex.models.conversation_execution import ConversationExecutionAdmission
+    from cubeplex.models.user import User
+
+    client, ws_id = member_client
+    conv_id, run_id = await _seed_paused_conversation(client, ws_id, _ask_pending("q-actor"))
+
+    async with async_session_maker() as session:
+        conv = await session.get(Conversation, conv_id)
+        assert conv is not None
+        other_user = User(
+            email=f"hitl-owner-{uuid4()}@example.invalid",
+            hashed_password="not-a-login",
+            display_name="Daibolin",
+        )
+        session.add(other_user)
+        await session.flush()
+        other_user_id = other_user.id
+        admission = ConversationExecutionAdmission(
+            org_id=conv.org_id,
+            workspace_id=conv.workspace_id,
+            conversation_id=conv_id,
+            actor_user_id=other_user_id,
+            source_kind="user_message",
+            source_id=f"im:test-{uuid4()}",
+            execution_generation=0,
+            run_id=run_id,
+            request_fingerprint="fp-test",
+            resolved_execution={
+                "model_key": "default",
+                "primary": "dummy/model",
+                "fallbacks": [],
+                "reasoning": None,
+                "trigger": "im",
+            },
+            run_start_token="tok-1",
+            run_started_at=datetime.now(UTC),
+            execution_kind="run",
+        )
+        session.add(admission)
+        await session.commit()
+        admission_id = admission.id
+
+    try:
+        boot = await client.get(f"/api/v1/ws/{ws_id}/conversations/{conv_id}/bootstrap")
+        assert boot.status_code == 200, boot.text
+        pending_hitl = boot.json()["pending_hitl"]
+        assert pending_hitl is not None
+        assert pending_hitl["actor_user_id"] == other_user_id
+        assert pending_hitl["actor_display_name"] == "Daibolin"
+
+        resp = await client.post(
+            f"/api/v1/ws/{ws_id}/conversations/{conv_id}/ask-user/q-actor",
+            json={"answers": {"confirm": "yes"}},
+        )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["code"] == "not_execution_actor"
+        stub_respond_task.assert_not_awaited()
+    finally:
+        async with async_session_maker() as session:
+            await session.execute(
+                delete(ConversationExecutionAdmission).where(
+                    ConversationExecutionAdmission.id == admission_id  # type: ignore[arg-type]
+                )
+            )
+            await session.execute(
+                delete(User).where(User.id == other_user_id)  # type: ignore[arg-type]
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_submit_returns_404_no_pending(
     member_client: tuple[httpx.AsyncClient, str],
     stub_respond_task: AsyncMock,

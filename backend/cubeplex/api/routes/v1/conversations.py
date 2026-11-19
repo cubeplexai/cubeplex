@@ -85,6 +85,7 @@ from cubeplex.streams.run_events import (
     read_run_events_after,
 )
 from cubeplex.streams.run_manager import (
+    ResumeActorMismatch,
     ResumeConflict,
     ResumeInFlight,
     ResumeNoPending,
@@ -1939,7 +1940,45 @@ async def get_conversation_bootstrap(
                 conversation_id,
             )
         else:
-            pending_hitl = serialize_pending_hitl(pending_req, run_id=run_id_for_pending)
+            from sqlalchemy import select as _hitl_select
+            from sqlmodel import col as _hitl_col
+
+            from cubeplex.models.conversation_execution import ConversationExecutionAdmission
+            from cubeplex.models.user import User as _HitlActorUser
+
+            actor_row = (
+                await session.execute(
+                    _hitl_select(
+                        _hitl_col(ConversationExecutionAdmission.actor_user_id),
+                        _hitl_col(_HitlActorUser.display_name),
+                        _hitl_col(_HitlActorUser.email),
+                    )
+                    .outerjoin(
+                        _HitlActorUser,
+                        _hitl_col(_HitlActorUser.id)
+                        == _hitl_col(ConversationExecutionAdmission.actor_user_id),
+                    )
+                    .where(
+                        _hitl_col(ConversationExecutionAdmission.org_id) == ctx.org_id,
+                        _hitl_col(ConversationExecutionAdmission.workspace_id) == ctx.workspace_id,
+                        _hitl_col(ConversationExecutionAdmission.conversation_id)
+                        == conversation_id,
+                        _hitl_col(ConversationExecutionAdmission.run_id) == run_id_for_pending,
+                    )
+                )
+            ).first()
+            hitl_actor_user_id: str | None = None
+            hitl_actor_display_name: str | None = None
+            if actor_row is not None:
+                hitl_actor_user_id = str(actor_row[0])
+                raw_name = actor_row[1] or actor_row[2]
+                hitl_actor_display_name = str(raw_name) if raw_name else None
+            pending_hitl = serialize_pending_hitl(
+                pending_req,
+                run_id=run_id_for_pending,
+                actor_user_id=hitl_actor_user_id,
+                actor_display_name=hitl_actor_display_name,
+            )
             pending_run_id_for_bootstrap = run_id_for_pending
 
     last_run_error_payload: dict[str, Any] | None = None
@@ -2681,6 +2720,14 @@ async def submit_sandbox_confirm(
         raise HTTPException(status_code=409, detail={"code": "stale_answer"}) from exc
     except ResumeInFlight as exc:
         raise HTTPException(status_code=409, detail={"code": "resume_in_flight"}) from exc
+    except ResumeActorMismatch as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "not_execution_actor",
+                "message": "Only the user who started this turn can respond.",
+            },
+        ) from exc
     except ResumeConflict as exc:
         raise HTTPException(status_code=409, detail={"code": "conversation_moved"}) from exc
     return {"status": "ok", "run_id": new_run_id}
@@ -2789,6 +2836,14 @@ async def submit_ask_user_answer(
         raise HTTPException(status_code=409, detail={"code": "stale_answer"}) from exc
     except ResumeInFlight as exc:
         raise HTTPException(status_code=409, detail={"code": "resume_in_flight"}) from exc
+    except ResumeActorMismatch as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "not_execution_actor",
+                "message": "Only the user who started this turn can respond.",
+            },
+        ) from exc
     except ResumeConflict as exc:
         raise HTTPException(status_code=409, detail={"code": "conversation_moved"}) from exc
     return {"status": "ok", "run_id": new_run_id}

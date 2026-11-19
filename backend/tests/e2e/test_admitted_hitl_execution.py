@@ -27,7 +27,12 @@ from cubeplex.streams.run_events import (
     get_active_run,
     get_run_meta,
 )
-from cubeplex.streams.run_manager import ResumeConflict, RunContext, RunManager
+from cubeplex.streams.run_manager import (
+    ResumeActorMismatch,
+    ResumeConflict,
+    RunContext,
+    RunManager,
+)
 from tests.e2e import test_admitted_run_execution as run_fixtures
 from tests.e2e import test_background_task_reservation as reservation_fixtures
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
@@ -493,7 +498,7 @@ async def test_other_participant_cannot_answer_with_original_actors_credentials(
             )
             await db_session.commit()
         other = replace(paused, ctx=replace(paused.ctx, user_id=responder_id))
-        with pytest.raises(ResumeConflict):
+        with pytest.raises(ResumeActorMismatch):
             await respond(run_manager, other)
         assert paused.provider.call_count == 1
         billing_actors = list(
@@ -514,4 +519,149 @@ async def test_other_participant_cannot_answer_with_original_actors_credentials(
         )
         await db_session.execute(delete(Membership).where(Membership.user_id == responder_id))
         await db_session.execute(delete(User).where(User.id == responder_id))
+        await db_session.commit()
+
+
+async def test_im_resume_resolves_non_creator_actor_in_shared_group_chat(
+    db_session: AsyncSession,
+    reservation_context: ReservationContext,
+    run_manager: RunManager,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In a shared IM group conversation created by User A, a later turn started
+    by User B has admission.actor_user_id == User B != conv.creator_user_id.
+    IM card resume must resolve User B as RunContext.user_id while keeping
+    User A as conversation_creator_user_id.
+    """
+    from cubeplex.cache import set_redis
+    from cubeplex.im.resume import resume_paused_run
+    from cubeplex.models.conversation import Conversation
+
+    creator_id = await actor_id(db_session, reservation_context)
+    conversation_id = reservation_context.conversation_id
+    conv_row = await db_session.get(Conversation, conversation_id)
+    assert conv_row is not None
+    original_is_group = conv_row.is_group_chat
+    original_attrs = dict(conv_row.attributes or {})
+    conv_row.is_group_chat = True
+    conv_row.attributes = {**original_attrs, "im": {"platform": "feishu", "scope_kind": "thread"}}
+
+    sender_b = User(email=f"hitl-im-{uuid4()}@example.invalid", hashed_password="not-a-login")
+    db_session.add(sender_b)
+    await db_session.flush()
+    sender_b_id = sender_b.id
+    db_session.add_all(
+        [
+            Membership(user_id=sender_b_id, workspace_id=DEFAULT_WS_ID, role="member"),
+            ConversationParticipant(
+                org_id=DEFAULT_ORG_ID,
+                workspace_id=DEFAULT_WS_ID,
+                conversation_id=conversation_id,
+                user_id=sender_b_id,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    current = snapshot()
+    provider_config = current.providers["provider"].model_copy(deep=True)
+    for model in provider_config.models:
+        model.context_window = 128_000
+        model.max_tokens = 4096
+    current = replace(current, providers={"provider": provider_config})
+
+    try:
+        admitted = await service(db_session).admit_user_message(
+            conversation_id=conversation_id,
+            actor_user_id=sender_b_id,
+            namespace="im",
+            source_id=f"imwr-{uuid4()}",
+            intent=UserMessageIntent(content="delete disk?"),
+            snapshot=current,
+            now=datetime.now(UTC),
+        )
+        await db_session.commit()
+
+        provider = FauxProvider(provider_id="provider")
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    faux_tool_call(
+                        "ask_user", {"questions": [{"key": "action", "prompt": "Delete disk?"}]}
+                    ),
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message([faux_text("deleted")], stop_reason="stop"),
+            ]
+        )
+        monkeypatch.setattr("cubeplex.llm.builder.build_provider", lambda *args, **kwargs: provider)
+        from cubeplex.config import config as _app_cfg
+
+        # Match _resolve_run_context's Redis prefix derivation to run_manager._key_prefix
+        set_redis(run_manager._redis)
+        base_prefix, _, env_name = run_manager._key_prefix.rpartition(":")
+        _orig_cfg_get = _app_cfg.get
+        monkeypatch.setenv("ENV_FOR_DYNACONF", env_name or "test")
+        monkeypatch.setattr(
+            _app_cfg,
+            "get",
+            lambda k, *a, **kw: (
+                base_prefix if k == "redis.key_prefix" else _orig_cfg_get(k, *a, **kw)
+            ),
+        )
+
+        ctx = RunContext(
+            user_id=sender_b_id,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            conversation_id=conversation_id,
+            trigger="im",
+            is_group_chat=True,
+            conversation_creator_user_id=creator_id,
+        )
+        run_id = await run_manager.start_run(
+            conversation_id=conversation_id,
+            content="delete disk?",
+            ctx=ctx,
+            run_id=admitted.admission.run_id,
+            admission_id=admitted.admission.id,
+            llm_snapshot=current,
+        )
+        await run_manager.drain(timeout_seconds=15)
+        async with shared_checkpointer() as cp:
+            pending = await cp.load_pending(conversation_id)
+        assert pending is not None
+
+        ok = await resume_paused_run(
+            run_id=run_id,
+            input_kind="ask_user",
+            choice="confirm_delete",
+            operator_open_id="ou_sender_b",
+            question_id=pending[0].question_id,
+            answer_key="action",
+            run_manager=run_manager,
+        )
+        assert ok is True
+        await run_manager.drain(timeout_seconds=15)
+        meta = await get_run_meta(run_manager._redis, prefix=run_manager._key_prefix, run_id=run_id)
+        assert meta is not None and meta.status == "completed"
+    finally:
+        from cubeplex.models.conversation_execution import ConversationExecutionAdmission
+
+        await run_manager.cancel_all()
+        await cleanup_run_rows(db_session, conversation_id)
+        await db_session.execute(
+            delete(ConversationExecutionAdmission).where(
+                ConversationExecutionAdmission.actor_user_id == sender_b_id  # type: ignore[arg-type]
+            )
+        )
+        conv_restore = await db_session.get(Conversation, conversation_id)
+        if conv_restore is not None:
+            conv_restore.is_group_chat = original_is_group
+            conv_restore.attributes = original_attrs
+        await db_session.execute(
+            delete(ConversationParticipant).where(ConversationParticipant.user_id == sender_b_id)
+        )
+        await db_session.execute(delete(Membership).where(Membership.user_id == sender_b_id))
+        await db_session.execute(delete(User).where(User.id == sender_b_id))
         await db_session.commit()

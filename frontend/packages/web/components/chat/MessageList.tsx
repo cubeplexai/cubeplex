@@ -228,8 +228,12 @@ async function handlePendingSubmitError(
 
   if (
     err.status === 409 &&
-    (code === 'resume_in_flight' || code === 'stale_answer' || code === 'conversation_moved')
+    (code === 'resume_in_flight' ||
+      code === 'stale_answer' ||
+      code === 'conversation_moved' ||
+      code === 'not_execution_actor')
   ) {
+    await loadMessages(client, conversationId)
     useMessageStore.setState((s) => ({
       errors: {
         ...s.errors,
@@ -239,8 +243,7 @@ async function handlePendingSubmitError(
         },
       },
     }))
-    await loadMessages(client, conversationId)
-    return
+    throw err
   }
   if (err.status === 404 && code === 'no_pending') {
     useMessageStore.setState((s) => {

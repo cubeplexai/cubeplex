@@ -36,11 +36,13 @@ async def _resolve_run_context(
         import os
 
         from sqlalchemy import select
+        from sqlmodel import col
 
         from cubeplex.cache import get_redis
         from cubeplex.config import config as _cfg
         from cubeplex.db.engine import async_session_maker
         from cubeplex.models.conversation import Conversation
+        from cubeplex.models.conversation_execution import ConversationExecutionAdmission
         from cubeplex.streams.run_events import get_run_meta
 
         redis = get_redis()
@@ -57,15 +59,28 @@ async def _resolve_run_context(
             row = (
                 await session.execute(
                     select(Conversation).where(
-                        Conversation.id == conversation_id,  # type: ignore[arg-type]
+                        col(Conversation.id) == conversation_id,
                     )
                 )
             ).scalar_one_or_none()
-        if row is None:
-            return None
+            if row is None:
+                return None
+            admission_actor = (
+                await session.execute(
+                    select(col(ConversationExecutionAdmission.actor_user_id)).where(
+                        col(ConversationExecutionAdmission.org_id) == row.org_id,
+                        col(ConversationExecutionAdmission.workspace_id) == row.workspace_id,
+                        col(ConversationExecutionAdmission.conversation_id) == conversation_id,
+                        col(ConversationExecutionAdmission.run_id) == run_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        effective_user_id = (
+            str(admission_actor) if admission_actor is not None else str(row.creator_user_id)
+        )
         return (
             str(row.id),
-            str(row.creator_user_id),
+            effective_user_id,
             str(row.org_id),
             str(row.workspace_id),
             str(row.topic_id) if row.topic_id is not None else None,
@@ -103,6 +118,7 @@ async def resume_paused_run(
     sandbox_mode: str | None = None
     topic_creator_user_id: str | None = None
     topic_title: str | None = None
+    conversation_creator_user_id = user_id
     if topic_id is not None or is_group_chat:
         from sqlalchemy import select as _select
 
@@ -112,6 +128,9 @@ async def resume_paused_run(
 
         im_bound = False
         async with _sm() as _sess:
+            conv_row = await _sess.get(Conversation, conversation_id)
+            if conv_row is not None:
+                conversation_creator_user_id = str(conv_row.creator_user_id)
             if topic_id is not None:
                 topic_row = (
                     await _sess.execute(
@@ -126,7 +145,6 @@ async def resume_paused_run(
                     topic_creator_user_id = topic_row.creator_user_id
                     topic_title = topic_row.title
             if not im_bound:
-                conv_row = await _sess.get(Conversation, conversation_id)
                 im_bound = conv_row is not None and "im" in (conv_row.attributes or {})
 
         if not im_bound:
@@ -189,7 +207,7 @@ async def resume_paused_run(
         is_group_chat=is_group_chat,
         sandbox_mode=sandbox_mode,
         topic_creator_user_id=topic_creator_user_id,
-        conversation_creator_user_id=user_id,
+        conversation_creator_user_id=conversation_creator_user_id,
     )
 
     try:

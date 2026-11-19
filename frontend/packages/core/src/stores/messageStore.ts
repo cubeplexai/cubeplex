@@ -176,6 +176,8 @@ export interface PendingConfirm {
    * ``currentRunId`` or the bootstrap ``pending_hitl`` payload.
    */
   run_id: string
+  actor_user_id?: string | null
+  actor_display_name?: string | null
 }
 
 export interface PendingAsk {
@@ -185,6 +187,8 @@ export interface PendingAsk {
   requestedAt: number
   /** Run id that owns the pending request. See ``PendingConfirm.run_id``. */
   run_id: string
+  actor_user_id?: string | null
+  actor_display_name?: string | null
 }
 
 export type RunLifecycle = 'idle' | 'running' | 'paused_hitl' | 'resuming_hitl' | 'stopping'
@@ -1333,6 +1337,8 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
       matched_pattern: string | null
       timeout_seconds: number | null
       run_id?: string
+      actor_user_id?: string | null
+      actor_display_name?: string | null
     }
     if (!d.tool_call_id) return base
     // Live SSE: the active run drives this event. The event payload may not
@@ -1351,6 +1357,8 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
           timeout_seconds: d.timeout_seconds ?? null,
           requestedAt: event.timestamp ? new Date(event.timestamp).getTime() : Date.now(),
           run_id: runId,
+          ...(d.actor_user_id != null ? { actor_user_id: d.actor_user_id } : {}),
+          ...(d.actor_display_name != null ? { actor_display_name: d.actor_display_name } : {}),
         },
       },
       // Mirror ask_user_request: a fresh confirm question wipes the
@@ -1392,6 +1400,8 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
       questions: import('../types/events').AskQuestion[]
       timeout_seconds: number | null
       run_id?: string
+      actor_user_id?: string | null
+      actor_display_name?: string | null
     }
     if (state.pendingAsk?.question_id === d.question_id) return base // idempotent
     // See sandbox_confirm_request above for the run_id source-of-truth note.
@@ -1404,6 +1414,8 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
         timeout_seconds: d.timeout_seconds ?? null,
         requestedAt: event.timestamp ? new Date(event.timestamp).getTime() : Date.now(),
         run_id: runId,
+        ...(d.actor_user_id != null ? { actor_user_id: d.actor_user_id } : {}),
+        ...(d.actor_display_name != null ? { actor_display_name: d.actor_display_name } : {}),
       },
       // Fresh question — drop the "we just answered the previous one" marker
       // so a subsequent bootstrap can seed THIS form if the page reloads
@@ -2670,6 +2682,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             timeout_seconds: null,
             requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
             run_id: pending.run_id,
+            ...(pending.actor_user_id != null ? { actor_user_id: pending.actor_user_id } : {}),
+            ...(pending.actor_display_name != null
+              ? { actor_display_name: pending.actor_display_name }
+              : {}),
           }
         } else if (!nextCancelling && pending && pending.kind === 'sandbox_confirm' && !skipSeed) {
           const requestedAt = Date.parse(pending.requested_at)
@@ -2681,6 +2697,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               timeout_seconds: null,
               requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
               run_id: pending.run_id,
+              ...(pending.actor_user_id != null ? { actor_user_id: pending.actor_user_id } : {}),
+              ...(pending.actor_display_name != null
+                ? { actor_display_name: pending.actor_display_name }
+                : {}),
             },
           }
         }

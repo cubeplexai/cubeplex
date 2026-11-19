@@ -340,7 +340,11 @@
     "cancel": "Cancel",
     "cancelling": "Cancelling…",
     "customPlaceholder": "Type your answer",
-    "customInput": "Custom answer for {label}"
+    "customInput": "Custom answer for {label}",
+    "onlyActorCanAnswer": "Only the user who started this turn can submit an answer. You can cancel to continue.",
+    "onlyActorCanAnswerNamed": "Only {name} can submit an answer. You can cancel to continue.",
+    "onlyActorCanApprove": "Only the user who started this turn can approve or deny this command.",
+    "onlyActorCanApproveNamed": "Only {name} can approve or deny this command."
   },
   "avatar": {
     "adminPanel": "Admin panel",
