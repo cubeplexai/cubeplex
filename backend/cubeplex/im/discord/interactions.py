@@ -35,6 +35,18 @@ async def handle_component_interaction(
 
     _, kind, run_id, short_qid, answer_key, value = parts
 
+    user = getattr(interaction, "user", None)
+    operator_open_id = str(getattr(user, "id", "") or "")
+    from cubeplex.im.outbound import verify_awaiting_responder
+
+    if not await verify_awaiting_responder(
+        redis_key_prefix=redis_key_prefix,
+        run_id=run_id,
+        operator_open_id=operator_open_id,
+    ):
+        await interaction.response.send_message("这不是发给你的。", ephemeral=True)
+        return
+
     from cubeplex.im.resume import resolve_full_question_id
 
     question_id = await resolve_full_question_id(run_id, short_qid)
@@ -46,7 +58,7 @@ async def handle_component_interaction(
             run_id=run_id,
             input_kind=kind,
             choice=value,
-            operator_open_id="",
+            operator_open_id=operator_open_id,
             question_id=question_id,
             answer_key=answer_key,
             run_manager=run_manager,

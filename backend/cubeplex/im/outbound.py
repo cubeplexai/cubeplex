@@ -541,6 +541,29 @@ async def register_awaiting_responder(
     )
 
 
+async def verify_awaiting_responder(
+    *,
+    redis_key_prefix: str,
+    run_id: str,
+    operator_open_id: str,
+) -> bool:
+    """Fail-closed check that ``operator_open_id`` matches the run's bound responder.
+
+    Returns ``False`` when ``redis_key_prefix``, ``run_id``, or
+    ``operator_open_id`` is missing, when the Redis binding is absent/expired,
+    or when the clicking user does not match the bound sender.
+    """
+    if not redis_key_prefix or not run_id or not operator_open_id:
+        return False
+    from cubeplex.cache import get_redis
+
+    raw = await get_redis().get(f"{redis_key_prefix}:run:{run_id}:awaiting_responder")
+    if raw is None:
+        return False
+    expected = raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw)
+    return bool(expected) and operator_open_id == expected
+
+
 def note_flood_strike(state: RenderState) -> None:
     """Tailer-side hook: connector signaled a flood-control response.
 
@@ -582,7 +605,6 @@ class OutboundRunTailer:
         artifact_dispatcher: Any | None = None,
         responder_open_id: str | None = None,
         block_ms: int = 2000,
-        shared_mode: bool = False,
     ) -> None:
         self._redis = redis
         self._prefix = key_prefix
@@ -593,7 +615,6 @@ class OutboundRunTailer:
         self._artifact_dispatcher = artifact_dispatcher
         self._responder_open_id = responder_open_id
         self._block_ms = block_ms
-        self._shared_mode = shared_mode
 
     async def maybe_register_awaiting_responder(self, *, ev_payload: dict[str, Any]) -> None:
         """Register the awaiting_responder binding if the event is a pending input.

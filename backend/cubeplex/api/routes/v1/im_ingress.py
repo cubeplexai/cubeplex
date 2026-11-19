@@ -526,16 +526,16 @@ async def teams_messages(
         if isinstance(action_data, str) and action_data.startswith("im:"):
             from cubeplex.im.teams.interactions import handle_card_action
 
-            operator_aad_id = str((activity.get("from") or {}).get("aadObjectId") or "")
-            ok = await handle_card_action(
+            from_obj = activity.get("from") or {}
+            operator_aad_id = str(from_obj.get("aadObjectId") or from_obj.get("id") or "")
+            await handle_card_action(
                 data={"action": action_data},
                 operator_aad_id=operator_aad_id,
                 run_manager=request.app.state.run_manager,
                 redis_key_prefix=request.app.state.redis_key_prefix,
             )
-            status_body = {"status": 200} if ok else {"status": 500}
             return Response(
-                content=json.dumps(status_body),
+                content=json.dumps({"status": 200}),
                 media_type="application/json",
             )
 

@@ -79,15 +79,12 @@ async def is_shared_mode_for_tailer(
     channel_id: str,
     conversation_id: str,
 ) -> bool:
-    """Whether the tailer should treat this run as a shared/group conversation.
+    """Whether the resolved conversation is a shared/group conversation.
 
-    Read it from the RESOLVED conversation's ``is_group_chat`` rather than the
-    account routing flag: ``resolve_im_conversation`` already encodes the real
-    decision there, including that a DM on a shared-routing bot is NOT shared.
-    Deriving it from account routing alone would make the tailer skip
-    ``maybe_register_awaiting_responder`` for such a DM, so the sender's own
-    HITL/ask-user card clicks would later be rejected. Falls back to the
-    account routing flag only if the conversation can't be loaded.
+    Reads ``is_group_chat`` from the RESOLVED conversation rather than the
+    account routing flag: ``resolve_im_conversation`` already encodes that a DM
+    on a shared-routing bot is NOT shared. Falls back to the account routing
+    flag only if the conversation cannot be loaded.
     """
     del channel_id  # superseded by the conversation's resolved is_group_chat
     from sqlmodel import col, select

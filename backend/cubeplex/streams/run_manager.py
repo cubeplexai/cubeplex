@@ -478,6 +478,9 @@ def _dicts_to_sse_events(
 async def _drain_subagent_citation_queue(
     queue: asyncio.Queue[tuple[str, Any, Any] | None],
     publish: Any,
+    *,
+    actor_user_id: str | None = None,
+    actor_display_name: str | None = None,
 ) -> None:
     """Drain (kind, agent_id, payload) tuples and publish typed AgentEvents.
 
@@ -512,7 +515,12 @@ async def _drain_subagent_citation_queue(
         timestamp = datetime.now(UTC).isoformat()
         sse_event: AgentEvent | None = None
         if kind == "subagent":
-            sse_event = cubeloop_dict_to_agent_event(payload, timestamp)
+            sse_event = cubeloop_dict_to_agent_event(
+                payload,
+                timestamp,
+                actor_user_id=actor_user_id,
+                actor_display_name=actor_display_name,
+            )
             if sse_event is not None and agent_id is not None:
                 sse_event.agent_id = agent_id
         elif kind == "citation":
@@ -5598,7 +5606,12 @@ class RunManager:
         # drain (see the DoneEvent block below) and the safety net in
         # `finally` skips when it already ran.
         event_q_drainer: asyncio.Task[None] | None = asyncio.create_task(
-            _drain_subagent_citation_queue(event_q, publish_stream_event),
+            _drain_subagent_citation_queue(
+                event_q,
+                publish_stream_event,
+                actor_user_id=ctx.user_id,
+                actor_display_name=ctx.sender_display_name,
+            ),
             name=f"event_q_drainer:{run_id}",
         )
 
@@ -6307,7 +6320,12 @@ class RunManager:
             await publish_event(sse_event)
 
         event_q_drainer: asyncio.Task[None] | None = asyncio.create_task(
-            _drain_subagent_citation_queue(event_q, publish_stream_event),
+            _drain_subagent_citation_queue(
+                event_q,
+                publish_stream_event,
+                actor_user_id=ctx.user_id,
+                actor_display_name=ctx.sender_display_name,
+            ),
             name=f"event_q_drainer_respond:{run_id}",
         )
 

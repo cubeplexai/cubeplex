@@ -281,7 +281,7 @@ interface HistoryProps {
   statusPhase?: never
   subAgentStreams?: never
   pendingConfirmMap?: Record<string, PendingConfirm>
-  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
+  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny' | 'cancel') => Promise<void>
 }
 
 interface StreamingProps {
@@ -306,7 +306,7 @@ interface StreamingProps {
   statusPhase?: string | null
   subAgentStreams?: Record<string, AgentStream>
   pendingConfirmMap?: Record<string, PendingConfirm>
-  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
+  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny' | 'cancel') => Promise<void>
 }
 
 type AssistantMessageProps = HistoryProps | StreamingProps
@@ -379,7 +379,7 @@ function ContentBlockRenderer({
   agentId?: string | null
   conversationId?: string
   pendingConfirmMap?: Record<string, PendingConfirm>
-  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
+  onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny' | 'cancel') => Promise<void>
 }) {
   if (block.type === 'thinking') {
     // ReasoningBlock owns its own chip / panel chrome (no outer card wrap).

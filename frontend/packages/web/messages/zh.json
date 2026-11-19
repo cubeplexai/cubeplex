@@ -343,8 +343,9 @@
     "customInput": "{label}的自定义回答",
     "onlyActorCanAnswer": "仅本轮发起人可提交回答，你可取消后继续对话。",
     "onlyActorCanAnswerNamed": "仅 {name} 可提交回答，你可取消后继续对话。",
-    "onlyActorCanApprove": "仅本轮发起人可审批此命令。",
-    "onlyActorCanApproveNamed": "仅 {name} 可审批此命令。"
+    "onlyActorCanApprove": "仅本轮发起人可审批此命令，你可取消后继续对话。",
+    "onlyActorCanApproveNamed": "仅 {name} 可审批此命令，你可取消后继续对话。",
+    "submitConflictToast": "无法提交回答，会话状态已刷新。"
   },
   "avatar": {
     "adminPanel": "管理后台",

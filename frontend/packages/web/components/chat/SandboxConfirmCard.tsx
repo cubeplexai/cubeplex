@@ -10,14 +10,21 @@ interface SandboxConfirmCardProps {
   pending: PendingConfirm
   onApprove: () => Promise<void>
   onDeny: () => Promise<void>
+  onCancel?: () => Promise<void>
 }
 
-export function SandboxConfirmCard({ pending, onApprove, onDeny }: SandboxConfirmCardProps) {
+export function SandboxConfirmCard({
+  pending,
+  onApprove,
+  onDeny,
+  onCancel,
+}: SandboxConfirmCardProps) {
   const t = useTranslations('askUser')
   const currentUserId = useAuthStore((s) => s.user?.id ?? null)
   const canAnswer =
-    !pending.actor_user_id || !currentUserId || pending.actor_user_id === currentUserId
+    !pending.actor_user_id || (currentUserId !== null && pending.actor_user_id === currentUserId)
   const [submitting, setSubmitting] = useState<'approve' | 'deny' | null>(null)
+  const [cancelling, setCancelling] = useState(false)
   const [secondsLeft, setSecondsLeft] = useState<number | null>(() => {
     if (pending.timeout_seconds === null) return null
     const elapsed = Math.floor((Date.now() - pending.requestedAt) / 1000)
@@ -31,13 +38,23 @@ export function SandboxConfirmCard({ pending, onApprove, onDeny }: SandboxConfir
   }, [secondsLeft])
 
   const handle = async (decision: 'approve' | 'deny') => {
-    if (!canAnswer || submitting) return
+    if (!canAnswer || submitting || cancelling) return
     setSubmitting(decision)
     try {
       if (decision === 'approve') await onApprove()
       else await onDeny()
     } catch {
       setSubmitting(null)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!onCancel || cancelling || submitting) return
+    setCancelling(true)
+    try {
+      await onCancel()
+    } catch {
+      setCancelling(false)
     }
   }
 
@@ -65,11 +82,11 @@ export function SandboxConfirmCard({ pending, onApprove, onDeny }: SandboxConfir
             : t('onlyActorCanApprove')}
         </p>
       )}
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2">
         <Button
           size="sm"
           className="gap-1 bg-success-solid hover:bg-success-solid/90 text-primary-foreground"
-          disabled={!canAnswer || !!submitting}
+          disabled={!canAnswer || !!submitting || cancelling}
           onClick={() => handle('approve')}
         >
           <Check className="h-3.5 w-3.5" />
@@ -79,12 +96,24 @@ export function SandboxConfirmCard({ pending, onApprove, onDeny }: SandboxConfir
           size="sm"
           variant="outline"
           className="gap-1 border-danger-border text-danger-fg hover:bg-danger-surface"
-          disabled={!canAnswer || !!submitting}
+          disabled={!canAnswer || !!submitting || cancelling}
           onClick={() => handle('deny')}
         >
           <X className="h-3.5 w-3.5" />
           {submitting === 'deny' ? 'Denying…' : 'Deny'}
         </Button>
+        {onCancel && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1 text-muted-foreground hover:text-foreground"
+            disabled={!!submitting || cancelling}
+            onClick={handleCancel}
+          >
+            <X className="h-3.5 w-3.5" />
+            {cancelling ? t('cancelling') : t('cancel')}
+          </Button>
+        )}
       </div>
     </div>
   )

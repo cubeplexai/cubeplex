@@ -22,7 +22,7 @@ class WecomPlatform:
     ) -> Any:
         from cubeplex.im.artifacts import IMArtifactDispatcher
         from cubeplex.im.outbound import OutboundRunTailer
-        from cubeplex.im.types import RenderState, is_shared_mode_for_tailer
+        from cubeplex.im.types import RenderState
         from cubeplex.im.wecom.connector import WecomConnector
         from cubeplex.im.wecom.renderer import WecomOpDispatcher
 
@@ -62,12 +62,6 @@ class WecomPlatform:
             reply_to_id=queue_item.reply_to_id,
             supports_inline_image=False,
         )
-        shared_mode = await is_shared_mode_for_tailer(
-            kwargs["session_maker"],
-            queue_item.account_id,
-            queue_item.channel_id,
-            queue_item.conversation_id,
-        )
         tailer = OutboundRunTailer(
             redis=app.state.redis,
             key_prefix=app.state.redis_key_prefix,
@@ -77,7 +71,6 @@ class WecomPlatform:
             dispatcher=dispatcher,
             artifact_dispatcher=artifacts,
             responder_open_id=queue_item.sender_open_id,
-            shared_mode=shared_mode,
         )
         asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 

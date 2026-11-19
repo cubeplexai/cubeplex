@@ -18,16 +18,17 @@ from loguru import logger
 async def _resolve_run_context(
     run_id: str,
 ) -> tuple[str, str, str, str, str | None, bool] | None:
-    """Look up ``(conversation_id, user_id, org_id, workspace_id, topic_id, is_group_chat)`` for a run.
+    """Resolve ``(conversation_id, user_id, org_id, workspace_id, topic_id, is_group_chat)``.
 
     Two-step lookup:
 
     1. Read the Redis ``RunMeta`` hash to map ``run_id → conversation_id``.
        ``RunManager`` writes this on every run start; TTL is the run-event
        TTL (12h by default) which more than covers a paused HITL window.
-    2. Load the ``Conversation`` row by id (unscoped — we don't yet know
-       which workspace it lives in) to read ``creator_user_id``,
-       ``workspace_id``, ``org_id``, ``topic_id``.
+    2. Load the ``Conversation`` row and ``ConversationExecutionAdmission``
+       for ``run_id`` to resolve the turn's ``actor_user_id`` (falling back
+       to ``creator_user_id`` for legacy pre-admission rows), ``workspace_id``,
+       ``org_id``, ``topic_id``, and ``is_group_chat``.
 
     Returns None when either step fails. The caller treats None as
     "session ended" and surfaces a toast.
@@ -118,6 +119,7 @@ async def resume_paused_run(
     sandbox_mode: str | None = None
     topic_creator_user_id: str | None = None
     topic_title: str | None = None
+    sender_display_name: str | None = None
     conversation_creator_user_id = user_id
     if topic_id is not None or is_group_chat:
         from sqlalchemy import select as _select
@@ -125,12 +127,17 @@ async def resume_paused_run(
         from cubeplex.db.engine import async_session_maker as _sm
         from cubeplex.models.conversation import Conversation
         from cubeplex.models.topic import Topic
+        from cubeplex.models.user import User
 
         im_bound = False
         async with _sm() as _sess:
             conv_row = await _sess.get(Conversation, conversation_id)
             if conv_row is not None:
                 conversation_creator_user_id = str(conv_row.creator_user_id)
+            actor_user = await _sess.get(User, user_id)
+            if actor_user is not None:
+                raw_name = actor_user.display_name or actor_user.email
+                sender_display_name = str(raw_name) if raw_name else None
             if topic_id is not None:
                 topic_row = (
                     await _sess.execute(
@@ -165,7 +172,7 @@ async def resume_paused_run(
         decision: Literal["approve", "deny"] = "approve" if choice == "approve" else "deny"
         answer = ApproveAnswer(
             decision=cast(Literal["approve", "deny", "edit"], decision),
-            reason=f"via Feishu card (operator={operator_open_id})",
+            reason=f"via IM card (operator={operator_open_id})",
         )
     elif input_kind == "ask_user":
         # Form path (Feishu multi-question / multi-select / free-text): the
@@ -205,6 +212,7 @@ async def resume_paused_run(
         topic_id=topic_id,
         topic_title=topic_title,
         is_group_chat=is_group_chat,
+        sender_display_name=sender_display_name,
         sandbox_mode=sandbox_mode,
         topic_creator_user_id=topic_creator_user_id,
         conversation_creator_user_id=conversation_creator_user_id,

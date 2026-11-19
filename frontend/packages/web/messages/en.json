@@ -343,8 +343,9 @@
     "customInput": "Custom answer for {label}",
     "onlyActorCanAnswer": "Only the user who started this turn can submit an answer. You can cancel to continue.",
     "onlyActorCanAnswerNamed": "Only {name} can submit an answer. You can cancel to continue.",
-    "onlyActorCanApprove": "Only the user who started this turn can approve or deny this command.",
-    "onlyActorCanApproveNamed": "Only {name} can approve or deny this command."
+    "onlyActorCanApprove": "Only the user who started this turn can approve or deny this command. You can cancel to continue.",
+    "onlyActorCanApproveNamed": "Only {name} can approve or deny this command. You can cancel to continue.",
+    "submitConflictToast": "Could not submit response. Conversation state has been refreshed."
   },
   "avatar": {
     "adminPanel": "Admin panel",

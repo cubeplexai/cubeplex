@@ -28,6 +28,21 @@ async def handle_block_action(
 
     _, kind, run_id, short_qid, answer_key, value = parts
 
+    operator_open_id = str((body.get("user") or {}).get("id") or "")
+    from cubeplex.im.outbound import verify_awaiting_responder
+
+    if not await verify_awaiting_responder(
+        redis_key_prefix=redis_key_prefix,
+        run_id=run_id,
+        operator_open_id=operator_open_id,
+    ):
+        logger.info(
+            "[Slack] block action rejected for non-matching responder: run={} user={}",
+            run_id,
+            operator_open_id,
+        )
+        return
+
     from cubeplex.im.resume import resolve_full_question_id
 
     question_id = await resolve_full_question_id(run_id, short_qid)
@@ -39,7 +54,7 @@ async def handle_block_action(
             run_id=run_id,
             input_kind=kind,
             choice=value,
-            operator_open_id="",
+            operator_open_id=operator_open_id,
             question_id=question_id,
             answer_key=answer_key,
             run_manager=run_manager,

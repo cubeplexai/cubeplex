@@ -32,7 +32,23 @@ async def handle_card_action(
     _, kind, run_id, short_qid, akey, value = parts
 
     from cubeplex.cache import get_redis
+    from cubeplex.im.outbound import verify_awaiting_responder
     from cubeplex.im.resume import resolve_full_question_id, resume_paused_run
+
+    # Fail-closed responder check MUST run before setting replay_key — otherwise
+    # any non-actor clicking the card in a shared Teams chat sets replay_key and
+    # locks out the real turn actor for 30 minutes.
+    if not await verify_awaiting_responder(
+        redis_key_prefix=redis_key_prefix,
+        run_id=run_id,
+        operator_open_id=operator_aad_id,
+    ):
+        logger.info(
+            "[Teams] card action rejected for non-matching responder: run={} got={}",
+            run_id,
+            operator_aad_id,
+        )
+        return False
 
     redis = get_redis()
 
@@ -41,22 +57,6 @@ async def handle_card_action(
     fresh = await redis.set(replay_key, "1", ex=1800, nx=True)
     if not fresh:
         return True
-
-    # Responder check — only the user who triggered the HITL pause may answer.
-    expected_raw = await redis.get(f"{redis_key_prefix}:run:{run_id}:awaiting_responder")
-    if expected_raw is not None:
-        expected = (
-            expected_raw.decode()
-            if isinstance(expected_raw, (bytes, bytearray))
-            else str(expected_raw)
-        )
-        if expected and operator_aad_id and expected != operator_aad_id:
-            logger.info(
-                "[Teams] card action rejected: expected={} got={}",
-                expected,
-                operator_aad_id,
-            )
-            return False
 
     try:
         question_id = await resolve_full_question_id(run_id, short_qid)

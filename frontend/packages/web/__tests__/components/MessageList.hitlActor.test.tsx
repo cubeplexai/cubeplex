@@ -6,6 +6,7 @@ import type { ApiClient, AskQuestion } from '@cubeplex/core'
 
 const submitAskUserAnswer = vi.hoisted(() => vi.fn())
 const cancelActiveRun = vi.hoisted(() => vi.fn().mockResolvedValue({ status: 'cancelled' }))
+const toastError = vi.hoisted(() => vi.fn())
 
 vi.mock('@cubeplex/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@cubeplex/core')>()
@@ -13,6 +14,9 @@ vi.mock('@cubeplex/core', async (importOriginal) => {
 })
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: () => undefined }),
+}))
+vi.mock('sonner', () => ({
+  toast: { error: toastError },
 }))
 
 import { ApiError, useAuthStore, useMessageStore } from '@cubeplex/core'
@@ -77,17 +81,7 @@ describe('HITL execution actor gating and 409 error recovery', () => {
     })
   })
 
-  it('disables AskUserCard submit for non-actor participants while keeping Cancel enabled', async () => {
-    useAuthStore.setState({
-      user: {
-        id: 'usr-viewer',
-        email: 'viewer@example.com',
-        is_active: true,
-        is_superuser: false,
-        is_verified: true,
-      } as never,
-    })
-
+  it('disables AskUserCard submit for non-actor/pre-hydration and keeps Cancel', async () => {
     const client = makeBootstrapClient({
       messages: [],
       active_run: null,
@@ -109,6 +103,22 @@ describe('HITL execution actor gating and 409 error recovery', () => {
       currentRunId: null,
     })
 
+    // Pre-hydration (user is null): must fail closed on Submit while keeping Cancel enabled.
+    const view = render(<MessageList conversationId="conv-1" />, { wrapper })
+    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
+    view.unmount()
+
+    // Non-actor participant: sees named guidance, cannot check radio or submit, can cancel.
+    useAuthStore.setState({
+      user: {
+        id: 'usr-viewer',
+        email: 'viewer@example.com',
+        is_active: true,
+        is_superuser: false,
+        is_verified: true,
+      } as never,
+    })
     render(<MessageList conversationId="conv-1" />, { wrapper })
 
     expect(
@@ -125,7 +135,7 @@ describe('HITL execution actor gating and 409 error recovery', () => {
     await waitFor(() => expect(cancelActiveRun).toHaveBeenCalledOnce())
   })
 
-  it('disables SandboxConfirmCard approve/deny for non-actor participants', () => {
+  it('disables SandboxConfirmCard approve/deny for non-actor and keeps Cancel', async () => {
     useAuthStore.setState({
       user: {
         id: 'usr-viewer',
@@ -135,6 +145,7 @@ describe('HITL execution actor gating and 409 error recovery', () => {
         is_verified: true,
       } as never,
     })
+    const onCancel = vi.fn(async () => {})
 
     render(
       <SandboxConfirmCard
@@ -150,18 +161,33 @@ describe('HITL execution actor gating and 409 error recovery', () => {
         }}
         onApprove={vi.fn(async () => {})}
         onDeny={vi.fn(async () => {})}
+        onCancel={onCancel}
       />,
       { wrapper },
     )
 
-    expect(screen.getByText('Only Daibolin can approve or deny this command.')).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Only Daibolin can approve or deny this command. You can cancel to continue.',
+      ),
+    ).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled()
+    const cancelBtn = screen.getByRole('button', { name: 'Cancel' })
+    expect(cancelBtn).toBeEnabled()
+    fireEvent.click(cancelBtn)
+    await waitFor(() => expect(onCancel).toHaveBeenCalledOnce())
   })
 
-  it.each(['not_execution_actor', 'conversation_moved'] as const)(
-    'resets submitting state and preserves error banner when submit fails with 409 (%s) on existing history',
-    async (errorCode) => {
+  it.each([
+    [
+      'not_execution_actor',
+      'Only the user who started this turn can submit an answer. You can cancel to continue.',
+    ],
+    ['conversation_moved', 'Could not submit response. Conversation state has been refreshed.'],
+  ] as const)(
+    'resets submitting state, shows toast, and avoids run failure state on 409 (%s)',
+    async (errorCode, expectedToast) => {
       const bootstrapPayload = {
         messages: [
           {
@@ -193,9 +219,9 @@ describe('HITL execution actor gating and 409 error recovery', () => {
       })
 
       submitAskUserAnswer.mockRejectedValueOnce(
-        new ApiError('Only the user who started this turn can respond.', 409, errorCode, {
+        new ApiError('Conflict', 409, errorCode, {
           code: errorCode,
-          message: 'Only the user who started this turn can respond.',
+          message: 'Conflict',
         }),
       )
 
@@ -205,12 +231,60 @@ describe('HITL execution actor gating and 409 error recovery', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
 
       await waitFor(() => expect(submitAskUserAnswer).toHaveBeenCalledOnce())
-      // Must reset back to "Submit" instead of hanging on "Sending…" forever
+      // Must reset back to "Submit" instead of hanging on "Sending…" forever.
       await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled())
-      // Error must NOT be wiped out by the subsequent loadMessages reload
-      expect(useMessageStore.getState().errors['conv-1']?.data.message).toBe(
-        'Only the user who started this turn can respond.',
-      )
+      // Toast surfaces the conflict without painting the assistant run as Failed.
+      expect(toastError).toHaveBeenCalledWith(expectedToast)
+      expect(useMessageStore.getState().errors['conv-1']).toBeNull()
     },
   )
+
+  it('reloads silently without cancelFailed toast when Cancel hits a 409 race', async () => {
+    const initialClient = makeBootstrapClient({
+      messages: [],
+      active_run: null,
+      total: 0,
+      last_run_status: null,
+      last_run_error: null,
+      pending_hitl: {
+        run_id: 'run-1',
+        question_id: 'q-race',
+        kind: 'ask_user',
+        requested_at: '2026-11-19T00:00:00.000Z',
+        questions: [diskQuestion],
+      },
+    })
+    const refreshedClient = makeBootstrapClient({
+      messages: [],
+      active_run: null,
+      total: 0,
+      last_run_status: null,
+      last_run_error: null,
+      pending_hitl: null,
+    })
+    await realLoadMessages(initialClient, 'conv-1')
+    const reloadSpy = vi.fn(async () => {})
+    useMessageStore.setState({
+      loadMessages: reloadSpy,
+      currentRunId: 'run-1',
+    })
+
+    cancelActiveRun.mockRejectedValueOnce(
+      new ApiError('Conversation moved', 409, 'conversation_moved', {
+        code: 'conversation_moved',
+        message: 'Conversation moved',
+      }),
+    )
+
+    render(<MessageList conversationId="conv-1" />, { wrapper })
+    reloadSpy.mockClear()
+    reloadSpy.mockImplementation((_c, convId) => realLoadMessages(refreshedClient, convId))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(cancelActiveRun).toHaveBeenCalledOnce())
+    await waitFor(() => expect(reloadSpy).toHaveBeenCalledWith(expect.anything(), 'conv-1'))
+    await waitFor(() => expect(useMessageStore.getState().pendingAsk).toBeNull())
+    expect(toastError).not.toHaveBeenCalled()
+    expect(useMessageStore.getState().errors['conv-1']).toBeFalsy()
+  })
 })

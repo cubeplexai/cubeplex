@@ -57,7 +57,7 @@ interface ToolCallItemProps {
   /** @deprecated chips use gap, not dividers — kept for call-site compat */
   showDivider?: boolean
   pendingConfirm?: PendingConfirm | null
-  onSandboxConfirm?: (decision: 'approve' | 'deny') => Promise<void>
+  onSandboxConfirm?: (decision: 'approve' | 'deny' | 'cancel') => Promise<void>
 }
 
 function formatDuration(ms: number): string {
@@ -207,6 +207,7 @@ export const ToolCallItem = memo(function ToolCallItem({
             pending={pendingConfirm}
             onApprove={() => onSandboxConfirm('approve')}
             onDeny={() => onSandboxConfirm('deny')}
+            onCancel={() => onSandboxConfirm('cancel')}
           />
         </div>
       )}
