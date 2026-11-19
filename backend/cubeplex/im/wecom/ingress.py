@@ -182,11 +182,15 @@ async def handle_inbound_callback(
         return
 
     from cubeplex.im.control_commands import (
+        ListModelsCommand,
         SteerCommand,
         StopCommand,
+        SwitchModelCommand,
         _find_existing_receipt,
+        execute_list_models_command,
         execute_steer_command,
         execute_stop_command,
+        execute_switch_model_command,
         parse_control_command,
     )
     from cubeplex.im.identity import resolve_current_linked_member
@@ -239,6 +243,52 @@ async def handle_inbound_callback(
                 org_id=account.org_id,
                 workspace_id=account.workspace_id,
             )
+        if result.receipt_id is not None and event.reply_to_id is not None:
+            await _deliver_command_response(
+                receipt_id=result.receipt_id,
+                req_id=event.reply_to_id,
+                chat_id=event.channel_id,
+                session_maker=session_maker,
+                gateway=gateway,
+            )
+        return
+
+    if isinstance(control_cmd, (ListModelsCommand, SwitchModelCommand)):
+
+        async def build_model_response(
+            session: AsyncSession,
+            user_id: str | None,
+        ) -> dict[str, Any]:
+            assert user_id is not None
+            if isinstance(control_cmd, ListModelsCommand):
+                text = await execute_list_models_command(
+                    session=session,
+                    account=account,
+                    effective_user_id=user_id,
+                    channel_id=event.channel_id,
+                    scope_key=event.scope_key,
+                    scope_kind=event.scope_kind,
+                )
+            else:
+                text = await execute_switch_model_command(
+                    session=session,
+                    account=account,
+                    effective_user_id=user_id,
+                    channel_id=event.channel_id,
+                    scope_key=event.scope_key,
+                    scope_kind=event.scope_kind,
+                    model_arg=control_cmd.model,
+                    channel_name=event.channel_name,
+                )
+            return {"kind": "text", "text": text}
+
+        result = await ingest_command_response(
+            event,
+            account=account,
+            session_maker=session_maker,
+            build_response=build_model_response,
+            require_current_identity=True,
+        )
         if result.receipt_id is not None and event.reply_to_id is not None:
             await _deliver_command_response(
                 receipt_id=result.receipt_id,

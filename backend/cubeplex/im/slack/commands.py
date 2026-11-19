@@ -48,7 +48,7 @@ def register_commands(
     session_maker: Any,
     run_manager: Any = None,
 ) -> None:
-    """Register /link, /new, /reset, /stop, and /steer slash commands on Slack."""
+    """Register /link, /new, /reset, /stop, /steer, /models, and /model slash commands."""
 
     @app.command("/link")  # type: ignore[untyped-decorator]
     async def cmd_link(ack: Any, command: dict[str, Any], respond: Any) -> None:
@@ -132,6 +132,33 @@ def register_commands(
             run_manager=run_manager,
         )
 
+    @app.command("/models")  # type: ignore[untyped-decorator]
+    async def cmd_models(ack: Any, command: dict[str, Any], respond: Any) -> None:
+        await ack()
+        await _handle_control_slash(
+            command,
+            respond,
+            account_id=account_id,
+            session_maker=session_maker,
+            run_manager=run_manager,
+            text="/models",
+            failure_reply="Failed to list models.",
+        )
+
+    @app.command("/model")  # type: ignore[untyped-decorator]
+    async def cmd_model(ack: Any, command: dict[str, Any], respond: Any) -> None:
+        await ack()
+        arg = (command.get("text") or "").strip()
+        await _handle_control_slash(
+            command,
+            respond,
+            account_id=account_id,
+            session_maker=session_maker,
+            run_manager=run_manager,
+            text=f"/model {arg}" if arg else "/model",
+            failure_reply="Failed to switch model.",
+        )
+
 
 async def _handle_reset_slash(
     command: dict[str, Any],
@@ -205,13 +232,15 @@ async def _resolve_slack_slash_scope(
     return channel_id, user_id, scope_key, "channel"
 
 
-async def _handle_stop_slash(
+async def _handle_control_slash(
     command: dict[str, Any],
     respond: Any,
     *,
     account_id: str,
     session_maker: Any,
     run_manager: Any,
+    text: str,
+    failure_reply: str,
 ) -> None:
     from uuid import uuid4
 
@@ -236,7 +265,7 @@ async def _handle_stop_slash(
         scope_kind=scope_kind,
         sender_ref=user_id,
         sender_open_id=user_id,
-        text="/stop",
+        text=text,
         reply_to_id=None,
         inbound_message_id="",
     )
@@ -247,8 +276,8 @@ async def _handle_stop_slash(
         return
     event.account_external_id = account.external_account_id
 
-    async def _reply(text: str) -> None:
-        await respond(text, response_type="ephemeral")
+    async def _reply(reply_text: str) -> None:
+        await respond(reply_text, response_type="ephemeral")
 
     try:
         await maybe_handle_control_command(
@@ -260,8 +289,27 @@ async def _handle_stop_slash(
             require_linked_member=True,
         )
     except Exception:
-        logger.opt(exception=True).warning("[Slack] /stop slash handler failed")
-        await respond("Failed to stop current reply.", response_type="ephemeral")
+        logger.opt(exception=True).warning("[Slack] {} slash handler failed", text.split()[0])
+        await respond(failure_reply, response_type="ephemeral")
+
+
+async def _handle_stop_slash(
+    command: dict[str, Any],
+    respond: Any,
+    *,
+    account_id: str,
+    session_maker: Any,
+    run_manager: Any,
+) -> None:
+    await _handle_control_slash(
+        command,
+        respond,
+        account_id=account_id,
+        session_maker=session_maker,
+        run_manager=run_manager,
+        text="/stop",
+        failure_reply="Failed to stop current reply.",
+    )
 
 
 async def _handle_steer_slash(

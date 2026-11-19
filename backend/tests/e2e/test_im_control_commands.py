@@ -1017,3 +1017,188 @@ async def test_steer_with_attachments_and_stop_admission_fallback(
         )
         assert replies[-1] == STOP_SUCCESS_REPLY
         mock_stop.assert_awaited_once_with(run_id)
+
+
+async def test_im_models_and_model_switch_persists_and_applies_to_worker(
+    _im_env: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount, Any],
+) -> None:
+    """``/models`` lists org presets and ``/model <name>`` switches the IM conversation's
+    model_key, which subsequent ``process_im_queue_item`` runs honor."""
+    from cubeplex.im.inbound import ingest_inbound_event
+    from cubeplex.im.types import InboundEvent, make_channel_scope
+    from cubeplex.im.wecom.ingress import handle_inbound_callback
+    from cubeplex.im.worker import process_one_queue_item
+    from cubeplex.llm.snapshot import _load_presets, load_llm_snapshot
+    from cubeplex.services.conversation_execution import ConversationExecutionAdmission
+
+    maker, acct, app = _im_env
+
+    # Load real seeded presets for the org (already backed by seeded providers).
+    async with maker() as s:
+        presets, _ = await _load_presets(s, acct.org_id)
+    assert len(presets) >= 2
+    default_preset = next(p for p in presets if p.is_default)
+    target_preset = next(p for p in presets if p.key != default_preset.key)
+
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    scope_key = make_channel_scope()
+    # 1. /models on a fresh scope shows default_preset as default & active.
+    list_evt = InboundEvent(
+        platform="feishu",
+        platform_event_id=f"evt-models-1-{acct.id[-6:]}",
+        account_external_id=acct.external_account_id,
+        channel_id="oc_models_e2e",
+        scope_key=scope_key,
+        scope_kind="channel",
+        sender_ref="ou_u1",
+        sender_open_id="ou_u1",
+        text="/models",
+        reply_to_id="om_m1",
+        inbound_message_id="om_m1",
+    )
+    assert (
+        await maybe_handle_control_command(
+            list_evt,
+            account=acct,
+            session_maker=maker,
+            run_manager=app.state.run_manager,
+            reply=reply,
+        )
+        is True
+    )
+    assert f"{default_preset.key} ({default_preset.primary}) [默认 · 当前使用]" in replies[-1]
+    assert f"{target_preset.key} ({target_preset.primary})" in replies[-1]
+
+    # 2. /model <target> creates conversation if needed and sets Conversation.model_key.
+    switch_evt = InboundEvent(
+        platform="feishu",
+        platform_event_id=f"evt-model-sw-{acct.id[-6:]}",
+        account_external_id=acct.external_account_id,
+        channel_id="oc_models_e2e",
+        scope_key=scope_key,
+        scope_kind="channel",
+        sender_ref="ou_u1",
+        sender_open_id="ou_u1",
+        text=f"/model {target_preset.key}",
+        reply_to_id="om_m2",
+        inbound_message_id="om_m2",
+    )
+    assert (
+        await maybe_handle_control_command(
+            switch_evt,
+            account=acct,
+            session_maker=maker,
+            run_manager=app.state.run_manager,
+            reply=reply,
+        )
+        is True
+    )
+    assert f"已将当前会话模型切换为「{target_preset.key}」" in replies[-1]
+
+    # 3. Duplicate /model event is idempotent and sends no duplicate reply.
+    reply_count = len(replies)
+    assert (
+        await maybe_handle_control_command(
+            switch_evt,
+            account=acct,
+            session_maker=maker,
+            run_manager=app.state.run_manager,
+            reply=reply,
+        )
+        is True
+    )
+    assert len(replies) == reply_count
+
+    # 4. /models via WeCom ingress also sees target_preset as active.
+    wecom_gw = MagicMock()
+    wecom_gw.send_passive = AsyncMock(return_value={"errcode": 0})
+    wecom_gw.send_proactive = AsyncMock(return_value={"errcode": 0})
+    raw_models = {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": f"req-models-1-{acct.id[-6:]}"},
+        "body": {
+            "msgid": f"msg-models-1-{acct.id[-6:]}",
+            "aibotid": acct.external_account_id,
+            "chatid": "oc_models_e2e",
+            "chattype": "group",
+            "from": {"userid": "ou_u1"},
+            "msgtype": "text",
+            "text": {"content": "/models"},
+        },
+    }
+    await handle_inbound_callback(
+        raw_models,
+        account=acct,
+        session_maker=maker,
+        gateway=wecom_gw,
+        run_manager=app.state.run_manager,
+    )
+    wecom_gw.send_passive.assert_awaited_once()
+    sent_payload = wecom_gw.send_passive.call_args.args[1]
+    assert (
+        f"{target_preset.key} ({target_preset.primary}) [当前使用]"
+        in sent_payload["markdown"]["content"]
+    )
+
+    # 5. Next inbound message processed by worker admits and runs with model_key=target_preset.key.
+    msg_evt = InboundEvent(
+        platform="feishu",
+        platform_event_id=f"evt-msg-after-model-{acct.id[-6:]}",
+        account_external_id=acct.external_account_id,
+        channel_id="oc_models_e2e",
+        scope_key=scope_key,
+        scope_kind="channel",
+        sender_ref="ou_u1",
+        sender_open_id="ou_u1",
+        text="hello with switched model",
+        reply_to_id="om_m3",
+        inbound_message_id="om_m3",
+    )
+    from cubeplex.im.control_commands import EphemeralRejectionNotifier
+    from cubeplex.im.identity import NullIdentityResolver
+
+    async def _load_snap(session: AsyncSession, org_id: str) -> Any:
+        return await load_llm_snapshot(session, org_id, app.state.encryption_backend)
+
+    with patch.object(
+        app.state.run_manager,
+        "start_run",
+        new=AsyncMock(return_value="run-switched-1"),
+    ) as mock_start_run:
+        ingest_res = await ingest_inbound_event(
+            msg_evt,
+            account=acct,
+            session_maker=maker,
+            identity_resolver=NullIdentityResolver(),
+            rejection_notifier=EphemeralRejectionNotifier(reply),
+        )
+        assert ingest_res.outcome == "enqueued"
+        assert ingest_res.conversation_id is not None
+
+        if mock_start_run.await_count == 0:
+            await process_one_queue_item(
+                session_maker=maker,
+                run_manager=app.state.run_manager,
+                on_run_started=None,
+                lease_seconds=60,
+                load_execution_snapshot=_load_snap,
+            )
+        mock_start_run.assert_awaited_once()
+        assert mock_start_run.await_args.kwargs["model_key"] == target_preset.key
+
+    async with maker() as s:
+        conv = await s.get(Conversation, ingest_res.conversation_id)
+        assert conv is not None
+        assert conv.model_key == target_preset.key
+        adm = (
+            await s.execute(
+                select(ConversationExecutionAdmission).where(
+                    ConversationExecutionAdmission.conversation_id == conv.id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        assert adm.resolved_execution["model_key"] == target_preset.key

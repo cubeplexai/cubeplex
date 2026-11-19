@@ -136,6 +136,8 @@ In the Slack app settings open **Slash Commands** and create each command you wa
 | `/reset` | Same as `/new` | *(empty)* |
 | `/stop` | Stop the currently active reply | *(empty)* |
 | `/steer` | Inject a follow-up instruction into the active reply | `Follow-up instruction` |
+| `/models` | List available model presets | *(empty)* |
+| `/model` | Switch the conversation model preset | `Preset name` |
 
 With **Socket Mode** enabled you do **not** need a working public Request URL â€” events arrive over the socket. Slack may still require a placeholder URL when creating the command.
 
@@ -151,6 +153,8 @@ With **Socket Mode** enabled you do **not** need a working public Request URL â€
 | `/reset` | Same as `/new`. |
 | `/stop` | Stop the currently active reply without clearing queued messages. Replies privately for the slash form. |
 | `/steer <message>` | Inject a follow-up instruction into the active reply (or start a new one if idle). |
+| `/models` | List available model presets and mark the active one for this conversation. |
+| `/model <name>` | Switch the conversation's model preset for subsequent messages. |
 
 ### Slash commands do not work in threads
 

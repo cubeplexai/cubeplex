@@ -279,6 +279,7 @@ async def process_one_queue_item(
         execution_snapshot = None
         bg_tailer_run_id: str | None = None
         skip_bg_tailer = False
+        user_request_model_key: str | None = None
         async with session_maker() as session:
             live_account = await session.scalar(
                 select(IMConnectorAccount)
@@ -346,8 +347,22 @@ async def process_one_queue_item(
                     execution=ResolvedExecution.model_validate(admission.resolved_execution),
                     created=False,
                 )
+                if is_human:
+                    from cubeplex.models.conversation import Conversation
+
+                    conv = await session.get(Conversation, captured["conversation_id"])
+                    user_request_model_key = conv.model_key if conv is not None else None
             elif candidate.inbound_message_id is not None:
+                from cubeplex.models.conversation import Conversation
+
                 execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
+                conv = await session.get(Conversation, captured["conversation_id"])
+                conv_model_key = conv.model_key if conv is not None else None
+                if conv_model_key and not any(
+                    preset.key == conv_model_key for preset in execution_snapshot.model_presets
+                ):
+                    conv_model_key = None
+                user_request_model_key = conv_model_key
                 admitted = await ConversationExecutionService(
                     session,
                     org_id=captured["org_id"],
@@ -360,6 +375,7 @@ async def process_one_queue_item(
                     intent=UserMessageIntent(
                         content=captured["content"],
                         attachment_ids=tuple(attachment_ids or ()),
+                        model_key=conv_model_key,
                     ),
                     snapshot=execution_snapshot,
                     now=datetime.now(UTC),
@@ -459,11 +475,12 @@ async def process_one_queue_item(
                         )
 
             # The fingerprint is the request, not the resolved preset. Human IM
-            # messages are admitted with model_key unset; passing the resolved
-            # key back into start_run makes resolve_user_run reject the run.
-            # Automatic handoffs fingerprint that frozen key on purpose.
+            # messages are admitted with the conversation's requested model_key
+            # (or None for org default); passing a different key into start_run
+            # makes resolve_user_run reject the run. Automatic handoffs
+            # fingerprint their frozen key on purpose.
             request_model_key = (
-                None
+                user_request_model_key
                 if admitted is None or admitted.admission.source_kind == "user_message"
                 else admitted.execution.model_key
             )

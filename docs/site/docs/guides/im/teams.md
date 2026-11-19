@@ -229,6 +229,8 @@ Once linked, messages run as that user, with the same skills, memory, and tools 
 | `新对话` | Same as `/new` (text form). |
 | `/stop` | Stop the currently active reply without clearing queued messages. |
 | `/steer <message>` | Inject a follow-up instruction into the active reply (or start a new one if idle). |
+| `/models` | List available model presets and mark the active one for this conversation. |
+| `/model <name>` | Switch the conversation's model preset for subsequent messages. |
 
 `/new`, `/reset`, and `新对话` are equivalent. (The Chinese `绑定` alias for `/link` is Feishu-only.)
 
