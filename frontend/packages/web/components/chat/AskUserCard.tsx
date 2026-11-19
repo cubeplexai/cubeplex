@@ -314,7 +314,7 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
           </span>
         )}
       </div>
-      {!canAnswer && (
+      {currentUserId !== null && !canAnswer && (
         <p className="mt-2 pl-6 text-xs text-muted-foreground">
           {pending.actor_display_name
             ? t('onlyActorCanAnswerNamed', { name: pending.actor_display_name })

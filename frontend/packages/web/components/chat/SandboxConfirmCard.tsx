@@ -75,7 +75,7 @@ export function SandboxConfirmCard({
           Matched rule: <code className="font-mono">{pending.matched_pattern}</code>
         </p>
       )}
-      {!canAnswer && (
+      {currentUserId !== null && !canAnswer && (
         <p className="mb-3 text-xs text-muted-foreground">
           {pending.actor_display_name
             ? t('onlyActorCanApproveNamed', { name: pending.actor_display_name })
