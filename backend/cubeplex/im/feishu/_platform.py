@@ -60,6 +60,7 @@ class FeishuPlatform:
             client=client,
             channel_id=queue_item.channel_id,
             reply_to_id=queue_item.reply_to_id,
+            reply_in_thread=queue_item.scope_kind == "thread",
         )
         state = RenderState(
             bot_name="CubePlex",

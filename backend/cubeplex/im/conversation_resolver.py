@@ -34,6 +34,7 @@ from typing import Literal
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from cubeplex.im.bot_settings import (
     bot_display_name,
@@ -179,6 +180,29 @@ async def resolve_im_conversation(
                 old_conv.deleted_at = datetime.now(UTC)
                 session.add(old_conv)
                 await session.flush()
+
+    if should_topic and topic_id is None and scope_kind == "thread":
+        owner_uid = account.acting_user_id if is_shared else effective_user_id
+        channel_topic = (
+            await session.execute(
+                select(Topic)
+                .join(IMThreadLink, col(IMThreadLink.topic_id) == col(Topic.id))
+                .where(
+                    col(IMThreadLink.account_id) == account.id,
+                    col(IMThreadLink.channel_id) == channel_id,
+                    col(IMThreadLink.scope_kind) != "dm",
+                    col(Topic.creator_user_id) == owner_uid,
+                    col(Topic.is_archived).is_(False),
+                )
+                .order_by(col(Topic.created_at).desc(), col(Topic.id).desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if channel_topic is not None:
+            topic_id = channel_topic.id
+            _maybe_refresh_topic_channel_name(
+                channel_topic, channel_id=channel_id, channel_name=resolved_channel_name
+            )
 
     if should_topic and topic_id is None:
         title = im_topic_title(

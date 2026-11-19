@@ -447,3 +447,93 @@ def test_post_at_all_renders_at_all() -> None:
     ev = FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw)
     assert ev is not None
     assert "@all" in ev.text
+
+
+def _group_topic_event(
+    *,
+    message_id: str,
+    thread_id: str,
+    root_id: str | None = None,
+    union_id: str = "on_user_1",
+) -> dict:
+    msg: dict = {
+        "message_id": message_id,
+        "chat_id": "oc_topic_group",
+        "chat_type": "group",
+        "thread_id": thread_id,
+        "message_type": "text",
+        "content": json.dumps({"text": "@_user_1 hello"}),
+        "mentions": [{"key": "@_user_1", "id": {"open_id": "ou_bot"}, "name": "Bot"}],
+    }
+    if root_id is not None:
+        msg["root_id"] = root_id
+    return {
+        "header": {"event_id": f"ev_{message_id}", "event_type": "im.message.receive_v1"},
+        "event": {
+            "sender": {
+                "sender_id": {"open_id": f"ou_{union_id}", "union_id": union_id},
+                "sender_type": "user",
+            },
+            "message": msg,
+        },
+    }
+
+
+def test_group_topic_shared_mode_scopes_by_thread_root() -> None:
+    c = FeishuConnector(bot_open_id="ou_bot")
+    root_ev = c.parse_inbound(
+        _group_topic_event(message_id="om_root_1", thread_id="omt_1"),
+        binding_mode="shared",
+    )
+    reply_ev = c.parse_inbound(
+        _group_topic_event(
+            message_id="om_reply_1",
+            thread_id="omt_1",
+            root_id="om_root_1",
+            union_id="on_user_2",
+        ),
+        binding_mode="shared",
+    )
+    other_topic_ev = c.parse_inbound(
+        _group_topic_event(message_id="om_root_2", thread_id="omt_2"),
+        binding_mode="shared",
+    )
+    assert root_ev is not None and reply_ev is not None and other_topic_ev is not None
+    assert root_ev.scope_kind == "thread"
+    assert root_ev.scope_key == "t:om_root_1"
+    assert reply_ev.scope_kind == "thread"
+    assert reply_ev.scope_key == "t:om_root_1"
+    assert reply_ev.reply_to_id == "om_reply_1"
+    assert other_topic_ev.scope_kind == "thread"
+    assert other_topic_ev.scope_key == "t:om_root_2"
+
+
+def test_group_topic_isolated_mode_scopes_by_sender_and_thread() -> None:
+    c = FeishuConnector(bot_open_id="ou_bot")
+    u1_root = c.parse_inbound(
+        _group_topic_event(message_id="om_root_1", thread_id="omt_1", union_id="on_u1"),
+        binding_mode="isolated",
+    )
+    u1_reply = c.parse_inbound(
+        _group_topic_event(
+            message_id="om_reply_1",
+            thread_id="omt_1",
+            root_id="om_root_1",
+            union_id="on_u1",
+        ),
+        binding_mode="isolated",
+    )
+    u2_reply = c.parse_inbound(
+        _group_topic_event(
+            message_id="om_reply_2",
+            thread_id="omt_1",
+            root_id="om_root_1",
+            union_id="on_u2",
+        ),
+        binding_mode="isolated",
+    )
+    assert u1_root is not None and u1_reply is not None and u2_reply is not None
+    assert u1_root.scope_kind == "thread"
+    assert u1_root.scope_key == "u:on_u1|t:om_root_1"
+    assert u1_reply.scope_key == "u:on_u1|t:om_root_1"
+    assert u2_reply.scope_key == "u:on_u2|t:om_root_1"
