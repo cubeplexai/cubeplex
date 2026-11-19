@@ -165,8 +165,8 @@ the per-step verifications plus the pre-push hook are the checkpoints.
   check-ci on the code push.
 - Before the PR: verify the feature with a real command, paste the evidence,
   then push and open the PR.
-- After the PR is open, **ask the user whether to start
-  `/pr-codex-review-loop`** — don't kick it off automatically.
+- Before or after opening the PR, **ask the user whether to run
+  `/pr-review-loop`** — don't kick it off automatically.
 
 Stop and ask only on a real blocker (missing dependency, unclear instruction, a
 verification that keeps failing) — don't guess through it.

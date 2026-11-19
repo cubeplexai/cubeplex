@@ -32,9 +32,9 @@ Full-stack agent platform.
 4. **Plan before code** for multi-step work → `/feature-workflow`.
 5. **Brainstorm before design** for new features → `/feature-workflow`.
 6. **One concern per PR.** Choose spec/plan/code split before pushing.
-7. **PR codex review loop** after push:
-   [`pr-codex-review-loop`](.claude/skills/pr-codex-review-loop/SKILL.md)
-   — push → poll → fix → reply every comment → re-tag `@codex` until clean.
+7. **PR review loop** (local subagent — ask user before running, do not auto-start):
+   [`pr-review-loop`](.claude/skills/pr-review-loop/SKILL.md)
+   — spawn fresh reviewer subagent → triage P1/P2 → fix & test → repeat until clean.
 8. **Stay on the feature branch** during multi-task work. No auto-switch to
    main or mid-execution merges.
 9. **Verify before claiming done.** Run the command; paste evidence. Pre-push
@@ -150,7 +150,7 @@ Load on demand when the situation matches.
 | `/feature-workflow` | Start of a feature / non-trivial change |
 | `/cubeplex-tdd` | Feature, business logic, durable bug-fix contracts |
 | `/debug-cubeplex` | Bug or test failure — **before** proposing fixes |
-| `/pr-codex-review-loop` | After pushing a PR |
+| `/pr-review-loop` | Local subagent code review loop before/after pushing a PR |
 | `/release` | Cutting a production or self-hosted release |
 
 **Domains**
@@ -161,8 +161,6 @@ Load on demand when the situation matches.
 | `cubeloop-trace` | Debug a cubeloop run (spans, tool I/O, tokens, cache) |
 | `web-design-guidelines` | UI a11y / design review (after [frontend/design.md](frontend/design.md)) |
 | `playwright-cli` | Playwright tests |
-
-Escape hatch: `/codex:rescue` — stuck; want a second opinion.
 
 ---
 
