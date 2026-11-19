@@ -477,3 +477,187 @@ async def test_control_commands_error_branches(monkeypatch: pytest.MonkeyPatch) 
             run_manager=rm,  # type: ignore[arg-type]
         )
         assert res == ("handled", expected)
+
+
+async def test_control_commands_stop_and_lookup_edge_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cubeplex.im.control_commands import (
+        STOP_NO_ACTIVE_REPLY,
+        _find_stop_target_run_id,
+        execute_stop_command,
+        find_live_im_conversation,
+    )
+
+    class _ExecResult:
+        def __init__(self, val: object) -> None:
+            self._val = val
+
+        def scalar_one_or_none(self) -> object:
+            return self._val
+
+    class _FakeSavepoint:
+        def __init__(self) -> None:
+            self.rolled_back = False
+
+        async def __aenter__(self) -> _FakeSavepoint:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def rollback(self) -> None:
+            self.rolled_back = True
+
+    class _FakeSession:
+        def __init__(self, link: object, conv: object, topic: object = None) -> None:
+            self._link = link
+            self._conv = conv
+            self._topic = topic
+            self.savepoint = _FakeSavepoint()
+
+        async def execute(self, _stmt: object) -> _ExecResult:
+            return _ExecResult(self._link)
+
+        async def get(self, model: object, _id: str) -> object:
+            from cubeplex.models.conversation import Conversation
+
+            if model is Conversation:
+                return self._conv
+            return self._topic
+
+        def begin_nested(self) -> _FakeSavepoint:
+            return self.savepoint
+
+    acct = SimpleNamespace(id="a1", org_id="o1", workspace_id="w1", config={})
+    # 1. Deleted conversation returns None
+    res_del = await find_live_im_conversation(
+        _FakeSession(
+            SimpleNamespace(conversation_id="c1"), SimpleNamespace(deleted_at=datetime.now(UTC))
+        ),  # type: ignore[arg-type]
+        acct,  # type: ignore[arg-type]
+        channel_id="ch1",
+        scope_key="ch",
+        scope_kind="channel",
+        effective_user_id="u1",
+    )
+    assert res_del is None
+
+    # 2. Archived topic returns None when wants_topic is True
+    res_arch = await find_live_im_conversation(
+        _FakeSession(
+            SimpleNamespace(conversation_id="c1"),
+            SimpleNamespace(id="c1", deleted_at=None, topic_id="t1"),
+            SimpleNamespace(id="t1", is_archived=True),
+        ),  # type: ignore[arg-type]
+        acct,  # type: ignore[arg-type]
+        channel_id="ch1",
+        scope_key="ch",
+        scope_kind="channel",
+        effective_user_id="u1",
+    )
+    assert res_arch is None
+
+    # 3. _find_stop_target_run_id uses checkpointer pending_run_id
+    @asynccontextmanager
+    async def _fake_cp() -> object:
+        yield SimpleNamespace(load_pending_run_id=AsyncMock(return_value="run-pending-1"))
+
+    monkeypatch.setattr("cubeplex.im.control_commands.shared_checkpointer", _fake_cp)
+    assert (
+        await _find_stop_target_run_id(
+            _FakeSession(None, None),  # type: ignore[arg-type]
+            account=acct,  # type: ignore[arg-type]
+            conversation_id="c1",
+            run_manager=None,
+        )
+        == "run-pending-1"
+    )
+
+    # 4. execute_stop_command rolls back savepoint on LookupError and finished admission
+    monkeypatch.setattr(
+        "cubeplex.im.control_commands.find_live_im_conversation",
+        AsyncMock(return_value=SimpleNamespace(id="c1")),
+    )
+    monkeypatch.setattr(
+        "cubeplex.im.control_commands._find_stop_target_run_id",
+        AsyncMock(return_value="r1"),
+    )
+    sess = _FakeSession(None, None)
+
+    class _LookupExecSvc:
+        def __init__(self, *_a: object, **_kw: object) -> None:
+            pass
+
+        async def stop_run(self, **_kw: object) -> object:
+            raise LookupError("missing")
+
+    monkeypatch.setattr("cubeplex.im.control_commands.ConversationExecutionService", _LookupExecSvc)
+    stop_res = await execute_stop_command(
+        session=sess,  # type: ignore[arg-type]
+        account=acct,  # type: ignore[arg-type]
+        effective_user_id="u1",
+        channel_id="ch1",
+        scope_key="ch",
+        scope_kind="channel",
+        run_manager=None,
+    )
+    assert stop_res.reply_text == STOP_NO_ACTIVE_REPLY
+    assert sess.savepoint.rolled_back is True
+
+    class _FinishedExecSvc:
+        def __init__(self, *_a: object, **_kw: object) -> None:
+            pass
+
+        async def stop_run(self, **_kw: object) -> object:
+            return SimpleNamespace(
+                run_id="r1",
+                admission=SimpleNamespace(run_finished_at=datetime.now(UTC)),
+            )
+
+    sess2 = _FakeSession(None, None)
+    monkeypatch.setattr(
+        "cubeplex.im.control_commands.ConversationExecutionService", _FinishedExecSvc
+    )
+    stop_res2 = await execute_stop_command(
+        session=sess2,  # type: ignore[arg-type]
+        account=acct,  # type: ignore[arg-type]
+        effective_user_id="u1",
+        channel_id="ch1",
+        scope_key="ch",
+        scope_kind="channel",
+        run_manager=None,
+    )
+    assert stop_res2.reply_text == STOP_NO_ACTIVE_REPLY
+    assert sess2.savepoint.rolled_back is True
+
+
+async def test_discord_register_commands_wires_stop_and_steer() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cubeplex.im.discord.commands import register_commands
+
+    registered: list[str] = []
+
+    class _FakeTree:
+        def command(self, *, name: str, description: str) -> object:
+            del description
+
+            def _dec(fn: object) -> object:
+                registered.append(name)
+                return fn
+
+            return _dec
+
+        async def sync(self) -> list[str]:
+            return registered
+
+    bot = SimpleNamespace(tree=_FakeTree(), get_cog=AsyncMock())
+    await register_commands(bot)  # type: ignore[arg-type]
+    assert {"new", "reset", "link", "stop", "steer"} <= set(registered)
