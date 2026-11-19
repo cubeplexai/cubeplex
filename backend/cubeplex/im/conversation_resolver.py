@@ -181,16 +181,21 @@ async def resolve_im_conversation(
                 session.add(old_conv)
                 await session.flush()
 
+    # Roll up all thread scopes (e.g. Feishu topics, Slack threads) within a
+    # channel into one Topic per channel (shared) or per (channel, user)
+    # (isolated), matching is_shared so mode switches never cross-adopt.
     if should_topic and topic_id is None and scope_kind == "thread":
         owner_uid = account.acting_user_id if is_shared else effective_user_id
         channel_topic = (
             await session.execute(
                 select(Topic)
                 .join(IMThreadLink, col(IMThreadLink.topic_id) == col(Topic.id))
+                .join(Conversation, col(Conversation.id) == col(IMThreadLink.conversation_id))
                 .where(
                     col(IMThreadLink.account_id) == account.id,
                     col(IMThreadLink.channel_id) == channel_id,
                     col(IMThreadLink.scope_kind) != "dm",
+                    col(Conversation.is_group_chat) == is_shared,
                     col(Topic.creator_user_id) == owner_uid,
                     col(Topic.is_archived).is_(False),
                 )

@@ -323,6 +323,15 @@ def build_event_handler(
             if event is None:
                 return
             event.account_external_id = account.external_account_id
+            event_connector = (
+                FeishuConnector(
+                    bot_open_id=bot_open_id,
+                    client=outbound_client,
+                    reply_in_thread=True,
+                )
+                if outbound_client is not None and event.scope_kind == "thread"
+                else gate_connector
+            )
 
             # Intercept /link or 绑定 commands before normal ingest — otherwise
             # the identity gate replies "I don't know who you are" instead of
@@ -344,7 +353,7 @@ def build_event_handler(
                         email=link_email,
                         event=event,
                         account=account,
-                        connector=gate_connector,
+                        connector=event_connector,
                     )
                 except Exception:
                     logger.exception(
@@ -359,7 +368,7 @@ def build_event_handler(
                         event=event,
                         account=account,
                         session_maker=session_maker,
-                        connector=gate_connector,
+                        connector=event_connector,
                     )
                 except Exception:
                     logger.exception(
@@ -371,8 +380,8 @@ def build_event_handler(
             from cubeplex.im.control_commands import maybe_handle_control_command
 
             async def _reply_feishu(text: str) -> None:
-                if gate_connector is not None:
-                    await gate_connector.send_to_chat(event.channel_id, event.reply_to_id, text)
+                if event_connector is not None:
+                    await event_connector.send_to_chat(event.channel_id, event.reply_to_id, text)
 
             try:
                 if await maybe_handle_control_command(
@@ -381,8 +390,8 @@ def build_event_handler(
                     session_maker=session_maker,
                     run_manager=run_manager,
                     reply=_reply_feishu,
-                    identity_resolver=gate_connector,
-                    rejection_notifier=gate_connector,
+                    identity_resolver=event_connector,
+                    rejection_notifier=event_connector,
                 ):
                     return
             except Exception:
@@ -394,13 +403,13 @@ def build_event_handler(
 
             try:
                 kwargs: dict[str, Any] = {}
-                if gate_connector is not None:
-                    kwargs["identity_resolver"] = gate_connector
-                    kwargs["rejection_notifier"] = gate_connector
+                if event_connector is not None:
+                    kwargs["identity_resolver"] = event_connector
+                    kwargs["rejection_notifier"] = event_connector
                     # Resolve group display name for Topic titles (im.v1.chats.get).
-                    await gate_connector.enrich_inbound_channel_name(event)
+                    await event_connector.enrich_inbound_channel_name(event)
                     # Resolve quoted parent message content (im.v1.message.get).
-                    await gate_connector.enrich_inbound_quoted_message(event)
+                    await event_connector.enrich_inbound_quoted_message(event)
                 res = await ingest(
                     event,
                     account=account,

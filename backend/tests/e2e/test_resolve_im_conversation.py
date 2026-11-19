@@ -50,6 +50,7 @@ pytestmark = pytest.mark.asyncio
 _ORG = "org-resolve-im-001"
 _WS = "ws-resolve-im-001"
 _USER = "usr-resolve-im-001"
+_USER_B = "usr-resolve-im-002"
 _CRED = "cred-resolve-im-001"
 _ACCOUNT = "imac-resolve-im-001"
 _EXT_ACCT = "cli_resolve_im"
@@ -70,6 +71,7 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
     try:
         async with maker() as session:
             await im_seed_org_ws_user(session, org_id=_ORG, ws_id=_WS, user_id=_USER)
+            await im_seed_org_ws_user(session, org_id=_ORG, ws_id=_WS, user_id=_USER_B)
             await im_seed_stub_credential(
                 session,
                 credential_id=_CRED,
@@ -130,7 +132,7 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
                     account_ids=[_ACCOUNT],
                     credential_ids=[_CRED],
                     ws_ids=[_WS],
-                    user_ids=[_USER],
+                    user_ids=[_USER, _USER_B],
                     org_ids=[_ORG],
                     cleanup_conversations_in_ws=True,
                 )
@@ -1275,7 +1277,7 @@ async def test_thread_scopes_in_shared_group_share_one_topic(
             channel_id=_CHANNEL,
             scope_key="t:om_topic_2",
             scope_kind="thread",
-            effective_user_id="usr-resolve-im-002",
+            effective_user_id=_USER_B,
             title_hint="second topic",
             origin="inbound",
             channel_name="研发群",
@@ -1324,7 +1326,7 @@ async def test_thread_scopes_in_isolated_group_share_topic_per_user(
             channel_id=_CHANNEL,
             scope_key="u:u2|t:om_topic_1",
             scope_kind="thread",
-            effective_user_id="usr-resolve-im-002",
+            effective_user_id=_USER_B,
             title_hint="u2 topic 1",
             origin="inbound",
             channel_name="研发群",
