@@ -275,7 +275,7 @@ async def handle_inbound_callback(
                     workspace_id=account.workspace_id,
                     account_id=account.id,
                     platform_event_id=event.platform_event_id,
-                    status="rejected",
+                    status="pending",
                     response_payload={"kind": "text", "text": rejection_text or ""},
                 )
                 session.add(receipt)
@@ -307,7 +307,7 @@ async def handle_inbound_callback(
                         workspace_id=account.workspace_id,
                         account_id=account.id,
                         platform_event_id=event.platform_event_id,
-                        status="completed",
+                        status="pending",
                         response_payload={"kind": "text", "text": reply_text or ""},
                     )
                     session.add(receipt)

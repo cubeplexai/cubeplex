@@ -2478,6 +2478,8 @@ async def steer_active_run(
         redis=rds.client,
         redis_key_prefix=rds.key_prefix,
         run_manager=raw_request.app.state.run_manager,
+        load_pending_hitl=_load_pending_hitl,
+        get_active_run_fn=get_active_run,
     )
     if result.outcome == "too_large":
         raise HTTPException(

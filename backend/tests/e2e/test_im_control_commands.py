@@ -783,3 +783,201 @@ async def test_wecom_stop_signals_after_commit_and_delivers_reply(
     fake_gateway.send_passive.assert_awaited_once()
     sent_body = fake_gateway.send_passive.call_args.args[1]
     assert STOP_SUCCESS_REPLY in sent_body["markdown"]["content"]
+
+
+async def test_wecom_steer_active_and_idle_fallback(
+    _im_env: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount, Any],
+) -> None:
+    from cubeplex.im.wecom.ingress import handle_inbound_callback
+
+    maker, acct, app = _im_env
+    conv_id = f"conv-wcs-{acct.id[-6:]}"
+    run_id = f"run-wcs-{acct.id[-6:]}"
+    await _seed_active_conversation(
+        maker,
+        acct,
+        app,
+        channel_id="wc_steer_chat",
+        scope_key=make_channel_scope(),
+        conv_id=conv_id,
+        run_id=run_id,
+        actor_user_id=acct.acting_user_id,
+    )
+
+    fake_gateway = MagicMock()
+    fake_gateway.send_passive = AsyncMock(return_value={"errcode": 0})
+    fake_gateway.send_proactive = AsyncMock(return_value={"errcode": 0})
+
+    # 1. Active steer via WeCom
+    raw_active = {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": f"req-wcs-1-{acct.id[-6:]}"},
+        "body": {
+            "msgid": f"msg-wcs-1-{acct.id[-6:]}",
+            "aibotid": acct.external_account_id,
+            "chatid": "wc_steer_chat",
+            "chattype": "group",
+            "from": {"userid": "ou_u1"},
+            "msgtype": "text",
+            "text": {"content": "/steer also summarize"},
+        },
+    }
+    with patch.object(app.state.run_manager, "notify_durable_steer", new=AsyncMock()):
+        await handle_inbound_callback(
+            raw_active,
+            account=acct,
+            session_maker=maker,
+            gateway=fake_gateway,
+            run_manager=app.state.run_manager,
+        )
+    fake_gateway.send_passive.assert_awaited_once()
+    assert STEER_SUCCESS_REPLY in fake_gateway.send_passive.call_args.args[1]["markdown"]["content"]
+
+    # 2. Idle fallback via WeCom
+    raw_idle = {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": f"req-wcs-2-{acct.id[-6:]}"},
+        "body": {
+            "msgid": f"msg-wcs-2-{acct.id[-6:]}",
+            "aibotid": acct.external_account_id,
+            "chatid": "wc_steer_idle",
+            "chattype": "group",
+            "from": {"userid": "ou_u1"},
+            "msgtype": "text",
+            "text": {"content": "/steer start new wecom run"},
+        },
+    }
+    await handle_inbound_callback(
+        raw_idle,
+        account=acct,
+        session_maker=maker,
+        gateway=fake_gateway,
+        run_manager=app.state.run_manager,
+    )
+    async with maker() as session:
+        items = (
+            (
+                await session.execute(
+                    select(IMRunQueueItem).where(
+                        IMRunQueueItem.account_id == acct.id,
+                        IMRunQueueItem.channel_id == "wc_steer_idle",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(items) == 1
+        assert items[0].content == "start new wecom run"
+
+
+async def test_steer_with_attachments_and_stop_admission_fallback(
+    _im_env: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount, Any],
+) -> None:
+    from cubeplex.im.control_commands import STEER_ATTACHMENTS_NOTE
+    from cubeplex.im.types import InboundAttachmentRef
+
+    maker, acct, app = _im_env
+    conv_id = f"conv-adm-{acct.id[-6:]}"
+    run_id = f"run-adm-{acct.id[-6:]}"
+    await _seed_active_conversation(
+        maker,
+        acct,
+        app,
+        channel_id="oc_adm",
+        scope_key=make_channel_scope(),
+        conv_id=conv_id,
+        run_id=run_id,
+        actor_user_id=acct.acting_user_id,
+    )
+
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    # 1. Steer with attachments includes note
+    att_event = InboundEvent(
+        platform="feishu",
+        platform_event_id=f"evt-att-{acct.id[-6:]}",
+        account_external_id=acct.external_account_id,
+        channel_id="oc_adm",
+        scope_key=make_channel_scope(),
+        scope_kind="channel",
+        sender_ref="ou_u1",
+        sender_open_id="ou_u1",
+        text="/steer check attached",
+        reply_to_id="om_att",
+        inbound_message_id="om_att",
+        attachments=[InboundAttachmentRef(kind="file", filename="a.txt", mime=None, handle="k1")],
+    )
+    with patch.object(app.state.run_manager, "notify_durable_steer", new=AsyncMock()):
+        assert (
+            await maybe_handle_control_command(
+                att_event,
+                account=acct,
+                session_maker=maker,
+                run_manager=app.state.run_manager,
+                reply=reply,
+                require_linked_member=True,
+            )
+            is True
+        )
+    assert replies[-1] == f"{STEER_SUCCESS_REPLY}{STEER_ATTACHMENTS_NOTE}"
+
+    # 2. Unlinked sender with require_linked_member=True is rejected
+    unlinked_event = InboundEvent(
+        platform="discord",
+        platform_event_id=f"evt-unl-{acct.id[-6:]}",
+        account_external_id=acct.external_account_id,
+        channel_id="oc_adm",
+        scope_key=make_channel_scope(),
+        scope_kind="channel",
+        sender_ref="ou_missing",
+        sender_open_id="ou_missing",
+        text="/stop",
+        reply_to_id="om_u2",
+        inbound_message_id="om_u2",
+    )
+    assert (
+        await maybe_handle_control_command(
+            unlinked_event,
+            account=acct,
+            session_maker=maker,
+            run_manager=app.state.run_manager,
+            reply=reply,
+            require_linked_member=True,
+        )
+        is True
+    )
+    assert "/link" in replies[-1]
+
+    # 3. Stop falls back to ConversationExecutionAdmission when Redis key is absent
+    await app.state.redis.delete(f"{app.state.redis_key_prefix}:conv:{conv_id}:active_run")
+    stop_event = InboundEvent(
+        platform="feishu",
+        platform_event_id=f"evt-admstop-{acct.id[-6:]}",
+        account_external_id=acct.external_account_id,
+        channel_id="oc_adm",
+        scope_key=make_channel_scope(),
+        scope_kind="channel",
+        sender_ref="ou_u1",
+        sender_open_id="ou_u1",
+        text="/stop",
+        reply_to_id="om_as",
+        inbound_message_id="om_as",
+    )
+    with patch.object(app.state.run_manager, "notify_run_stop", new=AsyncMock()) as mock_stop:
+        assert (
+            await maybe_handle_control_command(
+                stop_event,
+                account=acct,
+                session_maker=maker,
+                run_manager=app.state.run_manager,
+                reply=reply,
+                require_linked_member=True,
+            )
+            is True
+        )
+        assert replies[-1] == STOP_SUCCESS_REPLY
+        mock_stop.assert_awaited_once_with(run_id)
