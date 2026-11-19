@@ -227,6 +227,8 @@ Once linked, messages run as that user, with the same skills, memory, and tools 
 | `/new` | Start a fresh conversation; your next message begins a new one. |
 | `/reset` | Same as `/new`. |
 | `新对话` | Same as `/new` (text form). |
+| `/stop` | Stop the currently active reply without clearing queued messages. |
+| `/steer <message>` | Inject a follow-up instruction into the active reply (or start a new one if idle). |
 
 `/new`, `/reset`, and `新对话` are equivalent. (The Chinese `绑定` alias for `/link` is Feishu-only.)
 

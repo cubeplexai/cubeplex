@@ -91,6 +91,7 @@ class SlackGateway:
             account_id=account.id,
             workspace_id=account.workspace_id,
             session_maker=session_maker,
+            run_manager=self._run_manager,
         )
 
         handler = AsyncSocketModeHandler(app, self._app_token)
@@ -182,6 +183,26 @@ class SlackGateway:
                 )
             except Exception:
                 logger.exception("[Slack] /new handler failed for {}", parsed.platform_event_id)
+            return
+
+        from cubeplex.im.control_commands import maybe_handle_control_command
+
+        async def _reply_slack(text: str) -> None:
+            await gate_connector.send_to_chat(parsed.channel_id, parsed.reply_to_id, text)
+
+        try:
+            if await maybe_handle_control_command(
+                parsed,
+                account=account,
+                session_maker=session_maker,
+                run_manager=self._run_manager,
+                reply=_reply_slack,
+                identity_resolver=gate_connector,
+                rejection_notifier=gate_connector,
+            ):
+                return
+        except Exception:
+            logger.exception("[Slack] control command failed for {}", parsed.platform_event_id)
             return
 
         try:

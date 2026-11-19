@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cubeplex.im.identity import NullIdentityResolver
@@ -13,7 +14,7 @@ from cubeplex.im.reset_command import format_reset_reply
 from cubeplex.im.types import lookup_binding_mode
 from cubeplex.im.wecom.commands import parse_command, render_response
 from cubeplex.im.wecom.connector import WecomConnector
-from cubeplex.models.im_connector import IMConnectorAccount
+from cubeplex.models.im_connector import IMConnectorAccount, IMWebhookReceipt
 from cubeplex.repositories.im_connector import (
     claim_command_response,
     mark_command_response_delivered,
@@ -97,6 +98,7 @@ async def handle_inbound_callback(
     account: IMConnectorAccount,
     session_maker: async_sessionmaker[AsyncSession],
     gateway: Any,
+    run_manager: Any = None,
 ) -> None:
     """Route one WeCom callback through commands or ordinary ingestion."""
     async with session_maker() as session:
@@ -178,6 +180,154 @@ async def handle_inbound_callback(
                 gateway=gateway,
             )
         return
+
+    from cubeplex.im.control_commands import (
+        SteerCommand,
+        StopCommand,
+        _find_existing_receipt,
+        execute_steer_command,
+        execute_stop_command,
+        parse_control_command,
+    )
+    from cubeplex.im.identity import resolve_current_linked_member
+
+    control_cmd = parse_control_command(event.text)
+    if isinstance(control_cmd, StopCommand):
+        stopped_target: tuple[str, str, str] | None = None
+
+        async def build_stop_response(
+            session: AsyncSession,
+            user_id: str | None,
+        ) -> dict[str, Any]:
+            nonlocal stopped_target
+            assert user_id is not None
+            stop_res = await execute_stop_command(
+                session=session,
+                account=account,
+                effective_user_id=user_id,
+                channel_id=event.channel_id,
+                scope_key=event.scope_key,
+                scope_kind=event.scope_kind,
+                run_manager=run_manager,
+                commit_fn=None,
+                defer_signal=True,
+            )
+            if stop_res.stopped_conversation_id and stop_res.stopped_run_id:
+                stopped_target = (
+                    stop_res.stopped_conversation_id,
+                    stop_res.stopped_run_id,
+                    user_id,
+                )
+            return {"kind": "text", "text": stop_res.reply_text}
+
+        result = await ingest_command_response(
+            event,
+            account=account,
+            session_maker=session_maker,
+            build_response=build_stop_response,
+            require_current_identity=True,
+        )
+        if result.outcome == "created" and stopped_target is not None and run_manager is not None:
+            from cubeplex.services.execution_signals import signal_stopped_runs
+
+            conv_id, run_id, actor_id = stopped_target
+            await signal_stopped_runs(
+                run_manager,
+                conversation_id=conv_id,
+                run_ids=(run_id,),
+                user_id=actor_id,
+                org_id=account.org_id,
+                workspace_id=account.workspace_id,
+            )
+        if result.receipt_id is not None and event.reply_to_id is not None:
+            await _deliver_command_response(
+                receipt_id=result.receipt_id,
+                req_id=event.reply_to_id,
+                chat_id=event.channel_id,
+                session_maker=session_maker,
+                gateway=gateway,
+            )
+        return
+
+    if isinstance(control_cmd, SteerCommand) and event.platform_event_id:
+        delivered_receipt_id: str | None = None
+        async with session_maker() as session:
+            existing = await _find_existing_receipt(session, account.id, event.platform_event_id)
+            if existing is not None:
+                if existing.response_payload is not None and event.reply_to_id is not None:
+                    await _deliver_command_response(
+                        receipt_id=existing.id,
+                        req_id=event.reply_to_id,
+                        chat_id=event.channel_id,
+                        session_maker=session_maker,
+                        gateway=gateway,
+                    )
+                return
+
+            user_id, rejection_text = await resolve_current_linked_member(
+                session=session,
+                account=account,
+                event=event,
+            )
+            if rejection_text is not None or user_id is None:
+                receipt = IMWebhookReceipt(
+                    org_id=account.org_id,
+                    workspace_id=account.workspace_id,
+                    account_id=account.id,
+                    platform_event_id=event.platform_event_id,
+                    status="rejected",
+                    response_payload={"kind": "text", "text": rejection_text or ""},
+                )
+                session.add(receipt)
+                try:
+                    await session.commit()
+                    delivered_receipt_id = receipt.id
+                except IntegrityError:
+                    await session.rollback()
+                    return
+            else:
+                outcome, reply_text = await execute_steer_command(
+                    session=session,
+                    account=account,
+                    effective_user_id=user_id,
+                    channel_id=event.channel_id,
+                    scope_key=event.scope_key,
+                    scope_kind=event.scope_kind,
+                    platform_event_id=event.platform_event_id,
+                    content=control_cmd.content,
+                    has_attachments=bool(event.attachments),
+                    run_manager=run_manager,
+                )
+                if outcome == "fallback":
+                    await session.rollback()
+                    event.text = control_cmd.content
+                else:
+                    receipt = IMWebhookReceipt(
+                        org_id=account.org_id,
+                        workspace_id=account.workspace_id,
+                        account_id=account.id,
+                        platform_event_id=event.platform_event_id,
+                        status="completed",
+                        response_payload={"kind": "text", "text": reply_text or ""},
+                    )
+                    session.add(receipt)
+                    try:
+                        await session.commit()
+                        delivered_receipt_id = receipt.id
+                    except IntegrityError:
+                        await session.rollback()
+                        return
+
+        if delivered_receipt_id is not None:
+            if event.reply_to_id is not None:
+                await _deliver_command_response(
+                    receipt_id=delivered_receipt_id,
+                    req_id=event.reply_to_id,
+                    chat_id=event.channel_id,
+                    session_maker=session_maker,
+                    gateway=gateway,
+                )
+            return
 
     ingest_result = await ingest_inbound_event(
         event,

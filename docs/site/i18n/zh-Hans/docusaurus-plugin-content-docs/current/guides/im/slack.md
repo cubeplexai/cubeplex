@@ -134,6 +134,8 @@ CubePlex 把 `/link`、`/new`、`/reset` 当作 **Slack 原生斜杠命令**处�
 | `/link` | 将 Slack 身份关联到 CubePlex | `you@example.com` |
 | `/new` | 开始全新 CubePlex 对话 | （可空） |
 | `/reset` | 与 `/new` 相同 | （可空） |
+| `/stop` | 终止当前正在进行的回复 | （可空） |
+| `/steer` | 向当前正在进行的回复中途补充指令 | `补充指令内容` |
 
 已启用 **Socket Mode** 时 **不需要** 可用的公网 Request URL——事件走 socket。创建命令时 Slack 可能仍要求填一个占位 URL。
 
@@ -147,6 +149,8 @@ CubePlex 把 `/link`、`/new`、`/reset` 当作 **Slack 原生斜杠命令**处�
 | `/link <email>` | 将 Slack 身份关联到 CubePlex 账户（参阅[步骤 8](#step-8--link-your-identity)）。仅你可见的私下回复。 |
 | `/new` | 开始全新对话；下一条消息会开始新对话。斜杠形式为私下回复。 |
 | `/reset` | 与 `/new` 相同。 |
+| `/stop` | 终止当前正在进行的回复，不会清空已排队的后续消息。斜杠形式为私下回复。 |
+| `/steer <消息>` | 向当前正在进行的回复中途补充指令（若当前无活跃回复，则直接作为新消息发送）。 |
 
 ### 斜杠命令在线程（thread）中不可用
 

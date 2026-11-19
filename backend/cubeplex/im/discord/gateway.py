@@ -72,10 +72,11 @@ class DiscordGateway:
                 bot.user.id,
             )
             self._connector = DiscordConnector(bot_user_id=bot.user.id)
-            # Store session_maker and account_id on bot for slash commands
+            # Store session_maker, account_id, and run_manager on bot for slash commands
             bot._cubeplex_session_maker = session_maker  # type: ignore[attr-defined]
             bot._cubeplex_account_id = account.id  # type: ignore[attr-defined]
             bot._cubeplex_workspace_id = account.workspace_id  # type: ignore[attr-defined]
+            bot._cubeplex_run_manager = self._run_manager  # type: ignore[attr-defined]
             from cubeplex.im.discord.commands import register_commands
 
             await register_commands(bot)
@@ -106,6 +107,47 @@ class DiscordGateway:
                 channel_id=event.channel_id,
                 reply_to_id=event.reply_to_id,
             )
+            from cubeplex.im.control_commands import maybe_handle_control_command
+            from cubeplex.im.reset_command import (
+                apply_reset_command,
+                format_reset_reply,
+                parse_reset_command,
+            )
+
+            if parse_reset_command(event.text):
+                try:
+                    outcome = await apply_reset_command(
+                        session_maker=session_maker,
+                        account_id=account.id,
+                        channel_id=event.channel_id,
+                        scope_key=event.scope_key,
+                    )
+                    await gate_connector.send_to_chat(
+                        event.channel_id, event.reply_to_id, format_reset_reply(outcome)
+                    )
+                except Exception:
+                    logger.exception(
+                        "[Discord] /new handler failed for {}", event.platform_event_id
+                    )
+                return
+
+            async def _reply_discord(text: str) -> None:
+                await gate_connector.send_to_chat(event.channel_id, event.reply_to_id, text)
+
+            try:
+                if await maybe_handle_control_command(
+                    event,
+                    account=account,
+                    session_maker=session_maker,
+                    run_manager=self._run_manager,
+                    reply=_reply_discord,
+                    identity_resolver=NullIdentityResolver(),
+                    rejection_notifier=gate_connector,
+                ):
+                    return
+            except Exception:
+                logger.exception("[Discord] control command failed for {}", event.platform_event_id)
+                return
             try:
                 result = await ingest(
                     event,

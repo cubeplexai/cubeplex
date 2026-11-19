@@ -1,4 +1,4 @@
-"""Slack slash commands: /link, /new, /reset.
+"""Slack slash commands: /link, /new, /reset, /stop, and /steer.
 
 Also exposes ``parse_link_command`` so the Socket Mode gateway can intercept
 plain-text ``/link`` / ``link`` messages (when the slash command is not
@@ -46,8 +46,9 @@ def register_commands(
     account_id: str,
     workspace_id: str,
     session_maker: Any,
+    run_manager: Any = None,
 ) -> None:
-    """Register /link, /new, and /reset slash commands on the Slack app."""
+    """Register /link, /new, /reset, /stop, and /steer slash commands on Slack."""
 
     @app.command("/link")  # type: ignore[untyped-decorator]
     async def cmd_link(ack: Any, command: dict[str, Any], respond: Any) -> None:
@@ -109,6 +110,28 @@ def register_commands(
             command, respond, account_id=account_id, session_maker=session_maker
         )
 
+    @app.command("/stop")  # type: ignore[untyped-decorator]
+    async def cmd_stop(ack: Any, command: dict[str, Any], respond: Any) -> None:
+        await ack()
+        await _handle_stop_slash(
+            command,
+            respond,
+            account_id=account_id,
+            session_maker=session_maker,
+            run_manager=run_manager,
+        )
+
+    @app.command("/steer")  # type: ignore[untyped-decorator]
+    async def cmd_steer(ack: Any, command: dict[str, Any], respond: Any) -> None:
+        await ack()
+        await _handle_steer_slash(
+            command,
+            respond,
+            account_id=account_id,
+            session_maker=session_maker,
+            run_manager=run_manager,
+        )
+
 
 async def _handle_reset_slash(
     command: dict[str, Any],
@@ -154,3 +177,169 @@ async def _handle_reset_slash(
         return
 
     await respond(format_reset_reply(outcome), response_type="ephemeral")
+
+
+async def _resolve_slack_slash_scope(
+    command: dict[str, Any],
+    *,
+    account_id: str,
+    session_maker: Any,
+) -> tuple[str, str, str, str] | None:
+    from cubeplex.im.types import (
+        DM_SCOPE_KEY,
+        lookup_binding_mode,
+        make_channel_scope,
+        make_participant_scope,
+    )
+
+    channel_id = command.get("channel_id") or ""
+    user_id = command.get("user_id") or ""
+    if not channel_id or not user_id:
+        return None
+    if channel_id.startswith("D"):
+        return channel_id, user_id, DM_SCOPE_KEY, "dm"
+    binding_mode = await lookup_binding_mode(session_maker, account_id, channel_id)
+    scope_key = (
+        make_channel_scope() if binding_mode == "shared" else make_participant_scope(user_id)
+    )
+    return channel_id, user_id, scope_key, "channel"
+
+
+async def _handle_stop_slash(
+    command: dict[str, Any],
+    respond: Any,
+    *,
+    account_id: str,
+    session_maker: Any,
+    run_manager: Any,
+) -> None:
+    from uuid import uuid4
+
+    from cubeplex.im.control_commands import maybe_handle_control_command
+    from cubeplex.im.types import InboundEvent
+    from cubeplex.models.im_connector import IMConnectorAccount
+
+    resolved = await _resolve_slack_slash_scope(
+        command, account_id=account_id, session_maker=session_maker
+    )
+    if resolved is None:
+        await respond("Could not determine channel or user.", response_type="ephemeral")
+        return
+    channel_id, user_id, scope_key, scope_kind = resolved
+    trigger_id = command.get("trigger_id") or uuid4().hex
+    event = InboundEvent(
+        platform="slack",
+        platform_event_id=f"slash:{trigger_id}",
+        account_external_id="",
+        channel_id=channel_id,
+        scope_key=scope_key,
+        scope_kind=scope_kind,
+        sender_ref=user_id,
+        sender_open_id=user_id,
+        text="/stop",
+        reply_to_id=None,
+        inbound_message_id="",
+    )
+    async with session_maker() as session:
+        account = await session.get(IMConnectorAccount, account_id)
+    if account is None:
+        await respond("IM account not found.", response_type="ephemeral")
+        return
+    event.account_external_id = account.external_account_id
+
+    async def _reply(text: str) -> None:
+        await respond(text, response_type="ephemeral")
+
+    try:
+        await maybe_handle_control_command(
+            event,
+            account=account,
+            session_maker=session_maker,
+            run_manager=run_manager,
+            reply=_reply,
+            require_linked_member=True,
+        )
+    except Exception:
+        logger.opt(exception=True).warning("[Slack] /stop slash handler failed")
+        await respond("Failed to stop current reply.", response_type="ephemeral")
+
+
+async def _handle_steer_slash(
+    command: dict[str, Any],
+    respond: Any,
+    *,
+    account_id: str,
+    session_maker: Any,
+    run_manager: Any,
+) -> None:
+    from uuid import uuid4
+
+    from cubeplex.im.control_commands import (
+        STEER_IDLE_FALLBACK_SLASH_REPLY,
+        STEER_USAGE_REPLY,
+        EphemeralRejectionNotifier,
+        maybe_handle_control_command,
+    )
+    from cubeplex.im.identity import NullIdentityResolver
+    from cubeplex.im.inbound import ingest_inbound_event
+    from cubeplex.im.types import InboundEvent
+    from cubeplex.models.im_connector import IMConnectorAccount
+
+    resolved = await _resolve_slack_slash_scope(
+        command, account_id=account_id, session_maker=session_maker
+    )
+    if resolved is None:
+        await respond("Could not determine channel or user.", response_type="ephemeral")
+        return
+    channel_id, user_id, scope_key, scope_kind = resolved
+    content = (command.get("text") or "").strip()
+    if not content:
+        await respond(STEER_USAGE_REPLY, response_type="ephemeral")
+        return
+
+    trigger_id = command.get("trigger_id") or uuid4().hex
+    event = InboundEvent(
+        platform="slack",
+        platform_event_id=f"slash:{trigger_id}",
+        account_external_id="",
+        channel_id=channel_id,
+        scope_key=scope_key,
+        scope_kind=scope_kind,
+        sender_ref=user_id,
+        sender_open_id=user_id,
+        text=f"/steer {content}",
+        reply_to_id=None,
+        inbound_message_id="",
+    )
+    async with session_maker() as session:
+        account = await session.get(IMConnectorAccount, account_id)
+    if account is None:
+        await respond("IM account not found.", response_type="ephemeral")
+        return
+    event.account_external_id = account.external_account_id
+
+    async def _reply(text: str) -> None:
+        await respond(text, response_type="ephemeral")
+
+    try:
+        handled = await maybe_handle_control_command(
+            event,
+            account=account,
+            session_maker=session_maker,
+            run_manager=run_manager,
+            reply=_reply,
+            require_linked_member=True,
+        )
+        if not handled:
+            ingest_res = await ingest_inbound_event(
+                event,
+                account=account,
+                session_maker=session_maker,
+                identity_resolver=NullIdentityResolver(),
+                rejection_notifier=EphemeralRejectionNotifier(_reply),
+            )
+            if ingest_res.outcome == "enqueued":
+                await respond(STEER_IDLE_FALLBACK_SLASH_REPLY, response_type="ephemeral")
+    except Exception:
+        logger.opt(exception=True).warning("[Slack] /steer slash handler failed")
+        await respond("Failed to process /steer.", response_type="ephemeral")

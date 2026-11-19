@@ -124,7 +124,13 @@ class WecomGateway:
         self._passive: dict[str, _PassiveFrame] = {}
         self._poisoned_passive_ids: set[str] = set()
 
-    def configure_inbound(self, *, account: Any, session_maker: Any) -> None:
+    def configure_inbound(
+        self,
+        *,
+        account: Any,
+        session_maker: Any,
+        run_manager: Any = None,
+    ) -> None:
         """Bind database-backed callback routing after gateway construction."""
 
         async def handle(raw: dict[str, Any]) -> None:
@@ -135,6 +141,7 @@ class WecomGateway:
                 account=account,
                 session_maker=session_maker,
                 gateway=self,
+                run_manager=run_manager,
             )
 
         self._inbound_handler = handle
