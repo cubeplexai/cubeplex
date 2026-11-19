@@ -366,10 +366,20 @@ async def process_one_queue_item(
                 execution_snapshot = await load_execution_snapshot(session, captured["org_id"])
                 conv = await session.get(Conversation, captured["conversation_id"])
                 conv_model_key = conv.model_key if conv is not None else None
-                if conv_model_key and not any(
-                    preset.key == conv_model_key for preset in execution_snapshot.model_presets
-                ):
-                    conv_model_key = None
+                if conv_model_key:
+                    from cubeplex.llm.errors import BrokenPresetError, UnknownPresetError
+                    from cubeplex.llm.resolver import resolve_model_preset
+
+                    try:
+                        resolve_model_preset(execution_snapshot, conv_model_key)
+                    except (UnknownPresetError, BrokenPresetError):
+                        logger.warning(
+                            "[IM worker] saved model_key '{}' on conversation {} is unavailable; "
+                            "falling back to org default",
+                            conv_model_key,
+                            captured["conversation_id"],
+                        )
+                        conv_model_key = None
                 user_request_model_key = conv_model_key
                 admitted = await ConversationExecutionService(
                     session,
