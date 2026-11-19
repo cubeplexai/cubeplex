@@ -640,7 +640,10 @@ function maybeAutoOpenFilePreview(
 
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
  *  effect both fire on mount, but we only want one bootstrap fetch per open. */
-const loadMessagesInFlight = new Map<string, { promise: Promise<void>; conditional: boolean }>()
+const loadMessagesInFlight = new Map<
+  string,
+  { promise: Promise<void>; conditional: boolean; restricted: boolean }
+>()
 
 /** Dedup map for ``loadOlderMessages``: a user click on "Load earlier" and the
  *  ``loadOlderUntilSeq`` deep-link loop may both fire concurrently. Sharing
@@ -1110,10 +1113,14 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
         }
       : {}),
   }
+  const streamAgentsBase =
+    resumesPausedStream && !state.streamAgents[MAIN_AGENT_KEY]
+      ? { ...state.streamAgents, [MAIN_AGENT_KEY]: emptyStream() }
+      : state.streamAgents
 
   if (event.type === 'text_delta') {
     const e = event as TextDeltaEvent
-    const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+    const prev = streamAgentsBase[agentKey] ?? emptyStream(event.agent_name)
     return {
       ...base,
       // Model output supersedes any build-phase hint (preparing /
@@ -1121,7 +1128,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
       // indicator falls back to the plain streaming dots.
       statusPhase: null,
       streamAgents: {
-        ...state.streamAgents,
+        ...streamAgentsBase,
         [agentKey]: {
           ...prev,
           text: prev.text + e.data.content,
@@ -1135,11 +1142,11 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
   // it into a `thinking` block to match cubeloop's ThinkingContent.
   if (event.type === 'reasoning') {
     const e = event as ReasoningEvent
-    const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+    const prev = streamAgentsBase[agentKey] ?? emptyStream(event.agent_name)
     return {
       ...base,
       streamAgents: {
-        ...state.streamAgents,
+        ...streamAgentsBase,
         [agentKey]: {
           ...prev,
           thinking: prev.thinking + e.data.content,
@@ -1151,7 +1158,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
 
   if (event.type === 'tool_call') {
     const e = event as ToolCallEvent
-    const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+    const prev = streamAgentsBase[agentKey] ?? emptyStream(event.agent_name)
     const existingStartedAt = state.toolStartedMap[e.data.tool_call_id]
     const parsedTodos =
       e.data.name === 'write_todos' ? parseTodosFromToolCall(e.data.arguments) : null
@@ -1184,7 +1191,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
           existingStartedAt ?? timestampToMs(e.data.started_at ?? event.timestamp),
       },
       streamAgents: {
-        ...state.streamAgents,
+        ...streamAgentsBase,
         [agentKey]: {
           ...prev,
           toolCalls: [...prev.toolCalls, e],
@@ -1201,7 +1208,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
 
   if (event.type === 'tool_call_delta') {
     const e = event as ToolCallDeltaEvent
-    const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
+    const prev = streamAgentsBase[agentKey] ?? emptyStream(event.agent_name)
     const idx = e.data.index ?? 0
     if (e.data.name) {
       maybeAutoOpenFilePreview(
@@ -1245,7 +1252,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
         ...base,
         toolStartedMap: nextToolStartedMap,
         streamAgents: {
-          ...state.streamAgents,
+          ...streamAgentsBase,
           [agentKey]: { ...prev, blocks },
         },
       }
@@ -1263,7 +1270,7 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
       ...base,
       toolStartedMap: nextToolStartedMap,
       streamAgents: {
-        ...state.streamAgents,
+        ...streamAgentsBase,
         [agentKey]: { ...prev, blocks: finalized },
       },
     }
@@ -2495,6 +2502,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   ) {
     const force = options?.force === true
     const conditional = options?.conditional === true && !force
+    const restricted = Boolean(
+      options?.preserveOtherConversationStream ||
+      options?.expectedRunId !== undefined ||
+      options?.throwOnError,
+    )
     const state = get()
     if (!force && state.isStreaming && state.streamingConversationId === conversationId) return
     const shouldSkipForConcurrentStream = (s: MessageStore): boolean => {
@@ -2510,6 +2522,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       }
       return false
     }
+    if (shouldSkipForConcurrentStream(state)) return
     const requestKey = JSON.stringify([
       useAuthStore.getState().user?.id,
       client.baseUrl,
@@ -2520,7 +2533,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     // — dedupe so the (heavy) bootstrap fetch runs once per conversation open.
     let existingLoad = loadMessagesInFlight.get(requestKey)
     while (existingLoad) {
-      if (!force && (conditional || !existingLoad.conditional)) return existingLoad.promise
+      if (!force && !existingLoad.restricted && (conditional || !existingLoad.conditional)) {
+        return existingLoad.promise
+      }
       // Recovery still needs a full response if the background check failed.
       await existingLoad.promise.catch(() => undefined)
       existingLoad = loadMessagesInFlight.get(requestKey)
@@ -2620,11 +2635,18 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         // will land the ask_user_resolved any moment now anyway.
         const pending = bootstrap.pending_hitl ?? null
         const currentState = get()
+        const hasPendingLocalCancel =
+          Boolean(currentState.cancellingConversationIds[conversationId]) &&
+          currentState.streamingConversationId === conversationId &&
+          currentState.pendingRunClientMessageId !== null &&
+          currentState.currentRunId === null
         const nextCancelling = bootstrap.run_control?.cleanup_pending
           ? true
-          : !bootstrap.active_run && !bootstrap.pending_hitl
-            ? false
-            : Boolean(currentState.cancellingConversationIds[conversationId])
+          : hasPendingLocalCancel
+            ? true
+            : !bootstrap.active_run && !bootstrap.pending_hitl
+              ? false
+              : Boolean(currentState.cancellingConversationIds[conversationId])
         // If the user just answered this exact question, the backend's
         // `save_pending_request(None)` may not have committed yet when
         // bootstrap fetched — DB pending_hitl is stale. Skip the re-seed
@@ -2769,7 +2791,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           if (shouldSkipForConcurrentStream(s)) return {}
           didApplyBootstrapState = true
           const awaitingPendingCancelRunId =
-            nextCancelling &&
+            Boolean(s.cancellingConversationIds[conversationId]) &&
             s.streamingConversationId === conversationId &&
             s.pendingRunClientMessageId !== null &&
             s.currentRunId === null
@@ -2812,7 +2834,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           )
           return {
             bootstrapEtags: { ...s.bootstrapEtags, [requestKey]: response.etag },
-            messages: { ...s.messages, [conversationId]: nextMessages },
+            messages: {
+              ...s.messages,
+              [conversationId]:
+                awaitingPendingCancelRunId && !bootstrap.active_run
+                  ? currentMessages
+                  : nextMessages,
+            },
             oldestSeqByConv: {
               ...s.oldestSeqByConv,
               [conversationId]:
@@ -2839,7 +2867,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             // bootstrap race.
             errors: { ...s.errors, [conversationId]: nextError },
             lastRunStatus: bootstrap.last_run_status ?? null,
-            streamAgents: reuseEqualValue(s.streamAgents, nextStreamAgents),
+            streamAgents: awaitingPendingCancelRunId
+              ? s.streamAgents
+              : reuseEqualValue(s.streamAgents, nextStreamAgents),
             pendingSteers: {
               ...s.pendingSteers,
               [conversationId]: reuseEqualValue(
@@ -2903,9 +2933,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               ? s.pendingConfirmMap
               : reuseEqualValue(s.pendingConfirmMap, seedPendingConfirmMap),
             pendingAsk: skipSeed ? s.pendingAsk : reuseEqualValue(s.pendingAsk, seedPendingAsk),
-            cancellingConversationIds: nextCancelling
-              ? { ...s.cancellingConversationIds, [conversationId]: true }
-              : withoutConversationFlag(s.cancellingConversationIds, conversationId),
+            cancellingConversationIds:
+              nextCancelling || awaitingPendingCancelRunId
+                ? { ...s.cancellingConversationIds, [conversationId]: true }
+                : withoutConversationFlag(s.cancellingConversationIds, conversationId),
             isStreaming: awaitingPendingCancelRunId ? s.isStreaming : isStreamingActive,
             streamingConversationId: awaitingPendingCancelRunId
               ? s.streamingConversationId
@@ -2974,7 +3005,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         }))
       }
     })()
-    loadMessagesInFlight.set(requestKey, { promise, conditional })
+    loadMessagesInFlight.set(requestKey, { promise, conditional, restricted })
     try {
       await promise
     } finally {
@@ -3774,7 +3805,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
         pendingSteers: {
           ...s.pendingSteers,
-          [conversationId]: failedPendingSteers(s, conversationId),
+          [conversationId]: (s.pendingSteers[conversationId] ?? []).map((pending) => ({
+            ...pending,
+            state: 'failed',
+          })),
         },
       }))
       return

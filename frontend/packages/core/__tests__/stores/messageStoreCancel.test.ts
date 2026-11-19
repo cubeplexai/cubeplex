@@ -518,6 +518,15 @@ describe('messageStore.cancelStream', () => {
     const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv1')
     await Promise.resolve()
 
+    // First bootstrap sees active_run: null (before POST /messages commits on backend)
+    vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
+      bootstrap: idleBootstrap(),
+      etag: null,
+    })
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv1', { force: true })
+    expect(useMessageStore.getState().cancellingConversationIds).toEqual({ conv1: true })
+
+    // Next bootstrap sees the admitted run
     vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
       bootstrap: {
         ...idleBootstrap(),
@@ -534,5 +543,35 @@ describe('messageStore.cancelStream', () => {
     await cancelling
 
     expect(cancelActiveRun).toHaveBeenCalledWith(fakeClient, 'conv1', 'admitted-run')
+  })
+
+  it('marks pendingSteers failed when another conversation takes over mid-cancel', async () => {
+    let resolveCancel!: () => void
+    vi.mocked(cancelActiveRun).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCancel = () => resolve({ run_id: 'r1', accepted: true, cleanup_pending: true })
+      }),
+    )
+    seedStreaming('conv-a', {})
+    useMessageStore.setState({
+      pendingSteers: {
+        'conv-a': [
+          {
+            steerId: 's-1',
+            text: 'queued steer',
+            state: 'queued',
+            createdAt: '2026-11-18T00:00:00Z',
+          },
+        ],
+      },
+    })
+
+    const cancelling = useMessageStore.getState().cancelStream(fakeClient, 'conv-a')
+    await Promise.resolve()
+    seedStreaming('conv-b', { text: 'B alive' })
+    resolveCancel()
+    await cancelling
+
+    expect(useMessageStore.getState().pendingSteers['conv-a']?.[0]?.state).toBe('failed')
   })
 })
