@@ -40,6 +40,10 @@ class ExecutionConflictError(ValueError):
     """An immutable source identity was reused for different work."""
 
 
+class ExecutionActorMismatchError(ExecutionConflictError):
+    """A non-owning participant attempted to continue another actor's run."""
+
+
 class ExecutionRevokedError(ValueError):
     """The original admission no longer authorizes execution."""
 
@@ -205,7 +209,7 @@ class ConversationExecutionService:
         if admission.conversation_id != conversation_id:
             raise ExecutionConflictError("resume does not match the admitted conversation")
         if admission.actor_user_id != responding_user_id:
-            raise ExecutionConflictError("only the original execution actor may answer")
+            raise ExecutionActorMismatchError("only the original execution actor may answer")
         admission = await self._lock_live_admission(admission.id)
         if (
             admission.run_start_token is None

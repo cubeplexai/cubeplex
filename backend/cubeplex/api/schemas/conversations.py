@@ -93,6 +93,8 @@ class PendingHitlAskUser(BaseModel):
     kind: Literal["ask_user"]
     requested_at: str  # ISO 8601 UTC, e.g. "2026-06-02T12:34:56+00:00"
     questions: list[AskUserQuestion]
+    actor_user_id: str | None = None
+    actor_display_name: str | None = None
 
 
 class PendingHitlSandboxConfirm(BaseModel):
@@ -103,6 +105,8 @@ class PendingHitlSandboxConfirm(BaseModel):
     tool_call_id: str
     command: str
     matched_pattern: str
+    actor_user_id: str | None = None
+    actor_display_name: str | None = None
 
 
 PendingHitl = PendingHitlAskUser | PendingHitlSandboxConfirm

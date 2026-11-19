@@ -46,6 +46,8 @@ This is a conversation-level change. It does not create a topic, and it does not
 
 In workspaces configured with a **Workspace shared sandbox**, 1:1 conversations and group chats already share the workspace's single sandbox and `/workspace` storage across all members, so inviting participants continues using that workspace sandbox (while still turning off personal memory injection for the shared thread).
 
+When the agent pauses on a question or command confirmation card in a group chat, only the participant who started that turn can submit the answer or approval (in both the web app and IM cards). Any participant in the conversation can still cancel the waiting card and send a new message to continue under their own identity.
+
 :::caution
 Invite only people you trust with the conversation's current sandbox. Existing files and environment settings remain available to the group.
 :::

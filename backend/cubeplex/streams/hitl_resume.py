@@ -355,7 +355,13 @@ def _as_dict(obj: Any) -> dict[str, Any]:
     return dict(obj)
 
 
-def serialize_pending_hitl(pending: Any, *, run_id: str) -> dict[str, Any]:
+def serialize_pending_hitl(
+    pending: Any,
+    *,
+    run_id: str,
+    actor_user_id: str | None = None,
+    actor_display_name: str | None = None,
+) -> dict[str, Any]:
     """Convert a cubeloop ``HitlRequest`` into the frontend ``PendingHitl``
     payload (see :mod:`cubeplex.api.schemas.conversations` and spec §7).
 
@@ -381,6 +387,8 @@ def serialize_pending_hitl(pending: Any, *, run_id: str) -> dict[str, Any]:
             "tool_call_id": pending.payload.tool_call_id,
             "command": args.get("command", ""),
             "matched_pattern": details.get("matched_pattern", ""),
+            "actor_user_id": actor_user_id,
+            "actor_display_name": actor_display_name,
         }
     if kind == "ask":
         questions_out: list[dict[str, Any]] = []
@@ -402,6 +410,8 @@ def serialize_pending_hitl(pending: Any, *, run_id: str) -> dict[str, Any]:
             "kind": "ask_user",
             "requested_at": requested_at,
             "questions": questions_out,
+            "actor_user_id": actor_user_id,
+            "actor_display_name": actor_display_name,
         }
     # ``confirm`` kind is unused by cubeplex today. Raise so a future caller
     # doesn't silently get a half-built response.

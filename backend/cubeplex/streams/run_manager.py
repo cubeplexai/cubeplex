@@ -549,7 +549,13 @@ async def _finish_subagent_citation_queue(
         raise
 
 
-def cubeloop_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
+def cubeloop_dict_to_agent_event(
+    d: dict[str, Any],
+    timestamp: str,
+    *,
+    actor_user_id: str | None = None,
+    actor_display_name: str | None = None,
+) -> AgentEvent | None:
     """Translate a single SSE dict produced by ``convert_agent_event_to_sse``
     into a typed cubeplex ``AgentEvent``.
 
@@ -656,15 +662,20 @@ def cubeloop_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEven
     if t == "sandbox_confirm_request":
         args = d.get("args") or {}
         details = d.get("details") or {}
+        sbx_data: dict[str, Any] = {
+            "question_id": d.get("question_id", ""),
+            "tool_call_id": d.get("tool_call_id", ""),
+            "command": args.get("command", ""),
+            "matched_pattern": details.get("matched_pattern"),
+            "timeout_seconds": d.get("timeout_seconds"),
+        }
+        if actor_user_id is not None:
+            sbx_data["actor_user_id"] = actor_user_id
+        if actor_display_name is not None:
+            sbx_data["actor_display_name"] = actor_display_name
         return SandboxConfirmRequestEvent(
             timestamp=timestamp,
-            data={
-                "question_id": d.get("question_id", ""),
-                "tool_call_id": d.get("tool_call_id", ""),
-                "command": args.get("command", ""),
-                "matched_pattern": details.get("matched_pattern"),
-                "timeout_seconds": d.get("timeout_seconds"),
-            },
+            data=sbx_data,
         )
     if t == "sandbox_confirm_resolved":
         return SandboxConfirmResolvedEvent(
@@ -678,13 +689,18 @@ def cubeloop_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEven
             },
         )
     if t == "ask_user_request":
+        ask_data: dict[str, Any] = {
+            "question_id": d.get("question_id", ""),
+            "questions": d.get("questions", []),
+            "timeout_seconds": d.get("timeout_seconds"),
+        }
+        if actor_user_id is not None:
+            ask_data["actor_user_id"] = actor_user_id
+        if actor_display_name is not None:
+            ask_data["actor_display_name"] = actor_display_name
         return AskUserRequestEvent(
             timestamp=timestamp,
-            data={
-                "question_id": d.get("question_id", ""),
-                "questions": d.get("questions", []),
-                "timeout_seconds": d.get("timeout_seconds"),
-            },
+            data=ask_data,
         )
     if t == "ask_user_resolved":
         return AskUserResolvedEvent(
@@ -1024,6 +1040,10 @@ class ResumeInFlight(Exception):
 
 class ResumeConflict(Exception):
     """The conversation has moved on; the active run_id has changed."""
+
+
+class ResumeActorMismatch(ResumeConflict):
+    """Only the original execution actor may answer a paused HITL run."""
 
 
 def _extract_tool_summaries(
@@ -2426,6 +2446,7 @@ class RunManager:
         from cubeplex.db.engine import async_session_maker
         from cubeplex.services.conversation_execution import (
             ConversationExecutionService,
+            ExecutionActorMismatchError,
             ExecutionConflictError,
             ExecutionRevokedError,
             RunExecutionBinding,
@@ -2441,6 +2462,8 @@ class RunManager:
                     responding_user_id=ctx.user_id,
                 )
                 await session.commit()
+        except ExecutionActorMismatchError as exc:
+            raise ResumeActorMismatch("only the original execution actor may answer") from exc
         except (ExecutionConflictError, ExecutionRevokedError, LookupError) as exc:
             raise ResumeConflict("original execution cannot be resumed") from exc
         if admitted is None:
@@ -3300,6 +3323,8 @@ class RunManager:
                     sse_event = cubeloop_dict_to_agent_event(
                         d,
                         datetime.now(UTC).isoformat(),
+                        actor_user_id=ctx.user_id,
+                        actor_display_name=ctx.sender_display_name,
                     )
                     if sse_event is not None:
                         await publish_stream_event(sse_event, None)
@@ -3913,6 +3938,8 @@ class RunManager:
                     sse_event = cubeloop_dict_to_agent_event(
                         d,
                         datetime.now(UTC).isoformat(),
+                        actor_user_id=ctx.user_id,
+                        actor_display_name=ctx.sender_display_name,
                     )
                     if sse_event is not None:
                         await publish_stream_event(sse_event, None)
