@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
-from sqlalchemy import desc, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlmodel import col
@@ -410,13 +410,31 @@ def _match_model_preset(
     if exact is not None:
         return exact
     lowered = arg.lower()
-    ci_key = next((p for p in presets if p.key.lower() == lowered), None)
-    if ci_key is not None:
-        return ci_key
+    ci_matches = [p for p in presets if p.key.lower() == lowered]
+    if len(ci_matches) == 1:
+        return ci_matches[0]
+    if len(ci_matches) > 1:
+        return None
     primary_matches = [p for p in presets if p.primary.lower() == lowered]
     if len(primary_matches) == 1:
         return primary_matches[0]
     return None
+
+
+async def _load_enabled_model_refs(session: AsyncSession, org_id: str) -> set[str]:
+    from cubeplex.models.org_provider_override import OrgProviderOverride as DBO
+    from cubeplex.models.provider import Model as DBM
+    from cubeplex.models.provider import Provider as DBP
+
+    stmt = (
+        select(col(DBP.slug), col(DBM.model_id))
+        .join(DBM, and_(col(DBM.provider_id) == col(DBP.id), col(DBM.enabled)))
+        .outerjoin(DBO, and_(col(DBO.provider_id) == col(DBP.id), col(DBO.org_id) == org_id))
+        .where(col(DBP.org_id).is_(None) | (col(DBP.org_id) == org_id))
+        .where(func.coalesce(col(DBO.enabled), col(DBP.enabled), True))
+    )
+    rows = (await session.execute(stmt)).all()
+    return {f"{slug}/{model_id}" for slug, model_id in rows}
 
 
 async def execute_list_models_command(
@@ -494,6 +512,10 @@ async def execute_switch_model_command(
     target = _match_model_preset(presets, arg)
     if target is None:
         return f"⚠️ 未找到模型预设「{arg}」，请发送 /models 查看可用模型。"
+
+    enabled_refs = await _load_enabled_model_refs(session, account.org_id)
+    if any(ref not in enabled_refs for ref in target.chain):
+        return f"⚠️ 模型预设「{target.key}」包含已禁用或不可用的模型，暂时无法切换。"
 
     conv = await find_live_im_conversation(
         session,

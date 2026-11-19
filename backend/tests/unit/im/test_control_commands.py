@@ -711,6 +711,20 @@ def test_model_matching_and_active_key_resolution() -> None:
             kind="custom",
             is_default=False,
         ),
+        ModelPreset(
+            key="CaseA",
+            primary="openai/gpt-4.1",
+            fallbacks=(),
+            kind="custom",
+            is_default=False,
+        ),
+        ModelPreset(
+            key="casea",
+            primary="openai/gpt-4.1-mini",
+            fallbacks=(),
+            kind="custom",
+            is_default=False,
+        ),
     )
 
     assert _resolve_active_model_key(presets, None) == "flash"
@@ -721,6 +735,8 @@ def test_model_matching_and_active_key_resolution() -> None:
     assert _match_model_preset(presets, "PRO") == presets[1]
     assert _match_model_preset(presets, "anthropic/claude-sonnet-4") == presets[1]
     assert _match_model_preset(presets, "openai/gpt-4o") is None
+    assert _match_model_preset(presets, "CaseA") == presets[4]
+    assert _match_model_preset(presets, "CASEA") is None
     assert _match_model_preset(presets, "missing") is None
 
 
@@ -777,7 +793,13 @@ async def test_execute_list_and_switch_model_commands(monkeypatch: pytest.Monkey
         async def flush(self) -> None:
             return None
 
+    enabled_refs: set[str] = {"openai/gpt-4o-mini", "anthropic/claude-sonnet-4"}
+
+    async def _fake_enabled_refs(_session: object, _org_id: str) -> set[str]:
+        return enabled_refs
+
     monkeypatch.setattr("cubeplex.im.control_commands._load_presets", _fake_load_presets)
+    monkeypatch.setattr("cubeplex.im.control_commands._load_enabled_model_refs", _fake_enabled_refs)
     monkeypatch.setattr("cubeplex.im.control_commands.find_live_im_conversation", _fake_find_live)
     monkeypatch.setattr("cubeplex.im.control_commands.resolve_im_conversation", _fake_resolve_im)
 
@@ -842,6 +864,18 @@ async def test_execute_list_and_switch_model_commands(monkeypatch: pytest.Monkey
     assert "已将当前会话模型切换为「pro」" in switched
     assert created_conv.model_key == "pro"
 
+    enabled_refs = {"openai/gpt-4o-mini"}
+    disabled = await execute_switch_model_command(
+        session=sess,  # type: ignore[arg-type]
+        account=acct,  # type: ignore[arg-type]
+        effective_user_id="u1",
+        channel_id="ch1",
+        scope_key="dm",
+        scope_kind="dm",
+        model_arg="pro",
+    )
+    assert "包含已禁用或不可用的模型" in disabled
+
 
 async def test_slack_register_commands_wires_models_and_model() -> None:
     from cubeplex.im.slack.commands import register_commands
@@ -858,3 +892,83 @@ async def test_slack_register_commands_wires_models_and_model() -> None:
 
     register_commands(_FakeApp(), account_id="acct-1", workspace_id="ws-1", session_maker=object())
     assert {"/link", "/new", "/reset", "/stop", "/steer", "/models", "/model"} <= set(registered)
+
+
+async def test_slack_and_discord_control_slash_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from cubeplex.im.discord.commands import _handle_control_slash as discord_control
+    from cubeplex.im.slack.commands import _handle_control_slash as slack_control
+
+    handled_texts: list[str] = []
+
+    async def _fake_maybe(event: object, **_kwargs: object) -> bool:
+        handled_texts.append(getattr(event, "text", ""))
+        reply = _kwargs.get("reply")
+        if callable(reply):
+            await reply("ok")
+        return True
+
+    monkeypatch.setattr("cubeplex.im.control_commands.maybe_handle_control_command", _fake_maybe)
+
+    class _FakeSess:
+        async def __aenter__(self) -> _FakeSess:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def get(self, _cls: object, pk: str) -> object:
+            return SimpleNamespace(id=pk, external_account_id="ext-1")
+
+    monkeypatch.setattr(
+        "cubeplex.im.slack.commands._resolve_slack_slash_scope",
+        AsyncMock(return_value=("C1", "U1", "ch", "channel")),
+    )
+    slack_replies: list[str] = []
+
+    async def _slack_respond(text: str, **_kw: object) -> None:
+        slack_replies.append(text)
+
+    await slack_control(
+        {"trigger_id": "t1"},
+        _slack_respond,
+        account_id="acct-1",
+        session_maker=lambda: _FakeSess(),
+        run_manager=None,
+        text="/models",
+        failure_reply="fail",
+    )
+    assert handled_texts[-1] == "/models"
+    assert slack_replies[-1] == "ok"
+
+    monkeypatch.setattr(
+        "cubeplex.im.discord.commands._resolve_discord_scope",
+        AsyncMock(return_value=("C2", "U2", "ch", "channel")),
+    )
+    discord_sent: list[str] = []
+
+    async def _followup_send(text: str, **_kw: object) -> None:
+        discord_sent.append(text)
+
+    interaction = SimpleNamespace(
+        id="i1",
+        response=SimpleNamespace(defer=AsyncMock()),
+        followup=SimpleNamespace(send=_followup_send),
+    )
+    bot = SimpleNamespace(
+        _cubeplex_session_maker=lambda: _FakeSess(),
+        _cubeplex_account_id="acct-1",
+        _cubeplex_run_manager=None,
+    )
+    await discord_control(
+        interaction,  # type: ignore[arg-type]
+        bot,  # type: ignore[arg-type]
+        text="/model pro",
+        failure_reply="fail",
+    )
+    assert handled_texts[-1] == "/model pro"
+    assert discord_sent[-1] == "ok"

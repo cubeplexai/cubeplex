@@ -348,10 +348,18 @@ async def process_one_queue_item(
                     created=False,
                 )
                 if is_human:
-                    from cubeplex.models.conversation import Conversation
-
-                    conv = await session.get(Conversation, captured["conversation_id"])
-                    user_request_model_key = conv.model_key if conv is not None else None
+                    explicit_fp = ConversationExecutionService._fingerprint(
+                        UserMessageIntent(
+                            content=captured["content"],
+                            attachment_ids=tuple(attachment_ids or ()),
+                            model_key=admitted.execution.model_key,
+                        )
+                    )
+                    user_request_model_key = (
+                        admitted.execution.model_key
+                        if admission.request_fingerprint == explicit_fp
+                        else None
+                    )
             elif candidate.inbound_message_id is not None:
                 from cubeplex.models.conversation import Conversation
 
