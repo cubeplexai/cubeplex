@@ -63,6 +63,9 @@ function useTurnRunChip(opts: {
   const streamConnection = useMessageStore((s) => s.streamConnection)
   const currentRunId = useMessageStore((s) => s.currentRunId)
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
+  const runLifecycle = useMessageStore((s) =>
+    opts.conversationId ? (s.runLifecycle[opts.conversationId] ?? 'idle') : 'idle',
+  )
   const cancelling = useMessageStore((s) =>
     opts.conversationId ? Boolean(s.cancellingConversationIds[opts.conversationId]) : false,
   )
@@ -73,6 +76,7 @@ function useTurnRunChip(opts: {
   const live = isLiveRunChip({
     isLiveStreaming: opts.isLive,
     isRunAnchor,
+    isPausedHitl: runLifecycle === 'paused_hitl',
     messageRunId: opts.runId,
     currentRunId,
     streamConnection,
@@ -99,7 +103,7 @@ function useTurnRunChip(opts: {
             .loadMessages(client, opts.conversationId!, { force: true })
         }
       : undefined
-  const chipRunId = opts.runId ?? currentRunId
+  const chipRunId = opts.isLive ? (opts.runId ?? currentRunId) : (opts.runId ?? null)
   return { status, error: errorEntry?.data ?? null, onRetry, runId: chipRunId }
 }
 
@@ -686,7 +690,7 @@ export function AssistantMessage({
   const runChip = useTurnRunChip({
     conversationId,
     workspaceId,
-    runId: message?.run_id ?? currentRunId,
+    runId: stream ? currentRunId : message?.run_id,
     stopReason: message?.stop_reason,
     isLive: isStreaming === true,
     isLastRun,
@@ -768,9 +772,11 @@ export function AssistantMessage({
     )
   }
 
+  const showDetachedRunChip = !isStreaming && runChip.status !== 'completed'
+
   return (
     <div data-role="assistant" className="group space-y-2">
-      {(grouped.length > 0 || totalSubagents >= 2 || runChip.status !== 'completed') && (
+      {(grouped.length > 0 || totalSubagents >= 2 || showDetachedRunChip) && (
         <div className={cn(ASSISTANT_CONTENT_MAX_CLASS, 'space-y-2')}>
           {totalSubagents >= 2 && (
             <SubAgentCluster
@@ -779,7 +785,7 @@ export function AssistantMessage({
             />
           )}
           {grouped.map((item, i) => renderItem(item, i))}
-          {runChip.status !== 'completed' && runChipEl}
+          {showDetachedRunChip && runChipEl}
           {message && conversationId && showForkAction && (
             <div
               className="flex flex-wrap items-center gap-1 opacity-0

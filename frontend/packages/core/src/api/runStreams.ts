@@ -160,6 +160,7 @@ export async function* streamRun(
   runId: string,
   lastEventId?: string,
   signal?: AbortSignal,
+  onOpen?: () => void,
 ): AsyncGenerator<AgentEvent> {
   const headers: Record<string, string> = {
     Accept: 'text/event-stream',
@@ -187,6 +188,7 @@ export async function* streamRun(
   if (!res.ok || !res.body) {
     throw await toApiError(res)
   }
+  onOpen?.()
 
   const reader = res.body.getReader()
   try {

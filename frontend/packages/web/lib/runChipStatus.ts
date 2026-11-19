@@ -32,14 +32,16 @@ export function conversationErrorApplies(
 export function isLiveRunChip(opts: {
   isLiveStreaming: boolean
   isRunAnchor: boolean
+  isPausedHitl?: boolean
   messageRunId?: string | null
   currentRunId: string | null
   streamConnection: StreamConnection
 }): boolean {
   if (opts.isLiveStreaming) return true
-  if (!opts.isRunAnchor) return false
+  if (!opts.isRunAnchor || opts.isPausedHitl) return false
   return (
     opts.messageRunId != null &&
+    opts.messageRunId !== '' &&
     opts.messageRunId === opts.currentRunId &&
     opts.streamConnection != null &&
     opts.streamConnection !== 'connected'

@@ -367,4 +367,41 @@ describe('messageStore.cancelStream', () => {
 
     expect(useMessageStore.getState()).toMatchObject({ cancellingConversationIds: {} })
   })
+
+  it('clears streamConnection on cancel and avoids stopping deadlock on bootstrap', async () => {
+    seedStreaming('conv1', {
+      text: 'partial',
+      blocks: [{ type: 'text', text: 'partial' }],
+    })
+    useMessageStore.setState({ streamConnection: 'reconnecting' })
+
+    await useMessageStore.getState().cancelStream(fakeClient, 'conv1')
+    expect(useMessageStore.getState().streamConnection).toBeNull()
+
+    // Reload / refresh while active_run is still winding down with cleanup_pending: true
+    vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
+      bootstrap: {
+        ...idleBootstrap(),
+        active_run: { run_id: 'r-stopping', status: 'running' },
+        run_control: {
+          run_id: 'r-stopping',
+          stop_requested_at: '2026-11-18T00:00:00Z',
+          cleanup_pending: true,
+          can_stop: false,
+        },
+      } as never,
+      etag: null,
+    })
+
+    await useMessageStore.getState().loadMessages(fakeClient, 'conv1', { force: true })
+
+    expect(useMessageStore.getState()).toMatchObject({
+      isStreaming: false,
+      streamingConversationId: null,
+      currentRunId: null,
+      streamConnection: null,
+      cancellingConversationIds: { conv1: true },
+      runLifecycle: { conv1: 'stopping' },
+    })
+  })
 })

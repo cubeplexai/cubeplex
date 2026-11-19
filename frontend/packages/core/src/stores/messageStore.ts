@@ -1639,6 +1639,7 @@ async function finalizeCompletedStream(
         currentRunId: null,
         pendingRunClientMessageId: null,
         statusPhase: null,
+        streamConnection: null,
         pendingSteers: {
           ...state.pendingSteers,
           [conversationId]: failedPendingSteers(state, conversationId),
@@ -1682,6 +1683,7 @@ async function finalizeCompletedStream(
       currentRunId: null,
       pendingRunClientMessageId: null,
       statusPhase: null,
+      streamConnection: null,
       pendingSteers: {
         ...state.pendingSteers,
         [conversationId]: failedPendingSteers(state, conversationId),
@@ -1737,6 +1739,7 @@ async function finalizePausedStream(
         runLifecycle: { ...state.runLifecycle, [conversationId]: 'paused_hitl' },
         streamingConversationId: nextStreamingConversationId,
         statusPhase: null,
+        streamConnection: null,
       }
     })
     return
@@ -1763,6 +1766,7 @@ async function finalizePausedStream(
       runLifecycle: { ...state.runLifecycle, [conversationId]: 'paused_hitl' },
       streamingConversationId: nextStreamingConversationId,
       statusPhase: null,
+      streamConnection: null,
     }
   })
 }
@@ -1793,19 +1797,27 @@ async function consumeRunStream(
         shouldFinalize = false
         return
       }
+      let streamError: unknown = null
       try {
-        set({ streamConnection: 'connected' })
         for await (const event of streamRun(
           client,
           conversationId,
           runId,
           cursor ?? undefined,
           signal,
+          () => {
+            if (get().currentRunId === runId) {
+              set({ streamConnection: 'connected' })
+            }
+          },
         )) {
           const state = get()
           if (state.currentRunId !== runId) {
             shouldFinalize = false
             return
+          }
+          if (state.streamConnection !== 'connected') {
+            set({ streamConnection: 'connected' })
           }
           if (event.event_id && state.lastAppliedEventId) {
             if (compareEventIds(event.event_id, state.lastAppliedEventId) <= 0) continue
@@ -1950,6 +1962,7 @@ async function consumeRunStream(
           shouldFinalize = false
           return
         }
+        streamError = err
       }
       if (sawDone || sawPausedDone || sawTerminalError) break
       if (get().currentRunId !== runId || get().cancellingConversationIds[conversationId]) {
@@ -1957,10 +1970,20 @@ async function consumeRunStream(
         return
       }
       cursor = get().lastAppliedEventId ?? undefined
+      if (streamError instanceof ApiError && streamError.status === 404) {
+        shouldFinalize = false
+        set({ streamConnection: null })
+        queueMicrotask(() => {
+          void get().loadMessages(client, conversationId, { force: true })
+        })
+        return
+      }
       attempt += 1
-      set({
-        streamConnection: browserIsOnline() ? 'reconnecting' : 'disconnected',
-      })
+      if (streamError !== null || attempt > 1) {
+        set({
+          streamConnection: browserIsOnline() ? 'reconnecting' : 'disconnected',
+        })
+      }
       try {
         await waitForReconnect(
           attempt,
@@ -1999,7 +2022,12 @@ async function consumeRunStream(
         await finalizeCompletedStream(get, set, conversationId)
       }
     }
-    if (sawDone || sawPausedDone || sawTerminalError) {
+    if (
+      sawDone ||
+      sawPausedDone ||
+      sawTerminalError ||
+      (!get().isStreaming && get().pendingRunClientMessageId === null)
+    ) {
       set({ streamConnection: null })
     }
   }
@@ -2481,10 +2509,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           ...get().contextTokens,
           [conversationId]: usageSummary?.context_tokens ?? null,
         }
-        const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
-          ? { [MAIN_AGENT_KEY]: emptyStream() }
-          : {}
-
         // Cold-start fallback: when the Redis event log has aged out, the
         // backend returns the unresolved HITL request inline. Seed the same
         // pendingAsk / pendingConfirmMap slots the live SSE path populates so
@@ -2542,19 +2566,26 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         // during a long pause, bootstrap.active_run is null but the DB
         // pending + run_id ARE still recoverable (via pending_hitl). Treat
         // the pending_hitl payload as "this conversation is paused on
-        // run_id, the card must render, and we should tail the run stream
-        // so a resume turn from any worker reaches this tab".
+        // run_id and the card must render"; only tail the SSE run stream
+        // when Redis still holds `active_run` (otherwise /runs/{id}/stream 404s).
         //
         // MessageList gates AskUserCard on `streamingConversationId ===
         // conversationId`; without this, an ask_user paused beyond Redis
         // TTL has its pendingAsk seeded but the card stays hidden.
         const pendingHitlRunId = bootstrap.pending_hitl?.run_id ?? null
         const hasPendingHitl = pendingHitlRunId !== null
-        const streamRunId = bootstrap.active_run?.run_id ?? pendingHitlRunId
-        const streamingActive = !!bootstrap.active_run || hasPendingHitl
-        // Paused HITL: SSE is attached but the worker has detached. Don't
-        // light up "is streaming" indicators (typing dots etc.); the
-        // <AskUserCard> and composer hint already convey state. `pendingAsk`
+        const nextCancelling = bootstrap.run_control?.cleanup_pending
+          ? true
+          : !bootstrap.active_run && !bootstrap.pending_hitl
+            ? false
+            : Boolean(get().cancellingConversationIds[conversationId])
+        const streamRunId = nextCancelling
+          ? null
+          : (bootstrap.active_run?.run_id ?? pendingHitlRunId)
+        const streamingActive = !nextCancelling && (!!bootstrap.active_run || hasPendingHitl)
+        // Paused HITL: SSE is attached when Redis active_run exists, but the worker
+        // has detached. Don't light up "is streaming" indicators (typing dots etc.);
+        // the <AskUserCard> and composer hint already convey state. `pendingAsk`
         // and `pendingConfirmMap` are the truth signals here. We keep
         // `streamingConversationId` set so MessageList's `pendingAsk &&
         // streamingConversationId === conversationId` gate still fires.
@@ -2562,9 +2593,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         const isPaused =
           !isResumingHitl && (bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl)
         const isStreamingActive = streamingActive && !isPaused
-        const lifecycle: RunLifecycle = get().cancellingConversationIds[conversationId]
+        const nextStreamAgents: Record<string, AgentStream> = isStreamingActive
+          ? { [MAIN_AGENT_KEY]: emptyStream() }
+          : {}
+        const tailRunId = !nextCancelling ? (bootstrap.active_run?.run_id ?? null) : null
+        const lifecycle: RunLifecycle = nextCancelling
           ? 'stopping'
-          : hasPendingHitl && bootstrap.active_run?.status === 'running'
+          : isResumingHitl
             ? 'resuming_hitl'
             : hasPendingHitl
               ? 'paused_hitl'
@@ -2760,14 +2795,13 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               ? s.pendingConfirmMap
               : reuseEqualValue(s.pendingConfirmMap, seedPendingConfirmMap),
             pendingAsk: skipSeed ? s.pendingAsk : reuseEqualValue(s.pendingAsk, seedPendingAsk),
-            cancellingConversationIds: bootstrap.run_control?.cleanup_pending
+            cancellingConversationIds: nextCancelling
               ? { ...s.cancellingConversationIds, [conversationId]: true }
-              : !bootstrap.active_run && !bootstrap.pending_hitl
-                ? withoutConversationFlag(s.cancellingConversationIds, conversationId)
-                : s.cancellingConversationIds,
+              : withoutConversationFlag(s.cancellingConversationIds, conversationId),
             isStreaming: isStreamingActive,
             streamingConversationId: streamingActive ? conversationId : null,
             currentRunId: streamRunId,
+            streamConnection: isStreamingActive ? 'connected' : null,
             pendingRunClientMessageId: null,
             lastAppliedEventId: streamCursor,
             statusPhase: null,
@@ -2778,11 +2812,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           }
         })
 
-        if (streamRunId !== null) {
+        if (tailRunId !== null) {
           activeStreamController?.abort()
           const controller = new AbortController()
           activeStreamController = controller
-          const runId = streamRunId
+          const runId = tailRunId
           const lastEventId = streamCursor ?? undefined
           queueMicrotask(() => {
             void consumeRunStream(
@@ -2799,6 +2833,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               }
             })
           })
+        } else {
+          activeStreamController?.abort()
+          activeStreamController = null
         }
       } catch (err) {
         if (options?.throwOnError) throw err
@@ -3137,6 +3174,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                         currentRunId: null,
                         pendingRunClientMessageId: null,
                         statusPhase: null,
+                        streamConnection: null,
                       }
                     : {}),
                 }
@@ -3173,6 +3211,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                       currentRunId: null,
                       pendingRunClientMessageId: null,
                       statusPhase: null,
+                      streamConnection: null,
                       runLifecycle: { ...s.runLifecycle, [conversationId]: 'idle' },
                       lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
                     }
@@ -3244,9 +3283,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         ownsStreamingConversation(get(), conversationId) &&
         !get().cancellingConversationIds[conversationId]
       ) {
-        set({
-          streamConnection: browserIsOnline() ? 'reconnecting' : 'disconnected',
-        })
         await consumeRunStream(
           client,
           conversationId,
@@ -3616,6 +3652,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
 
     if (!state.isStreaming) {
+      activeStreamController?.abort()
+      activeStreamController = null
+      set({ streamConnection: null })
       const isIdle = await waitForConversationIdle(client, conversationId, get)
       if (!isIdle) return
       if (!(await reconcileAfterStop(client, conversationId, get))) return
@@ -3674,6 +3713,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           currentRunId: null,
           pendingRunClientMessageId: null,
           statusPhase: null,
+          streamConnection: null,
           pendingSteers: {
             ...s.pendingSteers,
             [conversationId]: failedPendingSteers(s, conversationId),

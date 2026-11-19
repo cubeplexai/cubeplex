@@ -11,10 +11,11 @@ vi.mock('../../src/api', async (importOriginal) => {
         yield* []
       })(),
     ),
+    getConversationBootstrap: vi.fn(),
   }
 })
 
-import { streamMessages, streamRun } from '../../src/api'
+import { ApiError, getConversationBootstrap, streamMessages, streamRun } from '../../src/api'
 import { useMessageStore } from '../../src/stores/messageStore'
 import { getTextContent } from '../../src/types'
 
@@ -126,5 +127,126 @@ describe('messageStore transport drop', () => {
     const assistant = (state.messages[CONV] ?? []).find((m) => m.role === 'assistant')
     expect(assistant?.stop_reason).not.toBe('error')
     expect(state.errors[CONV] ?? null).toBeNull()
+  })
+
+  it('reconciles without flashing Reconnecting on EOF/404 after run completion', async () => {
+    vi.useFakeTimers()
+    const observedConnections: Array<string | null> = []
+    const unsub = useMessageStore.subscribe((s) => {
+      observedConnections.push(s.streamConnection)
+    })
+    const completedBootstrap = {
+      bootstrap: {
+        messages: [
+          {
+            id: 'u-1',
+            role: 'user',
+            content: [{ type: 'text', text: 'hello' }],
+          },
+          {
+            id: 'a-1',
+            role: 'assistant',
+            run_id: 'run-eof',
+            stop_reason: 'stop',
+            content: [{ type: 'text', text: 'complete answer' }],
+          },
+        ],
+        oldest_seq: 1,
+        has_more: false,
+        todos: null,
+        active_run: null,
+        pending_hitl: null,
+        last_run_status: 'completed',
+        execution_generation: 0,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    }
+    try {
+      vi.mocked(streamMessages).mockImplementation(
+        async function* (_c, _id, _content, _a, _s, opts) {
+          opts?.onRunId?.('run-eof')
+          yield delta('complete answer', 'run-eof')
+        },
+      )
+      vi.mocked(streamRun).mockImplementation(async function* () {
+        yield* []
+      })
+      vi.mocked(getConversationBootstrap).mockResolvedValue(completedBootstrap)
+
+      const sendPromise = useMessageStore.getState().send(fakeClient, CONV, 'hello')
+      await vi.advanceTimersByTimeAsync(1_000)
+      await sendPromise
+      await vi.runAllTimersAsync()
+
+      expect(observedConnections).not.toContain('reconnecting')
+      expect(useMessageStore.getState().streamConnection).toBeNull()
+      expect(useMessageStore.getState().isStreaming).toBe(false)
+
+      // 404 on streamRun reconciles immediately without backoff or Reconnecting
+      observedConnections.length = 0
+      vi.mocked(streamRun).mockImplementation(async function* () {
+        yield* []
+        throw new ApiError('Run not found', 404)
+      })
+      await useMessageStore.getState().send(fakeClient, CONV, 'hello again')
+      await vi.runAllTimersAsync()
+
+      expect(observedConnections).not.toContain('reconnecting')
+      expect(useMessageStore.getState().streamConnection).toBeNull()
+      expect(useMessageStore.getState().isStreaming).toBe(false)
+    } finally {
+      unsub()
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears stale reconnecting state on expired-Redis pending_hitl bootstrap', async () => {
+    useMessageStore.setState({
+      streamConnection: 'reconnecting',
+    })
+    vi.mocked(getConversationBootstrap).mockResolvedValueOnce({
+      bootstrap: {
+        messages: [],
+        oldest_seq: null,
+        has_more: false,
+        todos: null,
+        active_run: null,
+        pending_hitl: {
+          run_id: 'run-hitl',
+          question_id: 'q-1',
+          kind: 'ask_user',
+          requested_at: '2026-11-18T00:00:00Z',
+          questions: [],
+        },
+        last_run_status: null,
+        execution_generation: 0,
+        stop_all: null,
+        run_control: null,
+        background_summary: {
+          has_inflight: false,
+          has_pending: false,
+          has_cleanup: false,
+          can_stop: false,
+        },
+        background_events: { items: [], next_cursor: null, has_more: false },
+      } as never,
+      etag: null,
+    })
+
+    await useMessageStore.getState().loadMessages(fakeClient, CONV, { force: true })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(streamRun).not.toHaveBeenCalled()
+    expect(useMessageStore.getState().streamConnection).toBeNull()
+    expect(useMessageStore.getState().currentRunId).toBe('run-hitl')
   })
 })
