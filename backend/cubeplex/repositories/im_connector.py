@@ -342,7 +342,13 @@ async def claim_pending_queue_item(
     stmt = stmt.where(
         IMRunQueueItem.attempts < max_attempts,  # type: ignore[arg-type]
         or_(
-            IMRunQueueItem.status == "pending",  # type: ignore[arg-type]
+            and_(
+                IMRunQueueItem.status == "pending",  # type: ignore[arg-type]
+                or_(
+                    IMRunQueueItem.available_at.is_(None),  # type: ignore[union-attr]
+                    IMRunQueueItem.available_at <= now,  # type: ignore[arg-type,operator]
+                ),
+            ),
             and_(
                 IMRunQueueItem.status == "started",  # type: ignore[arg-type]
                 IMRunQueueItem.claim_lease_expires_at.is_not(None),  # type: ignore[union-attr]
@@ -369,6 +375,7 @@ async def claim_pending_queue_item(
     item.status = "started"
     item.claimed_at = now
     item.claim_lease_expires_at = now + timedelta(seconds=lease_seconds)
+    item.available_at = None
     item.attempts += 1
     session.add(item)
     return item
@@ -458,6 +465,7 @@ async def rewind_queue_item_no_attempt_charge(
     session: AsyncSession,
     *,
     item_id: str,
+    defer_seconds: float = 0.0,
 ) -> None:
     """Rewind a ``started`` queue row to ``pending`` without consuming an attempt.
 
@@ -468,6 +476,10 @@ async def rewind_queue_item_no_attempt_charge(
     while the first reply is still rendering) would burn through
     ``max_attempts`` in seconds and park the follow-up as ``failed``
     instead of just waiting.
+
+    When ``defer_seconds > 0``, sets ``available_at`` in the future so
+    subsequent polls skip this row until the cooldown elapses instead of
+    head-of-line blocking other conversations.
 
     Symmetric ``attempts -= 1`` (claim incremented by one) keeps the
     invariant: ``attempts`` only ever reflects calls that actually
@@ -480,6 +492,9 @@ async def rewind_queue_item_no_attempt_charge(
     ).scalar_one()
     item.status = "pending"
     item.claim_lease_expires_at = None
+    item.available_at = (
+        datetime.now(UTC) + timedelta(seconds=defer_seconds) if defer_seconds > 0 else None
+    )
     if item.attempts > 0:
         item.attempts -= 1
     session.add(item)
