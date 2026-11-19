@@ -144,3 +144,31 @@ async def test_processing_complete_safe_when_inbound_missing() -> None:
     # No exception expected; no SDK calls.
     await c.on_processing_complete(st)
     assert c.removed == []
+
+
+async def test_reply_in_thread_flag_forwarded_to_feishu_reply_api() -> None:
+    from types import SimpleNamespace
+
+    captured: list[bool] = []
+
+    def _reply(req: object) -> object:
+        body = getattr(req, "request_body", None)
+        captured.append(bool(getattr(body, "reply_in_thread", False)))
+        return SimpleNamespace(
+            success=lambda: True,
+            data=SimpleNamespace(message_id="om_bot_reply"),
+        )
+
+    client = SimpleNamespace(
+        im=SimpleNamespace(v1=SimpleNamespace(message=SimpleNamespace(reply=_reply)))
+    )
+    for flag in (True, False):
+        c = FeishuConnector(
+            client=client,
+            channel_id="oc_group",
+            reply_to_id="om_user",
+            reply_in_thread=flag,
+        )
+        msg_id = await c.send_card_init_message("card_123")
+        assert msg_id == "om_bot_reply"
+    assert captured == [True, False]

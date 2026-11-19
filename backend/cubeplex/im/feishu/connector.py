@@ -40,6 +40,8 @@ from cubeplex.im.types import (
     RenderState,
     make_channel_scope,
     make_participant_scope,
+    make_thread_participant_scope,
+    make_thread_scope,
 )
 
 
@@ -411,11 +413,13 @@ class FeishuConnector:
         client: Any = None,
         channel_id: str | None = None,
         reply_to_id: str | None = None,
+        reply_in_thread: bool = False,
     ) -> None:
         self._bot_open_id = bot_open_id
         self._client = client
         self._channel_id = channel_id
         self._reply_to_id = reply_to_id
+        self._reply_in_thread = reply_in_thread
 
     # ------------------------------------------------------------------
     # Inbound
@@ -478,6 +482,16 @@ class FeishuConnector:
             if isinstance(raw_parent_id, str) and raw_parent_id.strip()
             else None
         )
+        raw_thread_id = message.get("thread_id")
+        thread_id = (
+            raw_thread_id.strip()
+            if isinstance(raw_thread_id, str) and raw_thread_id.strip()
+            else None
+        )
+        raw_root_id = message.get("root_id")
+        root_id = (
+            raw_root_id.strip() if isinstance(raw_root_id, str) and raw_root_id.strip() else None
+        )
 
         sender_ref = sender_id.get("union_id") or sender_open_id or ""
 
@@ -490,7 +504,16 @@ class FeishuConnector:
                 return None
             if not sender_ref:
                 return None
-            if binding_mode == "shared":
+            if thread_id:
+                thread_root_id = root_id or message_id
+                if not thread_root_id:
+                    return None
+                if binding_mode == "shared":
+                    scope_key = make_thread_scope(thread_root_id)
+                else:
+                    scope_key = make_thread_participant_scope(sender_ref, thread_root_id)
+                scope_kind = "thread"
+            elif binding_mode == "shared":
                 scope_key = make_channel_scope()
                 scope_kind = "channel"
             else:
@@ -549,6 +572,7 @@ class FeishuConnector:
         client: Any,
         channel_id: str,
         reply_to_id: str | None,
+        reply_in_thread: bool = False,
     ) -> None:
         """Bind the SDK client + target channel/thread for outbound calls.
 
@@ -559,6 +583,7 @@ class FeishuConnector:
         self._client = client
         self._channel_id = channel_id
         self._reply_to_id = reply_to_id
+        self._reply_in_thread = reply_in_thread
 
     # ------------------------------------------------------------------
     # Outbound primitives (lark_oapi)
@@ -748,7 +773,7 @@ class FeishuConnector:
                 ReplyMessageRequestBody.builder()
                 .content(payload)
                 .msg_type("text")
-                .reply_in_thread(False)
+                .reply_in_thread(self._reply_in_thread)
                 .build()
             )
             req = ReplyMessageRequest.builder().message_id(reply_to_id).request_body(body).build()
@@ -832,7 +857,7 @@ class FeishuConnector:
                     ReplyMessageRequestBody.builder()
                     .content(payload)
                     .msg_type("interactive")
-                    .reply_in_thread(False)
+                    .reply_in_thread(self._reply_in_thread)
                     .build()
                 )
                 reply_req = (
@@ -945,7 +970,7 @@ class FeishuConnector:
                 ReplyMessageRequestBody.builder()
                 .content(payload)
                 .msg_type("text")
-                .reply_in_thread(False)
+                .reply_in_thread(self._reply_in_thread)
                 .build()
             )
             req = (
@@ -1075,7 +1100,7 @@ class FeishuConnector:
                 ReplyMessageRequestBody.builder()
                 .content(payload)
                 .msg_type("file")
-                .reply_in_thread(False)
+                .reply_in_thread(self._reply_in_thread)
                 .build()
             )
             rreq = (
@@ -1130,7 +1155,7 @@ class FeishuConnector:
                 ReplyMessageRequestBody.builder()
                 .content(payload)
                 .msg_type("image")
-                .reply_in_thread(False)
+                .reply_in_thread(self._reply_in_thread)
                 .build()
             )
             rreq = (

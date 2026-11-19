@@ -1247,3 +1247,92 @@ async def test_new_rotates_conversation_under_same_topic(
         assert after.title == "hello after /new"
         assert r2.conversation_id != first_conv
         assert r2.topic_id == topic_id
+
+
+async def test_thread_scopes_in_shared_group_share_one_topic(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Multiple Feishu/IM topics in the same shared group share one CubePlex Topic
+    while each IM topic gets its own Conversation."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared", topic_mode="topic"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="t:om_topic_1",
+            scope_kind="thread",
+            effective_user_id=_USER,
+            title_hint="first topic",
+            origin="inbound",
+            channel_name="研发群",
+        )
+        r2 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="t:om_topic_2",
+            scope_kind="thread",
+            effective_user_id="usr-resolve-im-002",
+            title_hint="second topic",
+            origin="inbound",
+            channel_name="研发群",
+        )
+        await session.commit()
+
+    assert r1.topic_id is not None
+    assert r2.topic_id == r1.topic_id
+    assert r1.conversation_id != r2.conversation_id
+
+
+async def test_thread_scopes_in_isolated_group_share_topic_per_user(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """In isolated mode, a user's threads in the same group share their own Topic,
+    while different users keep separate Topics."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="topic"))
+
+    async with maker() as session:
+        u1_t1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="u:u1|t:om_topic_1",
+            scope_kind="thread",
+            effective_user_id=_USER,
+            title_hint="u1 topic 1",
+            origin="inbound",
+            channel_name="研发群",
+        )
+        u1_t2 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="u:u1|t:om_topic_2",
+            scope_kind="thread",
+            effective_user_id=_USER,
+            title_hint="u1 topic 2",
+            origin="inbound",
+            channel_name="研发群",
+        )
+        u2_t1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="u:u2|t:om_topic_1",
+            scope_kind="thread",
+            effective_user_id="usr-resolve-im-002",
+            title_hint="u2 topic 1",
+            origin="inbound",
+            channel_name="研发群",
+        )
+        await session.commit()
+
+    assert u1_t1.topic_id is not None
+    assert u1_t2.topic_id == u1_t1.topic_id
+    assert u1_t1.conversation_id != u1_t2.conversation_id
+    assert u2_t1.topic_id is not None
+    assert u2_t1.topic_id != u1_t1.topic_id
