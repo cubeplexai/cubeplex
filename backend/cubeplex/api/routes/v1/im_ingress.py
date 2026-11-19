@@ -283,7 +283,12 @@ async def feishu_events(
     # Build a connector with a live lark Client for the identity gate
     # (email lookup + rejection reply). Same credentials as the bot's
     # webhook auth path; cheap to construct per request.
-    gate_connector = _build_gate_connector(account, secrets, bot_open_id)
+    gate_connector = _build_gate_connector(
+        account,
+        secrets,
+        bot_open_id,
+        reply_in_thread=event.scope_kind == "thread",
+    )
 
     # Intercept /link or 绑定 commands before normal ingest.
     link_email = parse_link_command(event.text)
@@ -346,6 +351,8 @@ def _build_gate_connector(
     account: IMConnectorAccount,
     secrets: dict[str, Any],
     bot_open_id: str,
+    *,
+    reply_in_thread: bool = False,
 ) -> FeishuConnector | None:
     """Construct a connector bound to a live lark Client for identity gating.
 
@@ -368,7 +375,11 @@ def _build_gate_connector(
         .log_level(_lark.LogLevel.WARNING)
         .build()
     )
-    return FeishuConnector(bot_open_id=bot_open_id, client=client)
+    return FeishuConnector(
+        bot_open_id=bot_open_id,
+        client=client,
+        reply_in_thread=reply_in_thread,
+    )
 
 
 async def _redis_get(key: str) -> str | None:

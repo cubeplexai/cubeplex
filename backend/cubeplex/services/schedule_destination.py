@@ -191,11 +191,14 @@ async def resolve_im_destination_for_topic(
 
     link = (
         await session.execute(
-            select(IMThreadLink).where(
+            select(IMThreadLink)
+            .where(
                 IMThreadLink.topic_id == topic_id,  # type: ignore[arg-type]
                 IMThreadLink.org_id == org_id,  # type: ignore[arg-type]
                 IMThreadLink.workspace_id == workspace_id,  # type: ignore[arg-type]
             )
+            .order_by(IMThreadLink.created_at, IMThreadLink.id)  # type: ignore[arg-type]
+            .limit(1)
         )
     ).scalar_one_or_none()
     return _snapshot_from_link(link) if link is not None else None
