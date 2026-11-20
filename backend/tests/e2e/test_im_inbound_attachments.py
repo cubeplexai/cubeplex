@@ -239,6 +239,7 @@ async def test_reclaim_reuses_persisted_ids_without_duplicate_upload(
         lease_seconds=300,
         load_execution_snapshot=im_test_execution_snapshot,
         resolve_inbound_attachments=resolver,
+        active_run_defer_seconds=0.0,
     )
     assert download_calls["n"] == 1
     async with maker() as s:
@@ -299,6 +300,7 @@ async def test_all_rejected_persists_empty_and_does_not_re_resolve(
         lease_seconds=300,
         load_execution_snapshot=im_test_execution_snapshot,
         resolve_inbound_attachments=resolver,
+        active_run_defer_seconds=0.0,
     )
     assert download_calls["n"] == 1
     async with maker() as s:
