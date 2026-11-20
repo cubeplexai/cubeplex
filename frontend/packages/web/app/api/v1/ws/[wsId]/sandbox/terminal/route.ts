@@ -22,7 +22,7 @@ export const UPSTREAM_TIMEOUT_MS = 295_000
 export async function GET(request: NextRequest, { params }: { params: Promise<{ wsId: string }> }) {
   const { wsId } = await params
   return proxySandboxEndpoint(request, {
-    backendPath: `/api/v1/ws/${wsId}/sandbox/terminal`,
+    backendPath: `/api/v1/ws/${encodeURIComponent(wsId)}/sandbox/terminal`,
     timeoutMs: UPSTREAM_TIMEOUT_MS,
     timeoutStatus: 503,
     timeoutDetail: 'sandbox terminal is still starting; please retry',

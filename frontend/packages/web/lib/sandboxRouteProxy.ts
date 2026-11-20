@@ -49,13 +49,19 @@ export async function proxySandboxEndpoint(
   const qs = new URL(request.url).search
   const url = `${BACKEND_URL}${options.backendPath}${qs}`
 
+  const timeoutSignal = AbortSignal.timeout(options.timeoutMs)
+  const signal =
+    request.signal && typeof AbortSignal.any === 'function'
+      ? AbortSignal.any([request.signal, timeoutSignal])
+      : timeoutSignal
+
   try {
     // Guard both the upstream wait *and* body consumption: headers can arrive
     // while the body stalls; AbortSignal.timeout aborts the body stream too.
     const backendRes = await fetch(url, {
       headers: buildProxyHeaders(request),
       cache: 'no-store',
-      signal: AbortSignal.timeout(options.timeoutMs),
+      signal,
     })
     const contentType = backendRes.headers.get('content-type') ?? 'application/json'
     const body = await backendRes.text()

@@ -94,4 +94,21 @@ describe('sandbox terminal route proxy', () => {
       detail: expect.stringContaining('proxy failed'),
     })
   })
+
+  it('encodes wsId in backend path', async () => {
+    const backendFetch = vi.fn(async () => Response.json({ url: 'https://panel.example/tok/' }))
+    vi.stubGlobal('fetch', backendFetch)
+
+    const request = {
+      url: 'http://localhost/api/v1/ws/ws%2F..%2Fadmin/sandbox/terminal',
+      headers: new Headers(),
+    } as any
+
+    await GET(request, {
+      params: Promise.resolve({ wsId: 'ws/../admin' }),
+    })
+
+    const [url] = backendFetch.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain('/api/v1/ws/ws%2F..%2Fadmin/sandbox/terminal')
+  })
 })
