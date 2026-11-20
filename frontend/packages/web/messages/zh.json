@@ -2747,7 +2747,21 @@
           "feishu": "飞书 (国内)",
           "lark": "Lark (海外)"
         },
-        "openConsole": "打开飞书开放平台"
+        "openConsole": "打开飞书开放平台",
+        "mode": {
+          "qr": "扫码一键创建（推荐）",
+          "manual": "手动配置"
+        },
+        "qr": {
+          "subtitle": "使用飞书或 Lark 客户端扫码，一键创建预配置机器人并自动接入。",
+          "loading": "正在生成二维码...",
+          "waiting": "等待扫码确认...",
+          "connecting": "已授权，正在连接机器人...",
+          "expired": "二维码已过期，请点击刷新重新生成。",
+          "refresh": "刷新二维码",
+          "openLink": "在浏览器中打开授权页",
+          "expiresIn": "有效期剩余 {seconds} 秒"
+        }
       },
       "discord": {
         "prereq": {

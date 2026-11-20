@@ -9,6 +9,16 @@ Feishu (and its international edition, Lark) is the most developed IM connector.
 
 CubePlex supports both editions from the same connector — choose **Feishu** (`feishu.cn`) or **Lark** (`larksuite.com`) when you bind. The setup steps are identical; only the console domain differs.
 
+## Quick setup — Scan QR code (Recommended)
+
+In your CubePlex workspace, open **IM Connectors**, click **Connect**, and select **Lark / Feishu**. The wizard opens on **Scan QR code (Recommended)** by default:
+
+1. Choose **Feishu (China)** or **Lark (Global)**.
+2. Scan the QR code with your Feishu or Lark mobile app (or click the authorization link below the QR code) and confirm creation.
+3. Feishu/Lark automatically creates a pre-configured bot with the required scopes, `im.message.receive_v1` event subscription, and `card.action.trigger` callback, and CubePlex connects it in `long_connection` mode.
+
+Once connected, jump straight to [Step 7 — Test](#step-7--test). If you prefer to configure an existing app manually or need **webhook** delivery, switch to the **Manual setup** tab and follow Steps 1–6 below.
+
 ## Before you start
 
 You need:

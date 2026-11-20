@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -1056,7 +1056,7 @@ requires-dist = [
     { name = "httptools", specifier = ">=0.8.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "lark-oapi", specifier = ">=1.6.8" },
+    { name = "lark-oapi", specifier = ">=1.8.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "microsoft-teams-apps", specifier = ">=2.0.13.4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
@@ -1779,7 +1779,7 @@ wheels = [
 
 [[package]]
 name = "lark-oapi"
-version = "1.6.8"
+version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1788,8 +1788,9 @@ dependencies = [
     { name = "requests-toolbelt" },
     { name = "websockets" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/c0/80/17f0574b0f191f59c59c82ee5c486ef6d2ee3dcb9a0d50a64c188ca6e24d/lark_oapi-1.8.0.tar.gz", hash = "sha256:83b1b68daec37be5d869b1a02200982ef11402e0154aa86bc29154d400f2bcce", size = 2352598, upload-time = "2026-11-16T05:41:17.684Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/ad/1ab04db5d549ad1a7a2cd33682b1c38dee1d65019cb24fd7a23270e6337d/lark_oapi-1.6.8-py3-none-any.whl", hash = "sha256:9b443a5d47a7d204dd42dc40896c8b75087cc35788e45c48c140806d7df7e5e8", size = 7798300, upload-time = "2026-06-02T07:40:05.492Z" },
+    { url = "https://files.pythonhosted.org/packages/51/6b/20e31de896e030bdde8abd1bf785400278fe5d0c247048ace2ce0b2a9f66/lark_oapi-1.8.0-py3-none-any.whl", hash = "sha256:a83db234a4be7fcead8f4d521bc2d0602eb37a7b64adfe019bd4a75135331cd8", size = 7712459, upload-time = "2026-11-16T05:41:14.993Z" },
 ]
 
 [[package]]
