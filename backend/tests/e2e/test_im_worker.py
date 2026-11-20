@@ -2315,3 +2315,282 @@ async def test_hitl_cancel_recovers_via_recover_stopped_run_when_cancel_conflict
         assert len(rm.started) == 1
     finally:
         await close_shared_checkpointer()
+
+
+async def test_await_run_teardown_states() -> None:
+    import asyncio
+    import types
+
+    import fakeredis.aioredis
+
+    from cubeplex.streams.run_manager import RunManager
+
+    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    fake_app = types.SimpleNamespace(state=types.SimpleNamespace())
+    rm = RunManager(
+        app=fake_app,  # type: ignore[arg-type]
+        redis=fake_redis,
+        key_prefix="test-teardown-states",
+        run_event_ttl_seconds=60,
+    )
+    try:
+        assert await rm.await_run_teardown("run-missing", timeout=0.05) == "not_local"
+
+        done_gate = asyncio.Event()
+
+        async def _slow() -> None:
+            await done_gate.wait()
+
+        slow_task = asyncio.create_task(_slow())
+        rm._tasks["run-slow"] = slow_task
+        assert await rm.await_run_teardown("run-slow", timeout=0.02) == "timed_out"
+
+        done_gate.set()
+        assert await rm.await_run_teardown("run-slow", timeout=1.0) == "completed"
+    finally:
+        for t in list(rm._tasks.values()):
+            t.cancel()
+        await fake_redis.aclose()
+
+
+async def test_cancel_pending_hitl_edge_paths_remote_timeout_cleared_and_missing(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    import fakeredis.aioredis
+    from cubeloop.hitl import AskRequest, HitlRequest, Option, Question
+
+    from cubeplex.agents.checkpointer import (
+        close_shared_checkpointer,
+        init_checkpointer,
+        shared_checkpointer,
+    )
+    from cubeplex.streams.run_events import create_run
+
+    maker, account = _seeded
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_edge_seed",
+            channel_id="oc_chat",
+            scope_key="u:on_edge",
+            scope_kind="participant",
+            reply_to_id="om_edge_1",
+            inbound_message_id="om_edge_1",
+            sender_ref="on_edge",
+            sender_open_id="ou_edge",
+            text="first",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        seed_item = (
+            await session.execute(
+                select(IMRunQueueItem).where(
+                    IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        conv_id = seed_item.conversation_id
+        seed_item.status = "completed"
+        rcpt = (
+            await session.execute(
+                select(IMWebhookReceipt).where(
+                    IMWebhookReceipt.id == seed_item.receipt_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        rcpt.status = "completed"
+        snap = await im_test_execution_snapshot(session, account.org_id)
+        admitted_paused = await ConversationExecutionService(
+            session, org_id=account.org_id, workspace_id=account.workspace_id
+        ).admit_user_message(
+            conversation_id=conv_id,
+            actor_user_id=_USER_ID,
+            namespace="im",
+            source_id="seed-edge",
+            intent=UserMessageIntent(content="first"),
+            snapshot=snap,
+            now=datetime.now(UTC),
+        )
+        paused_run_id = admitted_paused.admission.run_id
+        assert paused_run_id is not None
+        await session.commit()
+
+    await ingest_inbound_event(
+        InboundEvent(
+            platform="feishu",
+            account_external_id="cli_wkrA",
+            platform_event_id="evW_edge_2",
+            channel_id="oc_chat",
+            scope_key="u:on_edge",
+            scope_kind="participant",
+            reply_to_id="om_edge_2",
+            inbound_message_id="om_edge_2",
+            sender_ref="on_edge",
+            sender_open_id="ou_edge",
+            text="second",
+        ),
+        account=account,
+        session_maker=maker,
+    )
+    async with maker() as session:
+        item2 = (
+            await session.execute(
+                select(IMRunQueueItem).where(
+                    IMRunQueueItem.account_id == account.id,  # type: ignore[arg-type]
+                    IMRunQueueItem.status == "pending",  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one()
+        item2_id = item2.id
+
+    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    key_prefix = "test-edge-remote"
+    await create_run(
+        fake_redis,
+        prefix=key_prefix,
+        run_id=paused_run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(),
+        user_message="first",
+        ttl_seconds=60,
+    )
+
+    try:
+        async with init_checkpointer() as cp:
+            await cp.save_pending_request(
+                conv_id,
+                HitlRequest(
+                    question_id="q-edge",
+                    thread_id=None,
+                    created_at=datetime.now(UTC).timestamp(),
+                    payload=AskRequest(
+                        questions=[
+                            Question(
+                                key="confirm",
+                                prompt="Proceed?",
+                                options=[Option(value="yes", label="Yes")],
+                            )
+                        ]
+                    ),
+                ),
+                run_id=paused_run_id,
+            )
+
+        # 1. Missing cancel_paused_run -> unrecoverable -> charges attempt.
+        class _NoCancelRM:
+            async def start_run(self, **_kwargs: object) -> str:
+                raise RuntimeError(f"Conversation {conv_id} has a pending HITL request")
+
+        assert (
+            await process_one_queue_item(
+                session_maker=maker,
+                run_manager=_NoCancelRM(),
+                on_run_started=None,
+                lease_seconds=300,
+                load_execution_snapshot=im_test_execution_snapshot,
+                active_run_defer_seconds=0.0,
+            )
+            is False
+        )
+        async with maker() as session:
+            row = await session.get(IMRunQueueItem, item2_id)
+            assert row is not None and row.attempts == 1
+
+        # 2. Remote teardown ("not_local" + active Redis slot) -> defers without attempt charge.
+        class _RemoteTeardownRM:
+            _redis = fake_redis
+            _key_prefix = key_prefix
+
+            async def cancel_paused_run(
+                self, *, conversation_id: str, run_id: str, ctx: RunContext
+            ) -> None:
+                del conversation_id, run_id, ctx
+
+            async def await_run_teardown(self, run_id: str, *, timeout: float = 3.0) -> str:
+                del run_id, timeout
+                return "not_local"
+
+            async def start_run(self, **_kwargs: object) -> str:
+                raise RuntimeError(f"Conversation {conv_id} has a pending HITL request")
+
+        assert (
+            await process_one_queue_item(
+                session_maker=maker,
+                run_manager=_RemoteTeardownRM(),
+                on_run_started=None,
+                lease_seconds=300,
+                load_execution_snapshot=im_test_execution_snapshot,
+                active_run_defer_seconds=0.0,
+            )
+            is False
+        )
+        async with maker() as session:
+            row = await session.get(IMRunQueueItem, item2_id)
+            assert row is not None and row.attempts == 1
+
+        # 3. Local teardown timed_out -> defers without attempt charge.
+        class _TimedOutTeardownRM:
+            async def cancel_paused_run(
+                self, *, conversation_id: str, run_id: str, ctx: RunContext
+            ) -> None:
+                del conversation_id, run_id, ctx
+
+            async def await_run_teardown(self, run_id: str, *, timeout: float = 3.0) -> str:
+                del run_id, timeout
+                return "timed_out"
+
+            async def start_run(self, **_kwargs: object) -> str:
+                raise RuntimeError(f"Conversation {conv_id} has a pending HITL request")
+
+        assert (
+            await process_one_queue_item(
+                session_maker=maker,
+                run_manager=_TimedOutTeardownRM(),
+                on_run_started=None,
+                lease_seconds=300,
+                load_execution_snapshot=im_test_execution_snapshot,
+                active_run_defer_seconds=0.0,
+            )
+            is False
+        )
+        async with maker() as session:
+            row = await session.get(IMRunQueueItem, item2_id)
+            assert row is not None and row.attempts == 1
+
+        # 4. Pending already cleared before cancel helper checks -> retries start_run and succeeds.
+        class _AlreadyClearedRM:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def cancel_paused_run(
+                self, *, conversation_id: str, run_id: str, ctx: RunContext
+            ) -> None:
+                del conversation_id, run_id, ctx
+
+            async def start_run(self, **kwargs: object) -> str:
+                self.calls += 1
+                if self.calls == 1:
+                    async with shared_checkpointer() as cp:
+                        await cp.save_pending_request(conv_id, None)
+                    raise RuntimeError(f"Conversation {conv_id} has a pending HITL request")
+                return str(kwargs.get("run_id") or "run-cleared")
+
+        cleared_rm = _AlreadyClearedRM()
+        assert (
+            await process_one_queue_item(
+                session_maker=maker,
+                run_manager=cleared_rm,
+                on_run_started=None,
+                lease_seconds=300,
+                load_execution_snapshot=im_test_execution_snapshot,
+            )
+            is True
+        )
+        assert cleared_rm.calls == 2
+    finally:
+        await close_shared_checkpointer()
+        await fake_redis.aclose()
