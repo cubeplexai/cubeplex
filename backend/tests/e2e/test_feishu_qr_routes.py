@@ -134,5 +134,19 @@ async def test_feishu_qr_cancel(
         assert cancelled.status_code == 200
         assert cancelled.json()["state"] == "cancelled"
         assert cancelled.json()["qr_url"] is None
+
+        missing_get = await async_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/im/feishu/qr/fqr_missing")
+        assert missing_get.status_code == 404
+
+        missing_cancel = await async_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/feishu/qr/fqr_missing/cancel"
+        )
+        assert missing_cancel.status_code == 404
+
+        mismatch = await async_client.post(
+            "/api/v1/ws/ws-wrong/im/feishu/qr/start",
+            json={"domain": "feishu"},
+        )
+        assert mismatch.status_code == 404
     finally:
         fastapi_app.state.feishu_qr_manager = prev_mgr

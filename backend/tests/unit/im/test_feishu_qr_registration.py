@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from lark_oapi.scene.registration.errors import AppAccessDeniedError, AppExpiredError
+from lark_oapi.scene.registration.errors import (
+    AppAccessDeniedError,
+    AppExpiredError,
+    RegisterAppError,
+)
 
 from cubeplex.api.schemas.im_connector import IMAccountOut, ImRuntimeStatus
 from cubeplex.im.feishu.qr_registration import (
@@ -166,3 +171,128 @@ async def test_qr_registration_denied_and_expired() -> None:
     assert res2 is not None
     assert res2.state == "expired"
     assert res2.error_code == "expired_token"
+
+
+@pytest.mark.asyncio
+async def test_qr_registration_supersede_timeout_prune_and_shutdown() -> None:
+    gate = asyncio.Event()
+
+    async def slow_qr_register_app(**kwargs: Any) -> dict[str, Any]:
+        await gate.wait()
+        return {"client_id": "cli_x", "client_secret": "sec_x"}
+
+    async def fake_connect(app_id: str, app_secret: str, domain: FeishuDomain) -> IMAccountOut:
+        return _dummy_account(app_id, domain)
+
+    # Timeout waiting for QR code
+    mgr_timeout = FeishuQrRegistrationManager(
+        register_app=slow_qr_register_app, qr_ready_timeout=0.05
+    )
+    timed_out = await mgr_timeout.start(
+        org_id="org-1", workspace_id="ws-1", user_id="user-1", connect_bot=fake_connect
+    )
+    assert timed_out.state == "error"
+    assert timed_out.error_code == "qr_timeout"
+    gate.set()
+
+    # Superseding active attempt & shutdown
+    gate2 = asyncio.Event()
+
+    async def active_register_app(**kwargs: Any) -> dict[str, Any]:
+        kwargs["on_qr_code"]({"url": "https://open.feishu.cn/qr", "expire_in": 300})
+        await gate2.wait()
+        return {"client_id": "cli_y", "client_secret": "sec_y"}
+
+    mgr = FeishuQrRegistrationManager(register_app=active_register_app)
+    first = await mgr.start(
+        org_id="org-1", workspace_id="ws-1", user_id="user-1", connect_bot=fake_connect
+    )
+    second = await mgr.start(
+        org_id="org-1", workspace_id="ws-1", user_id="user-1", connect_bot=fake_connect
+    )
+    first_after = mgr.get_status(
+        first.attempt_id, org_id="org-1", workspace_id="ws-1", user_id="user-1"
+    )
+    assert first_after is not None
+    assert first_after.state == "cancelled"
+
+    # Force expiry check on second attempt via expires_at
+    rec = mgr._attempts[second.attempt_id]
+    rec.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    expired = mgr.get_status(
+        second.attempt_id, org_id="org-1", workspace_id="ws-1", user_id="user-1"
+    )
+    assert expired is not None
+    assert expired.state == "expired"
+
+    # Prune old terminal records on next start
+    rec.updated_at = datetime.now(UTC) - timedelta(minutes=20)
+    third = await mgr.start(
+        org_id="org-1", workspace_id="ws-1", user_id="user-1", connect_bot=fake_connect
+    )
+    assert second.attempt_id not in mgr._attempts
+    assert third.attempt_id in mgr._attempts
+
+    await mgr.shutdown()
+    third_after = mgr.get_status(
+        third.attempt_id, org_id="org-1", workspace_id="ws-1", user_id="user-1"
+    )
+    assert third_after is not None
+    assert third_after.state == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_qr_registration_sdk_and_connect_errors() -> None:
+    async def fake_connect(app_id: str, app_secret: str, domain: FeishuDomain) -> IMAccountOut:
+        return _dummy_account(app_id, domain)
+
+    async def sdk_err(**kwargs: Any) -> dict[str, Any]:
+        kwargs["on_qr_code"]({"url": "https://open.feishu.cn/qr", "expire_in": 300})
+        raise RegisterAppError("bad_request", "broken")
+
+    async def boom_err(**kwargs: Any) -> dict[str, Any]:
+        kwargs["on_qr_code"]({"url": "https://open.feishu.cn/qr", "expire_in": 300})
+        raise RuntimeError("boom")
+
+    async def invalid_creds(**kwargs: Any) -> dict[str, Any]:
+        kwargs["on_qr_code"]({"url": "https://open.feishu.cn/qr", "expire_in": 300})
+        return {"client_id": "", "client_secret": ""}
+
+    async def valid_creds(**kwargs: Any) -> dict[str, Any]:
+        kwargs["on_qr_code"]({"url": "https://open.feishu.cn/qr", "expire_in": 300})
+        return {"client_id": "cli_ok", "client_secret": "sec_ok"}
+
+    async def conflict_connect(aid: str, sec: str, dom: FeishuDomain) -> IMAccountOut:
+        raise ValueError("already connected")
+
+    async def crash_connect(aid: str, sec: str, dom: FeishuDomain) -> IMAccountOut:
+        raise RuntimeError("db down")
+
+    for fn, expected_code in [
+        (sdk_err, "bad_request"),
+        (boom_err, "registration_failed"),
+        (invalid_creds, "invalid_credentials"),
+    ]:
+        mgr = FeishuQrRegistrationManager(register_app=fn)
+        s = await mgr.start(
+            org_id="org-1", workspace_id="ws-1", user_id="user-1", connect_bot=fake_connect
+        )
+        await asyncio.sleep(0.02)
+        res = mgr.get_status(s.attempt_id, org_id="org-1", workspace_id="ws-1", user_id="user-1")
+        assert res is not None
+        assert res.state == "error"
+        assert res.error_code == expected_code
+
+    for conn_fn, expected_code in [
+        (conflict_connect, "connect_conflict"),
+        (crash_connect, "connect_failed"),
+    ]:
+        mgr = FeishuQrRegistrationManager(register_app=valid_creds)
+        s = await mgr.start(
+            org_id="org-1", workspace_id="ws-1", user_id="user-1", connect_bot=conn_fn
+        )
+        await asyncio.sleep(0.02)
+        res = mgr.get_status(s.attempt_id, org_id="org-1", workspace_id="ws-1", user_id="user-1")
+        assert res is not None
+        assert res.state == "error"
+        assert res.error_code == expected_code
