@@ -11,9 +11,9 @@
  * (same pattern as the SSE messages proxy) and has no 30s proxy ceiling.
  * See: https://github.com/cubeplexai/cubeplex/issues/422
  */
-import { type NextRequest, NextResponse } from 'next/server'
+import { type NextRequest } from 'next/server'
 
-const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'
+import { proxySandboxEndpoint } from '@/lib/sandboxRouteProxy'
 
 // Backend start_browser allows up to 120s for the shell script; leave headroom
 // for get_or_create + endpoint mint. Hosted platforms that honor maxDuration
@@ -26,72 +26,13 @@ export const dynamic = 'force-dynamic'
 // 165s = start_browser 120s + get_or_create/endpoint slack, under the 180s cap.
 export const UPSTREAM_TIMEOUT_MS = 165_000
 
-function buildProxyHeaders(request: NextRequest): HeadersInit {
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  const cookie = request.headers.get('cookie')
-  const userId = request.headers.get('x-user-id')
-  const csrf = request.headers.get('x-csrf-token')
-  if (cookie) headers.cookie = cookie
-  if (userId) headers['x-user-id'] = userId
-  if (csrf) headers['X-CSRF-Token'] = csrf
-  return headers
-}
-
-function appendSetCookie(target: Headers, source: Headers): void {
-  const getSetCookie = (source as Headers & { getSetCookie?: () => string[] }).getSetCookie
-  if (typeof getSetCookie === 'function') {
-    for (const value of getSetCookie.call(source)) {
-      target.append('set-cookie', value)
-    }
-    return
-  }
-  const setCookie = source.get('set-cookie')
-  if (setCookie) target.append('set-cookie', setCookie)
-}
-
-function isTimeoutError(err: unknown): boolean {
-  // AbortSignal.timeout → TimeoutError (DOMException); AbortController → AbortError.
-  // Do not require `instanceof Error` — DOMException identity can differ across
-  // realms / test environments while still exposing `.name`.
-  if (err == null || typeof err !== 'object') return false
-  const name = (err as { name?: string }).name
-  return name === 'TimeoutError' || name === 'AbortError'
-}
-
 export async function GET(request: NextRequest, { params }: { params: Promise<{ wsId: string }> }) {
   const { wsId } = await params
-  const qs = new URL(request.url).search
-  const url = `${BACKEND_URL}/api/v1/ws/${wsId}/browser/live-view${qs}`
-
-  try {
-    // Guard both the upstream wait *and* body consumption: headers can arrive
-    // while the body stalls; AbortSignal.timeout aborts the body stream too.
-    const backendRes = await fetch(url, {
-      headers: buildProxyHeaders(request),
-      // Never cache a signed live-view URL.
-      cache: 'no-store',
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-    })
-    const contentType = backendRes.headers.get('content-type') ?? 'application/json'
-    const body = await backendRes.text()
-    const headers = new Headers({ 'Content-Type': contentType })
-    appendSetCookie(headers, backendRes.headers)
-    return new NextResponse(body, {
-      status: backendRes.status,
-      headers,
-    })
-  } catch (err) {
-    if (isTimeoutError(err)) {
-      return NextResponse.json(
-        {
-          detail: 'sandbox browser live-view timed out waiting for backend; please retry',
-        },
-        { status: 504 },
-      )
-    }
-    return NextResponse.json(
-      { detail: 'sandbox browser live-view proxy failed; please retry' },
-      { status: 502 },
-    )
-  }
+  return proxySandboxEndpoint(request, {
+    backendPath: `/api/v1/ws/${wsId}/browser/live-view`,
+    timeoutMs: UPSTREAM_TIMEOUT_MS,
+    timeoutStatus: 504,
+    timeoutDetail: 'sandbox browser live-view timed out waiting for backend; please retry',
+    failureDetail: 'sandbox browser live-view proxy failed; please retry',
+  })
 }
