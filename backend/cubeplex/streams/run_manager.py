@@ -2075,11 +2075,12 @@ class RunManager:
             and preserved_terminal_status is None
             and question_id is not None
         ):
-            try:
-                meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
-            except TypeError:
-                meta = None
-            if meta is not None and meta.status in ("errored", "failed"):
+            meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+            if (
+                meta is not None
+                and meta.conversation_id == conversation_id
+                and meta.status in ("errored", "failed")
+            ):
                 preserved_terminal_status = meta.status
                 claim = await claim_resume(
                     self._redis,
@@ -4134,9 +4135,9 @@ class RunManager:
                     await flush_citation_buffer(agent_key, agent_key)
                 if before_terminal_commit is not None:
                     await before_terminal_commit()
-                if emit_done_before_terminal_commit is not None and (
-                    projection_error is None or final_status == "paused_hitl"
-                ):
+                if projection_error is not None and final_status != "paused_hitl":
+                    raise projection_error
+                if emit_done_before_terminal_commit is not None:
                     await emit_done_before_terminal_commit(final_status)
             except BaseException as _run_exc:
                 final_status = "errored"
@@ -4170,8 +4171,6 @@ class RunManager:
                         claim_conflict_reason or "resume claim was replaced before finalization"
                     )
 
-        if projection_error is not None and final_status != "paused_hitl":
-            raise projection_error
         return final_status
 
     async def _build_agent_for_conversation(
@@ -6568,7 +6567,7 @@ class RunManager:
                     run_id,
                     conversation_id,
                     DoneEvent(
-                        timestamp=datetime.now(UTC).isoformat(),
+                        timestamp=utc_isoformat(datetime.now(UTC)),
                         data=done_data,
                     ),
                     **claim_kwargs,

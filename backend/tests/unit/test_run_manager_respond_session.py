@@ -150,8 +150,11 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
         order.append("reserve-finalization")
         return claim_matches
 
-    async def _finalize(*_args: Any, **_kwargs: Any) -> bool:
+    finalized_statuses: list[str] = []
+
+    async def _finalize(*_args: Any, **kwargs: Any) -> bool:
         order.append("finalize")
+        finalized_statuses.append(kwargs["status"])
         return finalize_matches
 
     monkeypatch.setattr(
@@ -174,6 +177,12 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
     async def _drain() -> None:
         order.append("drain")
 
+    done_statuses: list[str] = []
+
+    async def _emit_done(status: str) -> None:
+        order.append("emit-done")
+        done_statuses.append(status)
+
     async def _run() -> str:
         return await manager._run_cubeloop_respond_path(
             ctx=RunContext(
@@ -193,23 +202,31 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
             citation_buffers={"agent-1": "citation"},
             extra_ref_holder={"provider_name": "provider", "model_id": "model"},
             before_terminal_commit=_drain,
+            emit_done_before_terminal_commit=_emit_done,
         )
 
     if checkpoint_error:
         with pytest.raises(RuntimeError, match="checkpoint restore failed"):
             await _run()
         assert order == ["finalize"]
+        assert finalized_statuses == ["errored"]
+        assert done_statuses == []
     elif projection_failure:
         with pytest.raises(EventProjectionError, match="cubeplex-runtime.*timeout"):
             await _run()
         assert order.index("clear-pending") < order.index("finalize")
+        assert "emit-done" not in order
+        assert finalized_statuses == ["errored"]
     elif expected_conflict is None:
         assert await _run() == "completed"
         assert order.index("reserve-finalization") < order.index("clear-pending")
         assert order.index("clear-pending") < order.index("resolved")
         assert order.index("resolved") < order.index("flush")
         assert order.index("flush") < order.index("drain")
-        assert order.index("drain") < order.index("finalize")
+        assert order.index("drain") < order.index("emit-done")
+        assert order.index("emit-done") < order.index("finalize")
+        assert done_statuses == ["completed"]
+        assert finalized_statuses == ["completed"]
     else:
         with pytest.raises(ResumeConflict, match=expected_conflict):
             await _run()
@@ -231,19 +248,15 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
 async def test_execute_respond_run_chained_hitl_keeps_slot_and_avoids_post_pause_race(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Chained HITL emits DoneEvent(paused=True) before releasing the finalization lease
-    and keeps active_run occupied so a fast follow-up resume cannot be clobbered.
+    """Real _run_cubeloop_respond_path emits DoneEvent(paused=True) while the
+    finalization lease blocks concurrent claim_resume, commits paused_hitl,
+    and keeps active_run occupied after _execute_respond_run completes.
     """
     import json
 
     import fakeredis.aioredis
 
-    from cubeplex.streams.hitl_resume import (
-        ClaimResumeOutcome,
-        begin_resume_finalization,
-        claim_resume,
-        finalize_run_meta_if_claim_matches,
-    )
+    from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
     from cubeplex.streams.run_events import create_run, get_active_run, get_run_meta
 
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
@@ -269,7 +282,7 @@ async def test_execute_respond_run_chained_hitl_keeps_slot_and_avoids_post_pause
     )
     assert claim1.outcome == ClaimResumeOutcome.OK and claim1.claim_token is not None
 
-    app = SimpleNamespace(state=SimpleNamespace())
+    app = SimpleNamespace(state=SimpleNamespace(tracer=None))
     manager = RunManager(
         app=app,  # type: ignore[arg-type]
         redis=redis,
@@ -277,40 +290,72 @@ async def test_execute_respond_run_chained_hitl_keeps_slot_and_avoids_post_pause
         run_event_ttl_seconds=60,
     )
     manager._steering_delivery = SimpleNamespace(  # type: ignore[assignment]
+        register_and_drain=AsyncMock(),
+        acknowledge_injected=AsyncMock(),
+        drain=AsyncMock(),
         finalize_run=AsyncMock(),
         unregister=AsyncMock(),
     )
 
-    events_order: list[str] = []
+    follow_up = SimpleNamespace(question_id="q-followup", created_at=1700000001.0)
+    cp = SimpleNamespace(
+        load_pending=AsyncMock(return_value=(follow_up, rid)),
+        clear_pending_request_if_matches=AsyncMock(return_value=False),
+    )
 
-    async def _fake_respond_path(**kwargs: Any) -> str:
-        assert await begin_resume_finalization(
-            redis,
-            prefix=prefix,
-            conversation_id=cid,
-            run_id=rid,
-            claim_token=claim1.claim_token,
-            ttl_seconds=60,
-            lease_seconds=60,
-        )
-        emit_done = kwargs["emit_done_before_terminal_commit"]
-        assert emit_done is not None
-        # While DoneEvent is emitted, meta is still running and finalization lease is held.
-        meta_before = await get_run_meta(redis, prefix=prefix, run_id=rid)
-        assert meta_before is not None and meta_before.status == "running"
-        await emit_done("paused_hitl")
-        events_order.append("done_emitted")
-        assert await finalize_run_meta_if_claim_matches(
-            redis,
-            prefix=prefix,
-            run_id=rid,
-            claim_token=claim1.claim_token,
-            status="paused_hitl",
-        )
-        events_order.append("paused_committed")
-        return "paused_hitl"
+    @asynccontextmanager
+    async def _shared_checkpointer():
+        yield cp
 
-    monkeypatch.setattr(manager, "_run_cubeloop_respond_path", _fake_respond_path)
+    monkeypatch.setattr("cubeplex.agents.checkpointer.shared_checkpointer", _shared_checkpointer)
+
+    session = SimpleNamespace(
+        load_checkpoint=AsyncMock(),
+        state_context={},
+        abort=MagicMock(),
+    )
+    agent = SimpleNamespace(session=session)
+    monkeypatch.setattr(
+        manager,
+        "_build_agent_for_conversation",
+        AsyncMock(return_value=(agent, [], None)),
+    )
+
+    async def _execute_session(**_kwargs: Any) -> ExecutionResult:
+        return ExecutionResult(
+            run_id=rid,
+            attempt_id=claim1.claim_token or "",
+            outcome="suspended",
+            pending_request=follow_up,
+            checkpoint_committed=True,
+        )
+
+    monkeypatch.setattr("cubeplex.streams.execution_adapter.execute_session", _execute_session)
+
+    # Probe concurrent claim_resume during _append_event(DoneEvent): finalization
+    # lease must still be held so a fast follow-up answer cannot race DoneEvent.
+    racing_claim_outcomes: list[ClaimResumeOutcome] = []
+    meta_status_at_done: list[str] = []
+    orig_append_event = manager._append_event
+
+    async def _probing_append_event(*args: Any, **kwargs: Any) -> str:
+        event = args[2]
+        if getattr(event, "type", None) == "done":
+            meta = await get_run_meta(redis, prefix=prefix, run_id=rid)
+            assert meta is not None
+            meta_status_at_done.append(meta.status)
+            raced = await claim_resume(
+                redis,
+                prefix=prefix,
+                conversation_id=cid,
+                expected_run_id=rid,
+                started_at="2026-11-19T00:00:00+00:00",
+                ttl_seconds=60,
+            )
+            racing_claim_outcomes.append(raced.outcome)
+        return await orig_append_event(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_append_event", _probing_append_event)
     monkeypatch.setattr(manager, "_release_run_sandbox", AsyncMock())
     monkeypatch.setattr(manager, "_bump_topic_activity", AsyncMock())
     monkeypatch.setattr(manager, "_maybe_consolidate_memory", AsyncMock())
@@ -336,7 +381,8 @@ async def test_execute_respond_run_chained_hitl_keeps_slot_and_avoids_post_pause
         ctx=RunContext(user_id="u1", org_id="o1", workspace_id="w1", conversation_id=cid),
     )
 
-    assert events_order == ["done_emitted", "paused_committed"]
+    assert meta_status_at_done == ["running"]
+    assert racing_claim_outcomes == [ClaimResumeOutcome.ALREADY_RUNNING]
     active = await get_active_run(redis, prefix=prefix, conversation_id=cid)
     assert active is not None and active.run_id == rid and active.status == "paused_hitl"
     raw_events = await redis.xrange(f"{prefix}:run_events:v2:{rid}")
@@ -347,3 +393,119 @@ async def test_execute_respond_run_chained_hitl_keeps_slot_and_avoids_post_pause
     ]
     assert len(done_payloads) == 1
     assert done_payloads[0]["data"]["paused"] is True
+
+
+async def test_execute_respond_run_projection_error_emits_error_and_marks_errored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When execute_session completes with a host EventProjectionError,
+    _execute_respond_run must mark the run errored and emit ErrorEvent instead
+    of committing completed without DoneEvent.
+    """
+    import json
+
+    import fakeredis.aioredis
+
+    from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
+    from cubeplex.streams.run_events import create_run, get_active_run, get_run_meta
+
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    prefix = "test_respond_proj_err"
+    cid, rid = "c-proj", "r-proj"
+    await create_run(
+        redis,
+        prefix=prefix,
+        run_id=rid,
+        conversation_id=cid,
+        status="running",
+        started_at="2026-11-19T00:00:00+00:00",
+        ttl_seconds=60,
+    )
+    await redis.hset(f"{prefix}:run_meta:v2:{rid}", "status", "paused_hitl")
+    claim = await claim_resume(
+        redis,
+        prefix=prefix,
+        conversation_id=cid,
+        expected_run_id=rid,
+        started_at="2026-11-19T00:00:00+00:00",
+        ttl_seconds=60,
+    )
+    assert claim.outcome == ClaimResumeOutcome.OK and claim.claim_token is not None
+
+    app = SimpleNamespace(state=SimpleNamespace(tracer=None))
+    manager = RunManager(
+        app=app,  # type: ignore[arg-type]
+        redis=redis,
+        key_prefix=prefix,
+        run_event_ttl_seconds=60,
+    )
+    manager._steering_delivery = SimpleNamespace(  # type: ignore[assignment]
+        register_and_drain=AsyncMock(),
+        acknowledge_injected=AsyncMock(),
+        drain=AsyncMock(),
+        finalize_run=AsyncMock(),
+        unregister=AsyncMock(),
+    )
+
+    cp = SimpleNamespace(
+        load_pending=AsyncMock(return_value=None),
+        clear_pending_request_if_matches=AsyncMock(return_value=False),
+    )
+
+    @asynccontextmanager
+    async def _shared_checkpointer():
+        yield cp
+
+    monkeypatch.setattr("cubeplex.agents.checkpointer.shared_checkpointer", _shared_checkpointer)
+
+    session = SimpleNamespace(
+        load_checkpoint=AsyncMock(),
+        state_context={},
+        abort=MagicMock(),
+    )
+    agent = SimpleNamespace(session=session)
+    monkeypatch.setattr(
+        manager,
+        "_build_agent_for_conversation",
+        AsyncMock(return_value=(agent, [], None)),
+    )
+
+    async def _execute_session(**_kwargs: Any) -> ExecutionResult:
+        return ExecutionResult(
+            run_id=rid,
+            attempt_id=claim.claim_token or "",
+            outcome="completed",
+            checkpoint_committed=True,
+            delivery_errors=(
+                DeliveryError(
+                    consumer="cubeplex-runtime",
+                    seq=3,
+                    reason="timeout",
+                    message="redis publish timed out",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr("cubeplex.streams.execution_adapter.execute_session", _execute_session)
+    monkeypatch.setattr(manager, "_release_run_sandbox", AsyncMock())
+    monkeypatch.setattr(
+        "cubeplex.api.routes.v1.conversations._enqueue_search_index",
+        AsyncMock(),
+    )
+
+    await manager._execute_respond_run(
+        run_id=rid,
+        conversation_id=cid,
+        question_id="q1",
+        answer="yes",
+        claim_token=claim.claim_token,
+        ctx=RunContext(user_id="u1", org_id="o1", workspace_id="w1", conversation_id=cid),
+    )
+
+    meta = await get_run_meta(redis, prefix=prefix, run_id=rid)
+    assert meta is not None and meta.status == "errored"
+    assert await get_active_run(redis, prefix=prefix, conversation_id=cid) is None
+    raw_events = await redis.xrange(f"{prefix}:run_events:v2:{rid}")
+    types = [json.loads(fields["payload"]).get("type") for _eid, fields in raw_events]
+    assert "done" not in types
+    assert "error" in types

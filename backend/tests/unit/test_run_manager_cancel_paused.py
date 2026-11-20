@@ -24,9 +24,11 @@ PREFIX = "test_cancel_paused"
 
 
 def _make_rm() -> RunManager:
+    redis = MagicMock()
+    redis.hgetall = AsyncMock(return_value={})
     manager = RunManager(
         app=MagicMock(),
-        redis=MagicMock(),
+        redis=redis,
         key_prefix=PREFIX,
         run_event_ttl_seconds=60,
     )
@@ -238,7 +240,7 @@ async def test_cancel_paused_cleans_up_errored_non_admitted_run(
     """Errored respond run with retained pending_hitl must remain cancellable."""
     import fakeredis.aioredis
 
-    from cubeplex.streams.run_events import create_run
+    from cubeplex.streams.run_events import clear_active_run, create_run
 
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     await create_run(
@@ -250,6 +252,7 @@ async def test_cancel_paused_cleans_up_errored_non_admitted_run(
         started_at="2026-11-19T00:00:00+00:00",
         ttl_seconds=60,
     )
+    await clear_active_run(redis, prefix=PREFIX, conversation_id="c1", run_id="r1")
     pending = MagicMock(question_id="q1", created_at=1717200000.0)
     _patch_checkpointer(monkeypatch, pending=pending)
 
@@ -273,24 +276,30 @@ async def test_cancel_paused_cleans_up_errored_non_admitted_run(
     assert cleanup_calls[0]["preserved_terminal_status"] == "errored"
 
 
+@pytest.mark.parametrize("redis_expired", [False, True])
 async def test_cancel_paused_cleans_up_admitted_errored_run(
     monkeypatch: pytest.MonkeyPatch,
+    redis_expired: bool,
 ) -> None:
-    """Admitted errored respond run passes preserved_terminal_status to cleanup_only claim."""
+    """Admitted errored respond run passes preserved_terminal_status to cleanup_only claim
+    and rebuilds missing metadata if Redis TTL expired.
+    """
     import fakeredis.aioredis
 
-    from cubeplex.streams.run_events import create_run
+    from cubeplex.streams.run_events import clear_active_run, create_run, get_run_meta
 
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    await create_run(
-        redis,
-        prefix=PREFIX,
-        run_id="r1",
-        conversation_id="c1",
-        status="errored",
-        started_at="2026-11-19T00:00:00+00:00",
-        ttl_seconds=60,
-    )
+    if not redis_expired:
+        await create_run(
+            redis,
+            prefix=PREFIX,
+            run_id="r1",
+            conversation_id="c1",
+            status="errored",
+            started_at="2026-11-19T00:00:00+00:00",
+            ttl_seconds=60,
+        )
+        await clear_active_run(redis, prefix=PREFIX, conversation_id="c1", run_id="r1")
     pending = MagicMock(question_id="q1", created_at=1717200000.0)
     _patch_checkpointer(monkeypatch, pending=pending)
 
@@ -314,3 +323,5 @@ async def test_cancel_paused_cleans_up_admitted_errored_run(
     assert len(cleanup_calls) == 1
     assert cleanup_calls[0]["preserved_terminal_status"] == "errored"
     assert cleanup_calls[0]["admission"] is admission
+    meta = await get_run_meta(redis, prefix=PREFIX, run_id="r1")
+    assert meta is not None and meta.status == "errored"
