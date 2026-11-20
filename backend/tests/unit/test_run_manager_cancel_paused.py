@@ -230,3 +230,87 @@ async def test_repeated_stop_leaves_paused_cleanup_running(monkeypatch: pytest.M
     finally:
         release.set()
         await manager.cancel_all()
+
+
+async def test_cancel_paused_cleans_up_errored_non_admitted_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Errored respond run with retained pending_hitl must remain cancellable."""
+    import fakeredis.aioredis
+
+    from cubeplex.streams.run_events import create_run
+
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    await create_run(
+        redis,
+        prefix=PREFIX,
+        run_id="r1",
+        conversation_id="c1",
+        status="errored",
+        started_at="2026-11-19T00:00:00+00:00",
+        ttl_seconds=60,
+    )
+    pending = MagicMock(question_id="q1", created_at=1717200000.0)
+    _patch_checkpointer(monkeypatch, pending=pending)
+
+    manager = RunManager(
+        app=MagicMock(),
+        redis=redis,
+        key_prefix=PREFIX,
+        run_event_ttl_seconds=60,
+    )
+    manager._stop_paused_execution = AsyncMock(return_value=None)
+    cleanup_calls: list[dict[str, Any]] = []
+
+    async def _fake_cleanup(**kwargs: Any) -> None:
+        cleanup_calls.append(kwargs)
+
+    monkeypatch.setattr(manager, "_execute_cancel_paused_run", _fake_cleanup)
+
+    assert await manager.cancel_paused_run(conversation_id="c1", run_id="r1", ctx=_ctx()) == "r1"
+    await manager.drain(timeout_seconds=1)
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0]["preserved_terminal_status"] == "errored"
+
+
+async def test_cancel_paused_cleans_up_admitted_errored_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Admitted errored respond run passes preserved_terminal_status to cleanup_only claim."""
+    import fakeredis.aioredis
+
+    from cubeplex.streams.run_events import create_run
+
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    await create_run(
+        redis,
+        prefix=PREFIX,
+        run_id="r1",
+        conversation_id="c1",
+        status="errored",
+        started_at="2026-11-19T00:00:00+00:00",
+        ttl_seconds=60,
+    )
+    pending = MagicMock(question_id="q1", created_at=1717200000.0)
+    _patch_checkpointer(monkeypatch, pending=pending)
+
+    admission = MagicMock(run_terminal_status="errored")
+    manager = RunManager(
+        app=MagicMock(),
+        redis=redis,
+        key_prefix=PREFIX,
+        run_event_ttl_seconds=60,
+    )
+    manager._stop_paused_execution = AsyncMock(return_value=admission)
+    cleanup_calls: list[dict[str, Any]] = []
+
+    async def _fake_cleanup(**kwargs: Any) -> None:
+        cleanup_calls.append(kwargs)
+
+    monkeypatch.setattr(manager, "_execute_cancel_paused_run", _fake_cleanup)
+
+    assert await manager.cancel_paused_run(conversation_id="c1", run_id="r1", ctx=_ctx()) == "r1"
+    await manager.drain(timeout_seconds=1)
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0]["preserved_terminal_status"] == "errored"
+    assert cleanup_calls[0]["admission"] is admission
