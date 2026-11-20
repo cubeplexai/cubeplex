@@ -357,9 +357,9 @@ class FeishuQrRegistrationManager:
             rec.qr_ready_event.set()
             return
         except RegisterAppError as exc:
-            logger.warning("[FeishuQR] register_app failed: {}", exc.error)
+            logger.warning("[FeishuQR] register_app failed: {}", exc.code)
             rec.state = "error"
-            rec.error_code = exc.error or "registration_failed"
+            rec.error_code = exc.code or "registration_failed"
             rec.error_message = "Unable to complete Feishu app registration."
             rec.updated_at = datetime.now(UTC)
             rec.qr_ready_event.set()
