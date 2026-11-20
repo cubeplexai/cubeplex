@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -20,6 +21,8 @@ from cubeplex.api.schemas.im_connector import (
     ConnectWecomAccountIn,
     DingtalkAppsIn,
     DingtalkAppsOut,
+    FeishuQrAttemptOut,
+    FeishuQrStartIn,
     IdentityLinkListOut,
     IdentityLinkOut,
     IMAccountListOut,
@@ -35,6 +38,11 @@ from cubeplex.credentials.dependencies import (
 from cubeplex.credentials.encryption import EncryptionBackend
 from cubeplex.db.session import get_session
 from cubeplex.im.bot_settings import IMBotSettings, load_bot_settings
+from cubeplex.im.feishu.qr_registration import (
+    FeishuDomain,
+    FeishuQrRegistrationManager,
+    FeishuQrSnapshot,
+)
 from cubeplex.models.im_connector import IMConnectorAccount, IMIdentityLink
 from cubeplex.models.membership import Role
 from cubeplex.models.user import User
@@ -622,3 +630,123 @@ async def list_identity_links(
             for link, email, display_name in rows
         ]
     )
+
+
+def _get_qr_manager(request: Request) -> FeishuQrRegistrationManager:
+    mgr = getattr(request.app.state, "feishu_qr_manager", None)
+    if mgr is None:
+        mgr = FeishuQrRegistrationManager()
+        request.app.state.feishu_qr_manager = mgr
+    return mgr
+
+
+def _qr_to_out(snap: FeishuQrSnapshot) -> FeishuQrAttemptOut:
+    return FeishuQrAttemptOut(
+        attempt_id=snap.attempt_id,
+        state=snap.state,
+        domain=snap.domain,
+        qr_url=snap.qr_url,
+        expires_at=snap.expires_at,
+        account=snap.account,
+        error_code=snap.error_code,
+        error_message=snap.error_message,
+    )
+
+
+@router.post("/feishu/qr/start", response_model=FeishuQrAttemptOut)
+async def start_feishu_qr(
+    workspace_id: str,
+    body: FeishuQrStartIn,
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> FeishuQrAttemptOut:
+    """Start a Feishu/Lark QR-code one-click app registration attempt."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+
+    org_id = ctx.org_id
+    ws_id = ctx.workspace_id
+    user_id = ctx.user.id
+    starter = getattr(request.app.state, "im_connect_account", None)
+
+    async def _connect_bot(
+        app_id: str, app_secret: str, resolved_domain: FeishuDomain
+    ) -> IMAccountOut:
+        db_engine_mod = import_module("cubeplex.db.engine")
+        async with db_engine_mod.async_session_maker() as session:
+            creds = build_credential_service(session, backend, org_id=org_id, actor_user_id=user_id)
+            svc = IMConnectorService(session, creds, org_id=org_id)
+            account = await svc.connect_feishu(
+                workspace_id=ws_id,
+                app_id=app_id,
+                app_secret=app_secret,
+                encrypt_key="",
+                verification_token="",
+                domain=resolved_domain,
+                delivery_mode="long_connection",
+                acting_user_id=user_id,
+            )
+            await session.commit()
+        if starter is not None and account.enabled:
+            try:
+                await starter(account)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[IM ws] long-connection startup failed for {}", account.id
+                )
+        return _to_out(account)
+
+    mgr = _get_qr_manager(request)
+    snap = await mgr.start(
+        org_id=org_id,
+        workspace_id=ws_id,
+        user_id=user_id,
+        domain=body.domain,
+        connect_bot=_connect_bot,
+    )
+    return _qr_to_out(snap)
+
+
+@router.get("/feishu/qr/{attempt_id}", response_model=FeishuQrAttemptOut)
+async def get_feishu_qr_status(
+    workspace_id: str,
+    attempt_id: str,
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> FeishuQrAttemptOut:
+    """Poll the status of a Feishu/Lark QR registration attempt."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+    mgr = _get_qr_manager(request)
+    snap = mgr.get_status(
+        attempt_id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    if snap is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QR attempt not found")
+    return _qr_to_out(snap)
+
+
+@router.post("/feishu/qr/{attempt_id}/cancel", response_model=FeishuQrAttemptOut)
+async def cancel_feishu_qr(
+    workspace_id: str,
+    attempt_id: str,
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> FeishuQrAttemptOut:
+    """Cancel an active Feishu/Lark QR registration attempt."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+    mgr = _get_qr_manager(request)
+    snap = mgr.cancel(
+        attempt_id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    if snap is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QR attempt not found")
+    return _qr_to_out(snap)

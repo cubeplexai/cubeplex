@@ -75,6 +75,29 @@ export interface DingtalkAppsOut {
   apps: DingtalkAppInfo[]
 }
 
+export type FeishuQrState =
+  | 'starting'
+  | 'qr_ready'
+  | 'polling'
+  | 'slow_down'
+  | 'domain_switched'
+  | 'connecting'
+  | 'succeeded'
+  | 'expired'
+  | 'cancelled'
+  | 'error'
+
+export interface FeishuQrAttempt {
+  attempt_id: string
+  state: FeishuQrState
+  domain: 'feishu' | 'lark'
+  qr_url: string | null
+  expires_at: string | null
+  account: ImAccount | null
+  error_code: string | null
+  error_message: string | null
+}
+
 export interface ConnectTeamsAccountIn {
   platform: 'teams'
   app_id: string
@@ -129,6 +152,36 @@ export async function wsListDingtalkApps(
   })
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as DingtalkAppsOut
+}
+
+export async function wsStartFeishuQr(
+  client: ApiClient,
+  wsId: string,
+  domain: 'feishu' | 'lark' = 'feishu',
+): Promise<FeishuQrAttempt> {
+  const res = await client.post(`/api/v1/ws/${wsId}/im/feishu/qr/start`, { domain })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as FeishuQrAttempt
+}
+
+export async function wsGetFeishuQrStatus(
+  client: ApiClient,
+  wsId: string,
+  attemptId: string,
+): Promise<FeishuQrAttempt> {
+  const res = await client.get(`/api/v1/ws/${wsId}/im/feishu/qr/${attemptId}`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as FeishuQrAttempt
+}
+
+export async function wsCancelFeishuQr(
+  client: ApiClient,
+  wsId: string,
+  attemptId: string,
+): Promise<FeishuQrAttempt> {
+  const res = await client.post(`/api/v1/ws/${wsId}/im/feishu/qr/${attemptId}/cancel`, {})
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as FeishuQrAttempt
 }
 
 export async function wsDeleteImAccount(

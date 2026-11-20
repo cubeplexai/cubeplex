@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
+import { FeishuQrConnect } from './steps/FeishuQrConnect'
 import { StepPlatform } from './steps/StepPlatform'
 import { useConnectMutation } from './useConnectMutation'
 import { ALL_PLATFORMS } from './platforms'
@@ -48,6 +49,7 @@ export function ImConnectWizard({
     return p && p.live ? p : null
   }, [initialPlatformId])
   const [platform, setPlatform] = useState<PlatformDescriptor | null>(initialPlatform)
+  const [feishuMode, setFeishuMode] = useState<'qr' | 'manual'>('qr')
   const [stepIdx, setStepIdx] = useState(0)
   const [form, setForm] = useState<FormState>(() =>
     initialPlatform ? defaultsFor(initialPlatform) : {},
@@ -97,64 +99,98 @@ export function ImConnectWizard({
           />
         ) : (
           <>
-            <ol role="list" className="flex gap-2 text-xs">
-              {platform.steps.map((s, i) => (
-                <li
-                  key={s.key}
-                  aria-current={i === stepIdx ? 'step' : undefined}
-                  className={i === stepIdx ? 'font-semibold' : 'text-muted-foreground'}
+            {platform.id === 'feishu' && (
+              <div className="flex gap-1 rounded-md border bg-muted/40 p-1">
+                <button
+                  type="button"
+                  onClick={() => setFeishuMode('qr')}
+                  className={`flex-1 rounded-xs px-2.5 py-1 text-xs font-medium transition-colors ${
+                    feishuMode === 'qr'
+                      ? 'bg-background text-foreground shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
                 >
-                  {i + 1}. {t(s.labelKey)}
-                </li>
-              ))}
-            </ol>
-
-            {mut.error?.shape === 'banner' && (
-              <Alert variant="destructive">
-                <AlertDescription>{t(mut.error.messageKey)}</AlertDescription>
-              </Alert>
+                  {t('im.wizard.feishu.mode.qr')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeishuMode('manual')}
+                  className={`flex-1 rounded-xs px-2.5 py-1 text-xs font-medium transition-colors ${
+                    feishuMode === 'manual'
+                      ? 'bg-background text-foreground shadow-xs'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {t('im.wizard.feishu.mode.manual')}
+                </button>
+              </div>
             )}
 
-            {(() => {
-              const stepDef = platform.steps[stepIdx]
-              const Step = stepDef.Component
-              const extraProps = stepDef.key === 'verify' ? { busy: mut.busy } : {}
-              return (
-                <Step
-                  descriptor={platform}
-                  form={form}
-                  wsId={wsId}
-                  onChange={(patch) => {
-                    const merged: FormState = { ...form }
-                    for (const [k, v] of Object.entries(patch)) {
-                      if (v !== undefined) merged[k] = v
-                    }
-                    setForm(merged)
-                  }}
-                  onNext={handleNext}
-                  {...extraProps}
-                />
-              )
-            })()}
+            {platform.id === 'feishu' && feishuMode === 'qr' ? (
+              <FeishuQrConnect client={client} wsId={wsId} onConnected={onSuccess} />
+            ) : (
+              <>
+                <ol role="list" className="flex gap-2 text-xs">
+                  {platform.steps.map((s, i) => (
+                    <li
+                      key={s.key}
+                      aria-current={i === stepIdx ? 'step' : undefined}
+                      className={i === stepIdx ? 'font-semibold' : 'text-muted-foreground'}
+                    >
+                      {i + 1}. {t(s.labelKey)}
+                    </li>
+                  ))}
+                </ol>
 
-            <div className="flex justify-end gap-2">
-              {stepIdx > 0 && (
-                <Button variant="outline" onClick={() => setStepIdx(stepIdx - 1)}>
-                  Back
-                </Button>
-              )}
-              <Button
-                onClick={handleNext}
-                disabled={
-                  mut.busy ||
-                  !!(
-                    platform.steps[stepIdx].canAdvance && !platform.steps[stepIdx].canAdvance!(form)
+                {mut.error?.shape === 'banner' && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{t(mut.error.messageKey)}</AlertDescription>
+                  </Alert>
+                )}
+
+                {(() => {
+                  const stepDef = platform.steps[stepIdx]
+                  const Step = stepDef.Component
+                  const extraProps = stepDef.key === 'verify' ? { busy: mut.busy } : {}
+                  return (
+                    <Step
+                      descriptor={platform}
+                      form={form}
+                      wsId={wsId}
+                      onChange={(patch) => {
+                        const merged: FormState = { ...form }
+                        for (const [k, v] of Object.entries(patch)) {
+                          if (v !== undefined) merged[k] = v
+                        }
+                        setForm(merged)
+                      }}
+                      onNext={handleNext}
+                      {...extraProps}
+                    />
                   )
-                }
-              >
-                {stepIdx === platform.steps.length - 1 ? t('im.action.connect') : 'Next'}
-              </Button>
-            </div>
+                })()}
+
+                <div className="flex justify-end gap-2">
+                  {stepIdx > 0 && (
+                    <Button variant="outline" onClick={() => setStepIdx(stepIdx - 1)}>
+                      Back
+                    </Button>
+                  )}
+                  <Button
+                    onClick={handleNext}
+                    disabled={
+                      mut.busy ||
+                      !!(
+                        platform.steps[stepIdx].canAdvance &&
+                        !platform.steps[stepIdx].canAdvance!(form)
+                      )
+                    }
+                  >
+                    {stepIdx === platform.steps.length - 1 ? t('im.action.connect') : 'Next'}
+                  </Button>
+                </div>
+              </>
+            )}
           </>
         )}
       </DialogContent>

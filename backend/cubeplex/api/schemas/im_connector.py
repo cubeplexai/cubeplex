@@ -169,3 +169,33 @@ class IdentityLinkOut(BaseModel):
 
 class IdentityLinkListOut(BaseModel):
     links: list[IdentityLinkOut]
+
+
+class FeishuQrStartIn(BaseModel):
+    """Payload for ``POST /ws/{ws}/im/feishu/qr/start``."""
+
+    domain: Literal["feishu", "lark"] = "feishu"
+
+
+class FeishuQrAttemptOut(BaseModel):
+    """Public status snapshot for a Feishu/Lark QR registration attempt."""
+
+    attempt_id: str
+    state: Literal[
+        "starting",
+        "qr_ready",
+        "polling",
+        "slow_down",
+        "domain_switched",
+        "connecting",
+        "succeeded",
+        "expired",
+        "cancelled",
+        "error",
+    ]
+    domain: Literal["feishu", "lark"]
+    qr_url: str | None = None
+    expires_at: str | None = None
+    account: IMAccountOut | None = None
+    error_code: str | None = None
+    error_message: str | None = None
