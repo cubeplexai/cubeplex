@@ -183,7 +183,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
     <AppShell headerTitle={currentConvo?.title} conversationId={conversationId}>
       <ArtifactGallery conversationId={conversationId} />
       <MessageList conversationId={conversationId} />
-      <div className="relative z-10 border-t border-border bg-background px-4">
+      <div className="relative z-10 bg-background px-4">
         <ConversationTaskProgress conversationId={conversationId} />
         <div className="py-3">
           <InputBar conversationId={conversationId} modelSyncPending={modelSyncPending} />

@@ -1,6 +1,7 @@
 'use client'
 
 import type { Components } from 'react-markdown'
+import { cn } from '@/lib/utils'
 import { MermaidDiagram } from './MermaidDiagram'
 
 export const markdownComponents: Components = {
@@ -19,4 +20,11 @@ export const markdownComponents: Components = {
     }
     return <pre {...props}>{children}</pre>
   },
+  table: ({ node: _node, children, className, ...props }) => (
+    <div className="my-2 overflow-x-auto">
+      <table className={cn('my-0', className)} {...props}>
+        {children}
+      </table>
+    </div>
+  ),
 }
