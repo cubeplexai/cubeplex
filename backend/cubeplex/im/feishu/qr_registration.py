@@ -335,7 +335,7 @@ class FeishuQrRegistrationManager:
                 create_only=True,
             )
         except asyncio.CancelledError:
-            if rec.state not in ("cancelled", "expired"):
+            if rec.state not in ("cancelled", "expired", "error"):
                 rec.state = "cancelled"
                 rec.error_code = "abort"
                 rec.error_message = "Registration was cancelled."

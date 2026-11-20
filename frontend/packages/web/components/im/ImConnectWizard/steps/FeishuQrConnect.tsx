@@ -59,10 +59,12 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
 
   const activeAttemptIdRef = useRef<string | null>(null)
   const consecutivePollErrorsRef = useRef(0)
+  const startSeqRef = useRef(0)
   const mountedRef = useRef(true)
 
   const startQr = useCallback(
     async (targetDomain: 'feishu' | 'lark') => {
+      const seq = ++startSeqRef.current
       const prevId = activeAttemptIdRef.current
       if (prevId) {
         activeAttemptIdRef.current = null
@@ -75,7 +77,7 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
       setAttempt(null)
       try {
         const res = await wsStartFeishuQr(client, wsId, targetDomain)
-        if (!mountedRef.current) {
+        if (!mountedRef.current || startSeqRef.current !== seq) {
           void wsCancelFeishuQr(client, wsId, res.attempt_id).catch(() => {})
           return
         }
@@ -83,10 +85,10 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
         setAttempt(res)
         setPollTick((n) => n + 1)
       } catch {
-        if (!mountedRef.current) return
+        if (!mountedRef.current || startSeqRef.current !== seq) return
         setStartError(true)
       } finally {
-        if (mountedRef.current) setStarting(false)
+        if (mountedRef.current && startSeqRef.current === seq) setStarting(false)
       }
     },
     [client, wsId],
