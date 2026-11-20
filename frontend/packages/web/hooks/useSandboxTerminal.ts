@@ -14,6 +14,13 @@ async function fetcher(url: string): Promise<SandboxTerminal> {
   return res.json() as Promise<SandboxTerminal>
 }
 
+/** Retry transient cold-start / proxy failures; skip auth, not-found, and unsupported. */
+export function shouldRetryTerminalError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  if (/terminal fetch failed: (40[134]|501)\b/.test(msg)) return false
+  return true
+}
+
 export function useSandboxTerminal(
   workspaceId: string | null,
   enabled = true,
@@ -25,7 +32,9 @@ export function useSandboxTerminal(
     revalidateOnFocus: false,
     revalidateOnMount: true,
     revalidateOnReconnect: false,
-    shouldRetryOnError: false,
+    shouldRetryOnError: shouldRetryTerminalError,
+    errorRetryCount: 4,
+    errorRetryInterval: 3000,
   })
   return {
     url: data?.url ?? null,
