@@ -52,6 +52,7 @@ async def test_feishu_qr_start_poll_and_connect(
     )
     fastapi_app.state.im_connect_account = AsyncMock()
 
+    created_account_id: str | None = None
     try:
         from tests.e2e.conftest import DEFAULT_WS_ID
 
@@ -79,6 +80,7 @@ async def test_feishu_qr_start_poll_and_connect(
         else:
             pytest.fail(f"QR attempt did not succeed: {final}")
 
+        created_account_id = final["account"]["id"]
         assert final["account"]["external_account_id"] == app_id
         assert final["account"]["delivery_mode"] == "long_connection"
         assert "qr_super_secret" not in str(final)
@@ -87,6 +89,12 @@ async def test_feishu_qr_start_poll_and_connect(
         assert listed.status_code == 200
         assert any(a["external_account_id"] == app_id for a in listed.json()["accounts"])
     finally:
+        if created_account_id is not None:
+            from tests.e2e.conftest import DEFAULT_WS_ID
+
+            await async_client.delete(
+                f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{created_account_id}"
+            )
         fastapi_app.state.feishu_qr_manager = prev_mgr
         fastapi_app.state.im_connect_account = prev_connect
 
