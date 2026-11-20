@@ -29,7 +29,7 @@ export const UPSTREAM_TIMEOUT_MS = 165_000
 export async function GET(request: NextRequest, { params }: { params: Promise<{ wsId: string }> }) {
   const { wsId } = await params
   return proxySandboxEndpoint(request, {
-    backendPath: `/api/v1/ws/${wsId}/browser/live-view`,
+    backendPath: `/api/v1/ws/${encodeURIComponent(wsId)}/browser/live-view`,
     timeoutMs: UPSTREAM_TIMEOUT_MS,
     timeoutStatus: 504,
     timeoutDetail: 'sandbox browser live-view timed out waiting for backend; please retry',
