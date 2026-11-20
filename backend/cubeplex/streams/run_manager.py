@@ -2028,6 +2028,11 @@ class RunManager:
         if pending_run_id != run_id:
             raise ResumeConflict("question belongs to another run")
         admission = await self._stop_paused_execution(ctx=ctx, run_id=run_id)
+        preserved_terminal_status = admission.run_terminal_status if admission is not None else None
+        rebuild_missing_meta = False
+        if preserved_terminal_status is not None:
+            meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+            rebuild_missing_meta = meta is None
         return await self._start_paused_cleanup(
             ctx=ctx,
             run_id=run_id,
@@ -2035,6 +2040,8 @@ class RunManager:
             started_at=datetime.fromtimestamp(pending.created_at, UTC).isoformat(),
             admission=admission,
             reason=reason,
+            preserved_terminal_status=preserved_terminal_status,
+            rebuild_missing_meta=rebuild_missing_meta,
         )
 
     async def _start_paused_cleanup(
@@ -2062,6 +2069,27 @@ class RunManager:
             ttl_seconds=self._run_event_ttl_seconds,
             cleanup_only=(question_id is None or terminal_cleanup) and not rebuild_missing_meta,
         )
+        if (
+            claim.outcome == ClaimResumeOutcome.CONFLICT
+            and admission is None
+            and preserved_terminal_status is None
+            and question_id is not None
+        ):
+            try:
+                meta = await get_run_meta(self._redis, prefix=self._key_prefix, run_id=run_id)
+            except TypeError:
+                meta = None
+            if meta is not None and meta.status in ("errored", "failed"):
+                preserved_terminal_status = meta.status
+                claim = await claim_resume(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    expected_run_id=run_id,
+                    started_at=started_at,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                    cleanup_only=True,
+                )
         if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
             await self.notify_run_stop(run_id)
             return run_id
@@ -3836,6 +3864,7 @@ class RunManager:
         catalog_session: Any | None = None,
         extra_ref_holder: dict[str, Any] | None = None,
         before_terminal_commit: Callable[[], Awaitable[None]] | None = None,
+        emit_done_before_terminal_commit: Callable[[str], Awaitable[None]] | None = None,
     ) -> str:
         """Resume a paused HITL conversation by delivering ``answer`` to a
         cubeloop agent via a public Session respond request.
@@ -4105,6 +4134,10 @@ class RunManager:
                     await flush_citation_buffer(agent_key, agent_key)
                 if before_terminal_commit is not None:
                     await before_terminal_commit()
+                if emit_done_before_terminal_commit is not None and (
+                    projection_error is None or final_status == "paused_hitl"
+                ):
+                    await emit_done_before_terminal_commit(final_status)
             except BaseException as _run_exc:
                 final_status = "errored"
                 defer_terminal_to_owner = ctx.execution is not None
@@ -6493,6 +6526,8 @@ class RunManager:
             effective_system_prompt += "\n\n" + PERSONA_AUTHORING_BLOCK
             effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 
+            done_emitted = False
+
             async def drain_projection_before_terminal_commit() -> None:
                 nonlocal event_q_drainer
                 if event_q_drainer is None:
@@ -6500,7 +6535,47 @@ class RunManager:
                 await _finish_subagent_citation_queue(event_q, event_q_drainer)
                 event_q_drainer = None
 
-            await self._run_cubeloop_respond_path(
+            async def emit_done_before_terminal_commit(status: str) -> None:
+                nonlocal done_emitted
+                from cubeplex.services.usage import SessionUsage, get_session_usage
+
+                session_usage: SessionUsage = {
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_cache_read_tokens": 0,
+                    "total_cache_write_tokens": 0,
+                }
+                try:
+                    from cubeplex.db.engine import async_session_maker
+
+                    async with async_session_maker() as billing_session:
+                        session_usage = await get_session_usage(billing_session, conversation_id)
+                except Exception:
+                    logger.warning("Failed to query session usage for respond done event")
+
+                done_data: dict[str, Any] = {
+                    "usage": {
+                        "turn": dict(turn_usage),
+                        "session": session_usage,
+                        "context_window": context_window,
+                        "context_tokens": last_context_tokens,
+                    }
+                }
+                if status == "paused_hitl":
+                    done_data["paused"] = True
+
+                await self._append_event(
+                    run_id,
+                    conversation_id,
+                    DoneEvent(
+                        timestamp=datetime.now(UTC).isoformat(),
+                        data=done_data,
+                    ),
+                    **claim_kwargs,
+                )
+                done_emitted = True
+
+            final_status = await self._run_cubeloop_respond_path(
                 ctx=ctx,
                 run_id=run_id,
                 conversation_id=conversation_id,
@@ -6516,85 +6591,34 @@ class RunManager:
                 catalog_session=catalog_session,
                 extra_ref_holder=extra_ref_holder,
                 before_terminal_commit=drain_projection_before_terminal_commit,
+                emit_done_before_terminal_commit=emit_done_before_terminal_commit,
             )
-            await _update_conversation_timestamp(
-                conversation_id,
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-            )
-            await self._bump_topic_activity(ctx)
-            # Indexing is enqueued AFTER the resumed run finishes writing
-            # history to the checkpointer — see _enqueue_search_index
-            # docstring. The finally block re-enqueues on cancel/exception
-            # paths where cubeloop may have written partial history before
-            # the failure.
-            await _enqueue_search_index(
-                conversation_id,
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-            )
-            search_index_enqueued = True
-
-            from cubeplex.services.usage import SessionUsage, get_session_usage
-
-            session_usage: SessionUsage = {
-                "total_input_tokens": 0,
-                "total_output_tokens": 0,
-                "total_cache_read_tokens": 0,
-                "total_cache_write_tokens": 0,
-            }
-            try:
-                from cubeplex.db.engine import async_session_maker
-
-                async with async_session_maker() as billing_session:
-                    session_usage = await get_session_usage(billing_session, conversation_id)
-            except Exception:
-                logger.warning("Failed to query session usage for respond done event")
-
-            # Read the actual terminal status BEFORE emitting DoneEvent so
-            # we can stamp data.paused=true on chained-HITL flows (respond
-            # answers one question and the agent immediately emits a new
-            # pending one). Without this flag, the frontend treats `done`
-            # as completed and wipes pendingAsk / pendingConfirmMap, so the
-            # follow-up HITL card disappears until a reload. See spec §6.
-            #
-            # _run_cubeloop_respond_path's CAS-guarded finalize already wrote
-            # the terminal status; read it back rather than re-compute.
-            final_meta = await get_run_meta(
-                self._redis,
-                prefix=self._key_prefix,
-                run_id=run_id,
-            )
-            final_status = final_meta.status if final_meta is not None else "completed"
             durable_final_status = final_status
-
-            done_data: dict[str, Any] = {
-                "usage": {
-                    "turn": dict(turn_usage),
-                    "session": session_usage,
-                    "context_window": context_window,
-                    "context_tokens": last_context_tokens,
-                }
-            }
-            if final_status == "paused_hitl":
-                done_data["paused"] = True
-
-            await self._append_event(
-                run_id,
-                conversation_id,
-                DoneEvent(
-                    timestamp=datetime.now(UTC).isoformat(),
-                    data=done_data,
-                ),
-                **claim_kwargs,
-            )
-            # NOTE: no update_run_meta here — _run_cubeloop_respond_path
-            # already wrote the terminal status via
-            # finalize_run_meta_if_claim_matches (CAS-guarded). A naive
-            # update_run_meta would race with whatever flow stole the slot
-            # while we were running.
+            if not done_emitted:
+                await emit_done_before_terminal_commit(final_status)
+            # Post-done bookkeeping: the stream is already closed and status
+            # committed, so failures here must not turn a settled turn into an
+            # error (mirrors _execute_run).
+            try:
+                await _update_conversation_timestamp(
+                    conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                )
+                await self._bump_topic_activity(ctx)
+            except Exception:
+                logger.opt(exception=True).warning("post-done respond activity bookkeeping failed")
+            try:
+                await _enqueue_search_index(
+                    conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                )
+                search_index_enqueued = True
+            except Exception:
+                logger.opt(exception=True).warning("post-done respond search-index enqueue failed")
             if final_status == "paused_hitl":
                 AGENT_HITL_PAUSES.inc()
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
@@ -6765,13 +6789,14 @@ class RunManager:
                         self._remove_agent_for_attempt(run_id, steering_agent)
                     elif current_agent is not None:
                         registration_replaced = True
-            # Clear the active-run pointer — claim_resume handles the case
-            # where pointer is gone but meta is paused_hitl (it re-stamps
-            # the pointer atomically). On "completed" the pointer must be
-            # gone so the next start_run can allocate a fresh run.
-            if not registration_replaced:
-                outcome_recorded = durable_final_status == "paused_hitl" or (
-                    await self._record_execution_terminal_outcome(ctx, durable_final_status)
+            # Keep the active-run pointer while paused_hitl (mirroring
+            # _execute_run) so the conversation stays occupied until the
+            # follow-up HITL question is answered or cancelled. On terminal
+            # statuses the pointer must be cleared so the next start_run can
+            # allocate a fresh run.
+            if durable_final_status != "paused_hitl" and not registration_replaced:
+                outcome_recorded = await self._record_execution_terminal_outcome(
+                    ctx, durable_final_status
                 )
                 if not outcome_recorded:
                     logger.warning(
@@ -6793,12 +6818,7 @@ class RunManager:
                     ttl_seconds=self._run_event_ttl_seconds,
                     **claim_kwargs,
                 )
-                if (
-                    ctx.execution is not None
-                    and durable_final_status != "paused_hitl"
-                    and released
-                    and expired
-                ):
+                if ctx.execution is not None and released and expired:
                     from cubeplex.agents.checkpointer import shared_checkpointer
                     from cubeplex.services.conversation_execution import (
                         ConversationExecutionService,

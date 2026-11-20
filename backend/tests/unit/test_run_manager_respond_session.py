@@ -226,3 +226,124 @@ async def test_respond_projects_and_clears_answered_pending_before_finalizing(
             ),
         )
     assert manager._agents == {}
+
+
+async def test_execute_respond_run_chained_hitl_keeps_slot_and_avoids_post_pause_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chained HITL emits DoneEvent(paused=True) before releasing the finalization lease
+    and keeps active_run occupied so a fast follow-up resume cannot be clobbered.
+    """
+    import json
+
+    import fakeredis.aioredis
+
+    from cubeplex.streams.hitl_resume import (
+        ClaimResumeOutcome,
+        begin_resume_finalization,
+        claim_resume,
+        finalize_run_meta_if_claim_matches,
+    )
+    from cubeplex.streams.run_events import create_run, get_active_run, get_run_meta
+
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    prefix = "test_respond_chained"
+    cid, rid = "c-chained", "r-chained"
+    await create_run(
+        redis,
+        prefix=prefix,
+        run_id=rid,
+        conversation_id=cid,
+        status="running",
+        started_at="2026-11-19T00:00:00+00:00",
+        ttl_seconds=60,
+    )
+    await redis.hset(f"{prefix}:run_meta:v2:{rid}", "status", "paused_hitl")
+    claim1 = await claim_resume(
+        redis,
+        prefix=prefix,
+        conversation_id=cid,
+        expected_run_id=rid,
+        started_at="2026-11-19T00:00:00+00:00",
+        ttl_seconds=60,
+    )
+    assert claim1.outcome == ClaimResumeOutcome.OK and claim1.claim_token is not None
+
+    app = SimpleNamespace(state=SimpleNamespace())
+    manager = RunManager(
+        app=app,  # type: ignore[arg-type]
+        redis=redis,
+        key_prefix=prefix,
+        run_event_ttl_seconds=60,
+    )
+    manager._steering_delivery = SimpleNamespace(  # type: ignore[assignment]
+        finalize_run=AsyncMock(),
+        unregister=AsyncMock(),
+    )
+
+    events_order: list[str] = []
+
+    async def _fake_respond_path(**kwargs: Any) -> str:
+        assert await begin_resume_finalization(
+            redis,
+            prefix=prefix,
+            conversation_id=cid,
+            run_id=rid,
+            claim_token=claim1.claim_token,
+            ttl_seconds=60,
+            lease_seconds=60,
+        )
+        emit_done = kwargs["emit_done_before_terminal_commit"]
+        assert emit_done is not None
+        # While DoneEvent is emitted, meta is still running and finalization lease is held.
+        meta_before = await get_run_meta(redis, prefix=prefix, run_id=rid)
+        assert meta_before is not None and meta_before.status == "running"
+        await emit_done("paused_hitl")
+        events_order.append("done_emitted")
+        assert await finalize_run_meta_if_claim_matches(
+            redis,
+            prefix=prefix,
+            run_id=rid,
+            claim_token=claim1.claim_token,
+            status="paused_hitl",
+        )
+        events_order.append("paused_committed")
+        return "paused_hitl"
+
+    monkeypatch.setattr(manager, "_run_cubeloop_respond_path", _fake_respond_path)
+    monkeypatch.setattr(manager, "_release_run_sandbox", AsyncMock())
+    monkeypatch.setattr(manager, "_bump_topic_activity", AsyncMock())
+    monkeypatch.setattr(manager, "_maybe_consolidate_memory", AsyncMock())
+    monkeypatch.setattr(
+        "cubeplex.api.routes.v1.conversations._update_conversation_timestamp",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "cubeplex.api.routes.v1.conversations._enqueue_search_index",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "cubeplex.schedules.completion_hook.record_scheduled_run_terminal_state",
+        AsyncMock(),
+    )
+
+    await manager._execute_respond_run(
+        run_id=rid,
+        conversation_id=cid,
+        question_id="q1",
+        answer="yes",
+        claim_token=claim1.claim_token,
+        ctx=RunContext(user_id="u1", org_id="o1", workspace_id="w1", conversation_id=cid),
+    )
+
+    assert events_order == ["done_emitted", "paused_committed"]
+    active = await get_active_run(redis, prefix=prefix, conversation_id=cid)
+    assert active is not None and active.run_id == rid and active.status == "paused_hitl"
+    raw_events = await redis.xrange(f"{prefix}:run_events:v2:{rid}")
+    done_payloads = [
+        json.loads(fields["payload"])
+        for _eid, fields in raw_events
+        if json.loads(fields["payload"]).get("type") == "done"
+    ]
+    assert len(done_payloads) == 1
+    assert done_payloads[0]["data"]["paused"] is True
