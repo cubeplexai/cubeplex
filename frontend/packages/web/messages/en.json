@@ -2760,7 +2760,20 @@
           "expired": "QR code expired. Click refresh to generate a new one.",
           "refresh": "Refresh QR code",
           "openLink": "Open authorization page in browser",
-          "expiresIn": "Expires in {seconds}s"
+          "expiresIn": "Expires in {seconds}s",
+          "errors": {
+            "startFailed": "Failed to generate QR code. Please try again.",
+            "pollFailed": "Lost connection while checking authorization status. Please refresh.",
+            "access_denied": "Authorization was denied in Feishu / Lark.",
+            "qr_timeout": "Timed out waiting for QR code. Please try again.",
+            "connect_conflict": "This bot is already connected to this workspace.",
+            "connect_failed": "Bot was created, but CubePlex could not connect to it.",
+            "registration_failed": "Unable to complete Feishu / Lark app registration.",
+            "invalid_credentials": "Feishu / Lark returned invalid app credentials.",
+            "expired_token": "QR code expired. Click refresh to generate a new one.",
+            "abort": "QR registration was cancelled.",
+            "generic": "Registration failed. Please refresh and try again."
+          }
         }
       },
       "discord": {

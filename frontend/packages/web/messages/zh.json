@@ -2760,7 +2760,20 @@
           "expired": "二维码已过期，请点击刷新重新生成。",
           "refresh": "刷新二维码",
           "openLink": "在浏览器中打开授权页",
-          "expiresIn": "有效期剩余 {seconds} 秒"
+          "expiresIn": "有效期剩余 {seconds} 秒",
+          "errors": {
+            "startFailed": "生成二维码失败，请重试。",
+            "pollFailed": "查询授权状态失败，请刷新二维码重试。",
+            "access_denied": "已在飞书 / Lark 中取消授权。",
+            "qr_timeout": "生成二维码超时，请重试。",
+            "connect_conflict": "该机器人已接入当前工作区。",
+            "connect_failed": "机器人已创建，但 CubePlex 连接失败。",
+            "registration_failed": "无法完成飞书 / Lark 应用注册。",
+            "invalid_credentials": "飞书 / Lark 返回了无效的应用凭据。",
+            "expired_token": "二维码已过期，请点击刷新重新生成。",
+            "abort": "已取消扫码注册。",
+            "generic": "注册失败，请刷新二维码后重试。"
+          }
         }
       },
       "discord": {

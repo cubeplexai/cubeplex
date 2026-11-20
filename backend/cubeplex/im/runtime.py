@@ -712,6 +712,13 @@ async def stop(app: FastAPI) -> None:
             pass
 
     # Stop long-connections (Feishu)
+    qr_mgr = getattr(app.state, "feishu_qr_manager", None)
+    if qr_mgr is not None:
+        try:
+            await qr_mgr.shutdown()
+        except Exception:
+            logger.opt(exception=True).warning("[IM] feishu QR manager shutdown failed")
+
     long_conns = getattr(app.state, "im_long_connections", None) or {}
     for lc in list(long_conns.values()):
         try:

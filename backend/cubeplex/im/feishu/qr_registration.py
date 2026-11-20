@@ -276,6 +276,17 @@ class FeishuQrRegistrationManager:
             self._cancel_record(rec, datetime.now(UTC))
         return rec.snapshot()
 
+    async def shutdown(self) -> None:
+        """Cancel all in-flight QR registration tasks during app shutdown."""
+        now = datetime.now(UTC)
+        tasks: list[asyncio.Task[None]] = []
+        for rec in list(self._attempts.values()):
+            if rec.task is not None and not rec.task.done():
+                self._cancel_record(rec, now)
+                tasks.append(rec.task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     def _cancel_record(self, rec: _AttemptRecord, now: datetime) -> None:
         rec.state = "cancelled"
         rec.error_code = "abort"

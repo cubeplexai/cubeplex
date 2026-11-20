@@ -7,6 +7,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'sonner'
 
 import {
+  ApiError,
   wsCancelFeishuQr,
   wsGetFeishuQrStatus,
   wsStartFeishuQr,
@@ -33,15 +34,31 @@ const ACTIVE_STATES = new Set([
   'connecting',
 ])
 
+const KNOWN_ERROR_CODES = new Set([
+  'access_denied',
+  'qr_timeout',
+  'connect_conflict',
+  'connect_failed',
+  'registration_failed',
+  'invalid_credentials',
+  'expired_token',
+  'abort',
+])
+
+const MAX_CONSECUTIVE_POLL_ERRORS = 5
+
 export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.ReactElement {
   const t = useTranslations() as unknown as DynamicT
   const [domain, setDomain] = useState<'feishu' | 'lark'>('feishu')
   const [attempt, setAttempt] = useState<FeishuQrAttempt | null>(null)
   const [starting, setStarting] = useState(false)
-  const [startError, setStartError] = useState<string | null>(null)
+  const [startError, setStartError] = useState(false)
+  const [pollError, setPollError] = useState(false)
+  const [pollTick, setPollTick] = useState(0)
   const [nowMs, setNowMs] = useState<number>(() => Date.now())
 
   const activeAttemptIdRef = useRef<string | null>(null)
+  const consecutivePollErrorsRef = useRef(0)
   const mountedRef = useRef(true)
 
   const startQr = useCallback(
@@ -51,8 +68,10 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
         activeAttemptIdRef.current = null
         void wsCancelFeishuQr(client, wsId, prevId).catch(() => {})
       }
+      consecutivePollErrorsRef.current = 0
       setStarting(true)
-      setStartError(null)
+      setStartError(false)
+      setPollError(false)
       setAttempt(null)
       try {
         const res = await wsStartFeishuQr(client, wsId, targetDomain)
@@ -62,9 +81,10 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
         }
         activeAttemptIdRef.current = res.attempt_id
         setAttempt(res)
-      } catch (err) {
+        setPollTick((n) => n + 1)
+      } catch {
         if (!mountedRef.current) return
-        setStartError(err instanceof Error ? err.message : 'Failed to start QR login')
+        setStartError(true)
       } finally {
         if (mountedRef.current) setStarting(false)
       }
@@ -88,44 +108,73 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
     }
   }, [client, wsId, domain, startQr])
 
-  // Poll QR status while attempt is active
+  // Poll QR status while attempt is active; retry transient errors with backoff.
   useEffect(() => {
-    if (!attempt || !ACTIVE_STATES.has(attempt.state)) return
-    const delayMs = attempt.state === 'slow_down' ? 4000 : 2000
+    if (!attempt || !ACTIVE_STATES.has(attempt.state) || pollError) return
+    const baseDelay = attempt.state === 'slow_down' ? 4000 : 2000
+    const backoff = Math.min(baseDelay * 2 ** consecutivePollErrorsRef.current, 10000)
     const timer = window.setTimeout(async () => {
       try {
         const next = await wsGetFeishuQrStatus(client, wsId, attempt.attempt_id)
         if (!mountedRef.current || activeAttemptIdRef.current !== attempt.attempt_id) return
+        consecutivePollErrorsRef.current = 0
         setAttempt(next)
         if (next.state === 'succeeded') {
           activeAttemptIdRef.current = null
           toast.success(t('im.success.toast.connected'))
           onConnected()
+        } else if (ACTIVE_STATES.has(next.state)) {
+          setPollTick((n) => n + 1)
         }
-      } catch {
-        // Transient poll error; next render/refresh can retry
+      } catch (err) {
+        if (!mountedRef.current || activeAttemptIdRef.current !== attempt.attempt_id) return
+        const isTerminalHttp =
+          err instanceof ApiError &&
+          (err.status === 404 || err.status === 401 || err.status === 403)
+        consecutivePollErrorsRef.current += 1
+        if (isTerminalHttp || consecutivePollErrorsRef.current >= MAX_CONSECUTIVE_POLL_ERRORS) {
+          activeAttemptIdRef.current = null
+          setPollError(true)
+        } else {
+          setPollTick((n) => n + 1)
+        }
       }
-    }, delayMs)
+    }, backoff)
     return () => window.clearTimeout(timer)
-  }, [attempt, client, wsId, onConnected, t])
+  }, [attempt, pollTick, pollError, client, wsId, onConnected, t])
 
   // Countdown ticker
   useEffect(() => {
-    if (!attempt?.expires_at || !ACTIVE_STATES.has(attempt.state)) return
+    if (!attempt?.expires_at || !ACTIVE_STATES.has(attempt.state) || pollError) return
     const interval = window.setInterval(() => {
       setNowMs(Date.now())
     }, 1000)
     return () => window.clearInterval(interval)
-  }, [attempt?.expires_at, attempt?.state])
+  }, [attempt?.expires_at, attempt?.state, pollError])
 
   const remainingSeconds =
-    attempt?.expires_at && ACTIVE_STATES.has(attempt.state)
+    attempt?.expires_at && ACTIVE_STATES.has(attempt.state) && !pollError
       ? Math.max(0, Math.ceil((Date.parse(attempt.expires_at) - nowMs) / 1000))
       : null
 
   const isExpired = attempt?.state === 'expired'
-  const isError = attempt?.state === 'error' || !!startError
-  const isConnecting = attempt?.state === 'connecting'
+  const isError = attempt?.state === 'error' || startError || pollError
+  const isConnecting = attempt?.state === 'connecting' && !pollError
+
+  let errorText = ''
+  if (isExpired) {
+    errorText = t('im.wizard.feishu.qr.expired')
+  } else if (startError) {
+    errorText = t('im.wizard.feishu.qr.errors.startFailed')
+  } else if (pollError) {
+    errorText = t('im.wizard.feishu.qr.errors.pollFailed')
+  } else if (attempt?.state === 'error') {
+    const code = attempt.error_code
+    errorText =
+      code && KNOWN_ERROR_CODES.has(code)
+        ? t(`im.wizard.feishu.qr.errors.${code}`)
+        : t('im.wizard.feishu.qr.errors.generic')
+  }
 
   return (
     <div className="space-y-4">
@@ -154,11 +203,7 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
 
       {(isError || isExpired) && (
         <Alert variant="destructive">
-          <AlertDescription>
-            {isExpired
-              ? t('im.wizard.feishu.qr.expired')
-              : startError || attempt?.error_message || 'Registration failed'}
-          </AlertDescription>
+          <AlertDescription>{errorText}</AlertDescription>
         </Alert>
       )}
 
@@ -173,7 +218,7 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
             <Loader2 className="h-6 w-6 animate-spin" />
             <span>{t('im.wizard.feishu.qr.connecting')}</span>
           </div>
-        ) : attempt?.qr_url ? (
+        ) : attempt?.qr_url && !isError && !isExpired ? (
           <>
             <div className="rounded-lg border bg-white p-3 shadow-xs">
               <QRCodeSVG value={attempt.qr_url} size={184} level="M" />
@@ -203,15 +248,6 @@ export function FeishuQrConnect({ client, wsId, onConnected }: Props): React.Rea
           </Button>
         )}
       </div>
-
-      {(isExpired || isError) && (
-        <div className="flex justify-end">
-          <Button type="button" variant="outline" size="sm" onClick={() => void startQr(domain)}>
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-            {t('im.wizard.feishu.qr.refresh')}
-          </Button>
-        </div>
-      )}
     </div>
   )
 }

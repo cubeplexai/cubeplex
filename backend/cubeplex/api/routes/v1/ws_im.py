@@ -673,6 +673,7 @@ async def start_feishu_qr(
     async def _connect_bot(
         app_id: str, app_secret: str, resolved_domain: FeishuDomain
     ) -> IMAccountOut:
+        # cubeplex.db.__init__ shadows the `engine` submodule with the AsyncEngine instance.
         db_engine_mod = import_module("cubeplex.db.engine")
         async with db_engine_mod.async_session_maker() as session:
             creds = build_credential_service(session, backend, org_id=org_id, actor_user_id=user_id)
