@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
 
 interface SandboxTerminal {
@@ -40,15 +40,17 @@ export function useSandboxTerminal(
   const [retrying, setRetrying] = useState(false)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     setRetrying(false)
-    return () => {
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current)
-        retryTimerRef.current = null
-      }
-    }
-  }, [key])
+    return clearRetryTimer
+  }, [key, clearRetryTimer])
 
   const { data, error, isLoading, isValidating, mutate } = useSWR<SandboxTerminal>(key, fetcher, {
     revalidateOnFocus: false,
@@ -56,15 +58,16 @@ export function useSandboxTerminal(
     revalidateOnReconnect: false,
     shouldRetryOnError: shouldRetryTerminalError,
     onSuccess: () => {
+      clearRetryTimer()
       setRetrying(false)
     },
     onErrorRetry: (err, _key, _config, revalidate, { retryCount }) => {
-      if (!shouldRetryTerminalError(err) || retryCount >= MAX_RETRY_COUNT) {
+      clearRetryTimer()
+      if (!shouldRetryTerminalError(err) || retryCount > MAX_RETRY_COUNT) {
         setRetrying(false)
         return
       }
       setRetrying(true)
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
       retryTimerRef.current = setTimeout(() => {
         retryTimerRef.current = null
         void revalidate({ retryCount })
