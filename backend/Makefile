@@ -8,7 +8,7 @@ help:
 	@echo "  make lint              - Run ruff linter"
 	@echo "  make type-check        - Run mypy type checker"
 	@echo "  make test              - Run backend tests (excludes real_llm)"
-	@echo "  make test-real-llm     - Run real-LLM injection tests"
+	@echo "  make test-real-llm     - Run all tests/e2e marked real_llm"
 	@echo "  make test-cov          - Run backend tests with coverage report"
 	@echo "  make test-e2e          - Run backend E2E tests"
 	@echo "  make test-e2e-ci       - Run backend E2E tests, writing coverage-e2e.xml for Codecov"
@@ -57,7 +57,7 @@ test:
 
 test-real-llm:
 	@echo "Running real-LLM tests..."
-	uv run pytest -s -v -m real_llm tests/e2e/memory/ tests/e2e/middleware/
+	uv run pytest -s -v -m real_llm tests/e2e/
 	@echo "✓ Real-LLM tests passed"
 
 test-cov:
