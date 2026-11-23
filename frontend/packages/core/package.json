@@ -70,11 +70,11 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
-    "@vitest/ui": "^5.1.0",
+    "@vitest/ui": "^5.1.1",
     "jsdom": "^30.0.1",
     "react": "19.3.1",
     "typescript": "^6.0.3",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   },
   "peerDependencies": {
     "react": "19.3.1"
