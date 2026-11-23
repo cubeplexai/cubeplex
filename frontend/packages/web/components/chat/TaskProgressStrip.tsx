@@ -2,7 +2,15 @@
 
 import { useId, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { CheckCircle2, ChevronDown, ChevronRight, Circle, ListChecks, Loader2 } from 'lucide-react'
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  ListChecks,
+  Loader2,
+  PauseCircle,
+} from 'lucide-react'
 import { useMessageStore, type TodoItem } from '@cubeplex/core'
 
 import { ComposerOverlayShell } from './ComposerOverlayShell'
@@ -18,14 +26,21 @@ const expandedPrefs = new Map<string, boolean>()
 interface TaskProgressStripProps {
   conversationId: string
   todos: TodoItem[]
+  isRunning?: boolean
 }
 
 export function ConversationTaskProgress({ conversationId }: { conversationId: string }) {
   const todos = useMessageStore((s) => s.todosByConversation[conversationId] ?? EMPTY_TODOS)
-  return <TaskProgressStrip conversationId={conversationId} todos={todos} />
+  const runLifecycle = useMessageStore((s) => s.runLifecycle[conversationId] ?? 'idle')
+  const isRunning = runLifecycle === 'running' || runLifecycle === 'resuming_hitl'
+  return <TaskProgressStrip conversationId={conversationId} todos={todos} isRunning={isRunning} />
 }
 
-export function TaskProgressStrip({ conversationId, todos }: TaskProgressStripProps) {
+export function TaskProgressStrip({
+  conversationId,
+  todos,
+  isRunning = false,
+}: TaskProgressStripProps) {
   const t = useTranslations('chat')
   const listId = useId()
   const [expanded, setExpanded] = useState(() => expandedPrefs.get(conversationId) ?? false)
@@ -73,7 +88,7 @@ export function TaskProgressStrip({ conversationId, todos }: TaskProgressStripPr
       >
         {allDone ? (
           <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-success-fg" />
-        ) : current?.status === 'in_progress' ? (
+        ) : isRunning && current?.status === 'in_progress' ? (
           <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-primary" />
         ) : (
           <ListChecks aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
@@ -106,7 +121,11 @@ export function TaskProgressStrip({ conversationId, todos }: TaskProgressStripPr
         <ComposerOverlayShell id={listId} aria-label={t('tasksProgress')}>
           <ul className="min-h-0 space-y-1 overflow-y-auto p-2">
             {todos.map((todo, index) => (
-              <TodoRow key={`${todo.id ?? todo.description}-${index}`} todo={todo} />
+              <TodoRow
+                key={`${todo.id ?? todo.description}-${index}`}
+                todo={todo}
+                isRunning={isRunning}
+              />
             ))}
           </ul>
         </ComposerOverlayShell>
@@ -115,15 +134,17 @@ export function TaskProgressStrip({ conversationId, todos }: TaskProgressStripPr
   )
 }
 
-function TodoRow({ todo }: { todo: TodoItem }) {
+function TodoRow({ todo, isRunning }: { todo: TodoItem; isRunning: boolean }) {
   const done = todo.status === 'completed'
   const active = todo.status === 'in_progress'
   return (
     <li className="flex items-center gap-2 py-0.5 text-xs">
       {done ? (
         <CheckCircle2 aria-hidden className="size-3 shrink-0 text-success-fg" />
-      ) : active ? (
+      ) : active && isRunning ? (
         <Loader2 aria-hidden className="size-3 shrink-0 animate-spin text-primary" />
+      ) : active ? (
+        <PauseCircle aria-hidden className="size-3 shrink-0 text-muted-foreground" />
       ) : (
         <Circle aria-hidden className="size-3 shrink-0 text-muted-foreground/40" />
       )}
