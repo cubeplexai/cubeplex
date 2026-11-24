@@ -175,3 +175,31 @@ async def test_hydrate_images_do_not_block_document_staging() -> None:
     sandbox.execute.assert_awaited_once()
     objectstore.download_file.assert_awaited_once_with("k-doc")
     sandbox.upload.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_hydrate_include_images_stages_image() -> None:
+    """When include_images=True (e.g. on lazy sandbox wake), images are staged."""
+    sandbox = MagicMock()
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="MISSING", exit_code=0))
+    sandbox.upload = AsyncMock()
+    objectstore = MagicMock()
+    objectstore.download_file = AsyncMock(return_value=(b"\xff\xd8\xff", "image/jpeg"))
+    image = _att(
+        id="img1",
+        kind="image",
+        filename="image.jpg",
+        sandbox_path="/workspace/uploads/conv1/img1/image.jpg",
+        object_key="k-img",
+    )
+    repo = MagicMock()
+    repo.get_in_conversation = AsyncMock(return_value=image)
+
+    h = AttachmentHydrator(repo=repo, sandbox=sandbox, objectstore=objectstore)
+    out = await h.hydrate(conversation_id="conv1", file_ids=["img1"], include_images=True)
+
+    assert out == {"img1": "/workspace/uploads/conv1/img1/image.jpg"}
+    objectstore.download_file.assert_awaited_once_with("k-img")
+    sandbox.upload.assert_awaited_once_with(
+        [("/workspace/uploads/conv1/img1/image.jpg", b"\xff\xd8\xff")]
+    )

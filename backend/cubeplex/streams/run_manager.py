@@ -750,6 +750,7 @@ async def _hydrate_attachments_into_sandbox(
     conversation_id: str,
     attachment_ids: list[str],
     sandbox: Any,
+    include_images: bool = False,
 ) -> None:
     """Materialize attachment objects from ObjectStore onto the sandbox FS.
 
@@ -781,10 +782,17 @@ async def _hydrate_attachments_into_sandbox(
                 sandbox=sandbox,
                 objectstore=get_objectstore_client(),
             )
-            await hydrator.hydrate(
-                conversation_id=conversation_id,
-                file_ids=attachment_ids,
-            )
+            if include_images:
+                await hydrator.hydrate(
+                    conversation_id=conversation_id,
+                    file_ids=attachment_ids,
+                    include_images=True,
+                )
+            else:
+                await hydrator.hydrate(
+                    conversation_id=conversation_id,
+                    file_ids=attachment_ids,
+                )
     except Exception as exc:  # noqa: BLE001 — non-fatal by design
         logger.warning("Failed to hydrate attachments into sandbox: {}", exc)
 
@@ -3411,13 +3419,37 @@ class RunManager:
             # Build attachment metadata blocks and inject into user message so
             # AttachmentHintMiddleware can render the [Attachments] hint.
             if attachments:
-                await _hydrate_attachments_into_sandbox(
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    conversation_id=conversation_id,
-                    attachment_ids=attachments,
-                    sandbox=sandbox,
-                )
+                from cubeplex.sandbox.lazy import LazySandbox as _LazySandbox
+
+                if isinstance(sandbox, _LazySandbox) and not sandbox.initialized:
+
+                    async def _lazy_hydrate_images(raw_sandbox: Any) -> None:
+                        await _hydrate_attachments_into_sandbox(
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            conversation_id=conversation_id,
+                            attachment_ids=attachments,
+                            sandbox=raw_sandbox,
+                            include_images=True,
+                        )
+
+                    sandbox.set_attachment_hydrator(_lazy_hydrate_images)
+                    await _hydrate_attachments_into_sandbox(
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        conversation_id=conversation_id,
+                        attachment_ids=attachments,
+                        sandbox=sandbox,
+                    )
+                else:
+                    await _hydrate_attachments_into_sandbox(
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        conversation_id=conversation_id,
+                        attachment_ids=attachments,
+                        sandbox=sandbox,
+                        include_images=True,
+                    )
 
                 try:
                     _att_blocks = await _build_attachment_content_blocks(

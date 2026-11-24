@@ -258,7 +258,17 @@ class LazySandbox(Sandbox):
         self._lock = asyncio.Lock()
         self._skills_generation = 0
         self._synced_skills_generation: int | None = None
+        self._attachment_hydrator: Callable[[Sandbox], Awaitable[None]] | None = None
+        self._hydrated_attachments = False
         self._sync_lock = asyncio.Lock()  # independent of _lock; serialises _sync_skills
+
+    def set_attachment_hydrator(
+        self,
+        hydrator: Callable[[Sandbox], Awaitable[None]],
+    ) -> None:
+        """Register a callback to hydrate attachments when the sandbox starts."""
+        self._attachment_hydrator = hydrator
+        self._hydrated_attachments = False
 
     # ------------------------------------------------------------------
     # Properties
@@ -361,6 +371,20 @@ class LazySandbox(Sandbox):
                 return
             await self._sync_skills_locked(sandbox, generation)
 
+    async def _ensure_attachments_hydrated(self, sandbox: Sandbox) -> None:
+        """Hydrate attachments into the sandbox at most once per sandbox lifecycle."""
+        if self._attachment_hydrator is None or self._hydrated_attachments:
+            return
+        async with self._sync_lock:
+            if self._attachment_hydrator is None or self._hydrated_attachments:
+                return
+            await self._attachment_hydrator(sandbox)
+            self._hydrated_attachments = True
+
+    async def _sync_on_ready(self, sandbox: Sandbox) -> None:
+        await self._ensure_skills_synced(sandbox)
+        await self._ensure_attachments_hydrated(sandbox)
+
     async def _sync_skills_locked(self, sandbox: Sandbox, generation: int) -> None:
         """Run one sync while the caller holds ``_sync_lock``."""
         assert self._catalog is not None
@@ -423,6 +447,7 @@ class LazySandbox(Sandbox):
             async with self._lock:
                 self._sandbox = None
                 self._invalidate_skills_sync()
+                self._hydrated_attachments = False
                 self._user_sandbox_id = None
             logger.warning(
                 "Lazy sandbox: first attempt failed for scope {}/{}, retrying",
@@ -431,7 +456,7 @@ class LazySandbox(Sandbox):
             )
             sandbox = await self._ensure()
 
-        await self._ensure_skills_synced(sandbox)
+        await self._sync_on_ready(sandbox)
 
         # Refresh last_activity so cleanup_expired won't kill an in-use
         # sandbox mid-turn. Throttled inside the manager.
@@ -540,10 +565,11 @@ class LazySandbox(Sandbox):
             async with self._lock:
                 self._sandbox = None
                 self._invalidate_skills_sync()
+                self._hydrated_attachments = False
                 self._user_sandbox_id = None
             logger.warning("Lazy sandbox: execute failed, recreating sandbox")
             sandbox = await self._ensure()
-            await self._ensure_skills_synced(sandbox)
+            await self._sync_on_ready(sandbox)
             return await self._run_with_keepalive(
                 sandbox.execute(
                     command,
@@ -566,6 +592,7 @@ class LazySandbox(Sandbox):
                 if self._sandbox is sandbox:
                     self._sandbox = None
                     self._invalidate_skills_sync()
+                    self._hydrated_attachments = False
                     self._user_sandbox_id = None
             raise
 
@@ -615,10 +642,11 @@ class LazySandbox(Sandbox):
             async with self._lock:
                 self._sandbox = None
                 self._invalidate_skills_sync()
+                self._hydrated_attachments = False
                 self._user_sandbox_id = None
             logger.warning("Lazy sandbox: upload failed, recreating sandbox")
             sandbox = await self._ensure()
-            await self._ensure_skills_synced(sandbox)
+            await self._sync_on_ready(sandbox)
             await sandbox.upload(files)
 
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
