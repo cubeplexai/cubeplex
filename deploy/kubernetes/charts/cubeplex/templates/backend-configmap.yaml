@@ -8,7 +8,7 @@
 {{- $overrides = omit $overrides "tracing" -}}
 {{- end -}}
 {{- $sandboxCfg := .Values.backend.sandbox | default dict -}}
-{{- $sandboxProvider := (dig "provider" "opensandbox" $sandboxCfg) | default "opensandbox" -}}
+{{- $sandboxProvider := (dig "provider" "cubepod" $sandboxCfg) | default "cubepod" -}}
 {{- $cubepodCfg := (dig "cubepod" dict $sandboxCfg) | default dict -}}
 {{- $cubepodBaseUrl := dig "base_url" "" $cubepodCfg -}}
 {{- $cubepodDefaultTemplate := dig "default_template" "" $cubepodCfg -}}
@@ -41,7 +41,7 @@ data:
         bucket: {{ .Values.rustfs.defaultBucket | quote }}
         region: "us-east-1"
       sandbox:
-        # Sandbox execution is required (default: opensandbox; supports cubepod / local).
+        # Sandbox execution is required (default: cubepod; supports opensandbox / local).
         enabled: true
         provider: {{ $sandboxProvider | quote }}
         use_server_proxy: {{ dig "sandbox" "use_server_proxy" false .Values.backend }}

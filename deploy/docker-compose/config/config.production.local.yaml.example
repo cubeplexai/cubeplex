@@ -39,9 +39,13 @@ production:
 
   sandbox:
     enabled: true
-    # Provider: "opensandbox" (default) | "cubepod" | "local"
-    provider: "opensandbox"
-    # The two settings below MUST stay as shown for docker-runtime OpenSandbox.
+    # Provider: "cubepod" (default) | "opensandbox" | "local"
+    provider: "cubepod"
+    cubepod:
+      base_url: "http://cubepod-gateway:8080"
+      default_template: "cubeplex-ubuntu24-desktop"
+      # warm_pool: ""
+    # Settings below apply when provider is "opensandbox" (docker runtime):
     # secureAccess is rejected by the docker runtime — set false.
     secure_access: false
     # Use direct mode (not server-proxy). OpenSandbox v0.1.x has a known
@@ -50,12 +54,6 @@ production:
     # needs `host.docker.internal` resolvable (the overlay's extra_hosts
     # entry handles that).
     use_server_proxy: false
-    # Optional CubePod settings (when provider is "cubepod"; set optional
-    # sandbox.cubepod.api_key in config.production.secrets.yaml if needed):
-    # cubepod:
-    #   base_url: "http://cubepod-gateway:8080"
-    #   default_template: "cubeplex-ubuntu24-desktop"
-    #   warm_pool: ""
 
   # Tracing endpoints are injected by compose.tempo.yaml
   # (CUBEPLEX_TRACING__* env). Do not set tracing here unless you omit that

@@ -173,8 +173,8 @@ $EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 ```yaml
 image:
   # 固定成与 chart appVersion 不同的镜像版本：
-  backend:  { tag: "v0.9.5" }
-  frontend: { tag: "v0.9.5" }
+  backend:  { tag: "v0.10.0" }
+  frontend: { tag: "v0.10.0" }
 ```
 
 自己构建 / 私有 registry 的镜像，则额外设置其位置：
@@ -264,10 +264,27 @@ backend:
 直接失败（`CrashLoopBackOff`），而不是悄悄降级，所以配置错了 `kubectl get
 pods` 立刻能看到，不会等到第一条聊天消息才冒出 `no_default_preset` 500。
 
-### 4.5 必需的 OpenSandbox provider
+### 4.5 沙箱 provider（默认 CubePod / OpenSandbox）
 
-OpenSandbox 是 agent 工具调用（bash、read 等）实际执行的容器运行时。
-backend 会在启动时要求它存在，并拒绝不完整的配置。
+Helm chart 默认将 `backend.sandbox.provider` 设为 `"cubepod"`（且
+`opensandbox.enabled: false`），用于连接 CubePod gateway：
+
+```yaml
+backend:
+  sandbox:
+    provider: "cubepod"
+    cubepod:
+      base_url: "http://cubepod-gateway:8080"
+      # default_template: "cubeplex-ubuntu24-desktop"
+      # warm_pool: ""
+  secrets:
+    sandbox:
+      cubepod:
+        api_key: "..."                  # 可选 Bearer token
+```
+
+如果改用 OpenSandbox（自带 subchart 或外部部署），请设置
+`backend.sandbox.provider: "opensandbox"` 并配置 `backend.secrets.sandbox`：
 
 ```yaml
 backend:
@@ -277,10 +294,11 @@ backend:
       # image 默认 cubeplex-sandbox:v<chart 版本>；仅在需要覆盖时才设
       api_key: "..."
   sandbox:
+    provider: "opensandbox"
     use_server_proxy: false             # 集群无法直接访问 sandbox pod 时设为 true
 ```
 
-两种受支持的部署方式：
+两种受支持的 OpenSandbox 部署方式：
 
 | 场景 | `values.local.yaml` |
 |---|---|
@@ -500,7 +518,7 @@ egress:
   sandboxNamespace: "opensandbox"
   webhook:
     image:
-      tag: "v0.9.5"             # 与 backend/frontend 相同的 release 版本
+      tag: "v0.10.0"             # 与 backend/frontend 相同的 release 版本
     # 必须与 opensandbox-server 配置的 egress.image 完全一致。
     # chart 默认值。Docker Hub 覆盖：docker.io/opensandbox/egress:release-1.1.1
     egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:release-1.1.1"
@@ -670,7 +688,7 @@ backend:
 
 ```bash
 helm upgrade --install cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
-  --version 0.9.5 \
+  --version 0.10.0 \
   --namespace cubeplex --create-namespace \
   --values values.local.yaml \
   --wait --timeout 10m
@@ -890,8 +908,9 @@ backend:
   replicaCount: 1
   service: { port: 8000 }
   sandbox:                          # 见 §4.5
-    enabled: <跟随 opensandbox.enabled>
+    provider: "cubepod"             # "cubepod" | "opensandbox" | "local"
     use_server_proxy: false
+    cubepod: { base_url, default_template, warm_pool }
   resources: { requests, limits }
   env: { ENV_FOR_DYNACONF: production }
   configOverrides:                  # ConfigMap，非密钥
@@ -965,7 +984,7 @@ tempo:                              # 默认开启，见 §4.12
   resources: { ... }
 
 opensandbox:
-  enabled: true
+  enabled: false
   base:
     fastSandbox:
       namespaces: { createSystem: false, create: false }
@@ -980,10 +999,13 @@ opensandbox:
 
 ```yaml
 image:
-  backend:  { tag: "v0.9.5" }
-  frontend: { tag: "v0.9.5" }
+  backend:  { tag: "v0.10.0" }
+  frontend: { tag: "v0.10.0" }
 
 backend:
+  sandbox:
+    cubepod:
+      base_url: "http://cubepod-gateway:8080"
   configOverrides:
     api:
       public_url: "http://cubeplex.local"
@@ -1012,16 +1034,10 @@ backend:
           models:
             - { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", input: ["text", "image"],
                 context_window: 128000, max_tokens: 16384 }
-    sandbox:
-      domain: "opensandbox-server.opensandbox-system.svc.cluster.local:80"
-      api_key: "<与内置 OpenSandbox server API key 相同的值>"
 
 postgres: { auth: { password: "<openssl rand -hex 16>" } }
 redis:    { auth: { password: "<openssl rand -hex 16>" } }
 rustfs:   { auth: { secretKey: "<openssl rand -hex 16>" } }
-
-opensandbox:
-  enabled: true
 ```
 
 完整的带注释模板见仓库中的
