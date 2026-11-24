@@ -18,7 +18,7 @@
     "@playwright/test": "^1.65.0",
     "@typescript-eslint/eslint-plugin": "^8.72.2",
     "@typescript-eslint/parser": "^8.72.2",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.10",
     "eslint": "^9.15.0",
     "eslint-config-next": "16.4.6",
     "globals": "^17.14.0",
