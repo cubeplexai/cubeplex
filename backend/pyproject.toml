@@ -194,7 +194,7 @@ exclude_lines = [
 [tool.uv.sources]
 # Path-linked sibling project; never resolved from an index.
 cubeplex-ee = { path = "ee", editable = true }
-cubeloop = { git = "https://github.com/cubeplexai/cubeloop.git", rev = "bb2d6336e537f286ccac3dec072218bbec13405b" }
+cubeloop = { git = "https://github.com/cubeplexai/cubeloop.git", rev = "65ae0ec51b736f74b7d8804f18b3960a1e7aa44a" }
 
 [dependency-groups]
 # Deliberately a group and not an extra: `uv sync --all-extras` (what
