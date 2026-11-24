@@ -1,4 +1,4 @@
-"""Shared ``/help``, ``/stop``, ``/steer``, ``/models``, and ``/model`` command parsing and execution for IM."""
+"""Shared ``/help``, ``/stop``, ``/steer``, ``/models``, and ``/model`` IM control commands."""
 
 from __future__ import annotations
 
@@ -607,7 +607,9 @@ async def maybe_handle_control_command(
     rejection_notifier: RejectionNotifier | None = None,
     require_linked_member: bool = False,
 ) -> bool:
-    """Intercept ``/help``, ``/stop``, ``/steer <content>``, ``/models``, or ``/model`` before ``ingest_inbound_event``.
+    """Intercept IM control commands before ``ingest_inbound_event``.
+
+    Handles ``/help``, ``/stop``, ``/steer <content>``, ``/models``, and ``/model``.
 
     Returns ``True`` if the event was completely handled (including duplicates
     and identity rejections) and should NOT be passed to ``ingest_inbound_event``.

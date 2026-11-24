@@ -672,7 +672,7 @@ async def test_discord_register_commands_wires_stop_and_steer() -> None:
 
     bot = SimpleNamespace(tree=_FakeTree(), get_cog=AsyncMock())
     await register_commands(bot)  # type: ignore[arg-type]
-    assert {"new", "reset", "link", "stop", "steer", "models", "model"} <= set(registered)
+    assert {"help", "new", "reset", "link", "stop", "steer", "models", "model"} <= set(registered)
 
 
 def test_parse_model_commands_variants() -> None:
