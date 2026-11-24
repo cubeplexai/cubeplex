@@ -1269,6 +1269,33 @@ async def test_help_command_e2e_idempotent_and_wecom(
     )
     assert replies == [HELP_REPLY]
 
+    # 3. Slash-command path (require_linked_member=True) also works for an unlinked sender.
+    slash_help_evt = InboundEvent(
+        platform="discord",
+        platform_event_id=f"slash:help-1-{acct.id[-6:]}",
+        account_external_id=acct.external_account_id,
+        channel_id="oc_help_e2e",
+        scope_key=make_channel_scope(),
+        scope_kind="channel",
+        sender_ref="discord_unlinked",
+        sender_open_id="discord_unlinked",
+        text="/help",
+        reply_to_id=None,
+        inbound_message_id="",
+    )
+    assert (
+        await maybe_handle_control_command(
+            slash_help_evt,
+            account=acct,
+            session_maker=maker,
+            run_manager=app.state.run_manager,
+            reply=reply,
+            require_linked_member=True,
+        )
+        is True
+    )
+    assert replies == [HELP_REPLY, HELP_REPLY]
+
     async with maker() as session:
         convs = (
             (await session.execute(select(Conversation).where(Conversation.org_id == acct.org_id)))
@@ -1277,7 +1304,7 @@ async def test_help_command_e2e_idempotent_and_wecom(
         )
         assert convs == []
 
-    # 3. WeCom ingress handles /help via durable command response delivery.
+    # 4. WeCom ingress handles /help via durable command response delivery and dedupes retries.
     wecom_gw = MagicMock()
     wecom_gw.send_passive = AsyncMock(return_value={"errcode": 0})
     wecom_gw.send_proactive = AsyncMock(return_value={"errcode": 0})
@@ -1301,6 +1328,14 @@ async def test_help_command_e2e_idempotent_and_wecom(
         gateway=wecom_gw,
         run_manager=app.state.run_manager,
     )
+    await handle_inbound_callback(
+        raw_help,
+        account=acct,
+        session_maker=maker,
+        gateway=wecom_gw,
+        run_manager=app.state.run_manager,
+    )
     wecom_gw.send_passive.assert_awaited_once()
+    wecom_gw.send_proactive.assert_not_called()
     sent_payload = wecom_gw.send_passive.call_args.args[1]
     assert sent_payload["markdown"]["content"] == HELP_REPLY
