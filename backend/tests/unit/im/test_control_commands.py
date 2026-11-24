@@ -5,11 +5,23 @@ from __future__ import annotations
 import pytest
 
 from cubeplex.im.control_commands import (
+    HELP_REPLY,
+    HelpCommand,
     SteerCommand,
     StopCommand,
     make_im_client_steer_id,
     parse_control_command,
 )
+
+
+def test_parse_help_command_variants() -> None:
+    assert parse_control_command("/help") == HelpCommand()
+    assert parse_control_command("  /HELP \n") == HelpCommand()
+    assert parse_control_command("/helper") is None
+    assert parse_control_command("/help me") is None
+    assert parse_control_command("hello /help") is None
+    for cmd in ("/help", "/new", "/reset", "/stop", "/steer", "/models", "/model", "/link"):
+        assert cmd in HELP_REPLY
 
 
 def test_parse_stop_command_variants() -> None:
@@ -891,7 +903,9 @@ async def test_slack_register_commands_wires_models_and_model() -> None:
             return _dec
 
     register_commands(_FakeApp(), account_id="acct-1", workspace_id="ws-1", session_maker=object())
-    assert {"/link", "/new", "/reset", "/stop", "/steer", "/models", "/model"} <= set(registered)
+    assert {"/help", "/link", "/new", "/reset", "/stop", "/steer", "/models", "/model"} <= set(
+        registered
+    )
 
 
 async def test_slack_and_discord_control_slash_dispatch(
@@ -971,4 +985,25 @@ async def test_slack_and_discord_control_slash_dispatch(
         failure_reply="fail",
     )
     assert handled_texts[-1] == "/model pro"
+    assert discord_sent[-1] == "ok"
+
+    await slack_control(
+        {"trigger_id": "t-help"},
+        _slack_respond,
+        account_id="acct-1",
+        session_maker=lambda: _FakeSess(),
+        run_manager=None,
+        text="/help",
+        failure_reply="fail",
+    )
+    assert handled_texts[-1] == "/help"
+    assert slack_replies[-1] == "ok"
+
+    await discord_control(
+        interaction,  # type: ignore[arg-type]
+        bot,  # type: ignore[arg-type]
+        text="/help",
+        failure_reply="fail",
+    )
+    assert handled_texts[-1] == "/help"
     assert discord_sent[-1] == "ok"

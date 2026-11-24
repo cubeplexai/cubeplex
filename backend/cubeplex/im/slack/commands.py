@@ -1,4 +1,4 @@
-"""Slack slash commands: /link, /new, /reset, /stop, and /steer.
+"""Slack slash commands: /help, /link, /new, /reset, /stop, /steer, /models, and /model.
 
 Also exposes ``parse_link_command`` so the Socket Mode gateway can intercept
 plain-text ``/link`` / ``link`` messages (when the slash command is not
@@ -48,7 +48,20 @@ def register_commands(
     session_maker: Any,
     run_manager: Any = None,
 ) -> None:
-    """Register /link, /new, /reset, /stop, /steer, /models, and /model slash commands."""
+    """Register /help, /link, /new, /reset, /stop, /steer, /models, and /model slash commands."""
+
+    @app.command("/help")  # type: ignore[untyped-decorator]
+    async def cmd_help(ack: Any, command: dict[str, Any], respond: Any) -> None:
+        await ack()
+        await _handle_control_slash(
+            command,
+            respond,
+            account_id=account_id,
+            session_maker=session_maker,
+            run_manager=run_manager,
+            text="/help",
+            failure_reply="Failed to show help.",
+        )
 
     @app.command("/link")  # type: ignore[untyped-decorator]
     async def cmd_link(ack: Any, command: dict[str, Any], respond: Any) -> None:

@@ -47,6 +47,7 @@ the bot's workspace. Membership is checked again for every message.
 - In a direct chat, send a message normally.
 - In a group, mention the bot. The account's group routing setting controls whether each member
   receives an isolated conversation or the group shares one conversation.
+- Send `/help` to show a brief summary of the supported `/` commands.
 - Send `/new`, `/reset`, or `新对话` to start a fresh conversation for the current scope.
 - Send `/stop` to stop the currently active reply without clearing queued messages.
 - Send `/steer <message>` to inject a follow-up instruction into the active reply (or start a new one if idle).

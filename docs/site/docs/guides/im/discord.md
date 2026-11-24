@@ -103,6 +103,7 @@ On Discord these are registered as **native slash commands** (they appear in the
 
 | Command | Effect |
 |---|---|
+| `/help` | Show a brief summary of the supported `/` commands. |
 | `/new` | Start a fresh conversation; your next message begins a new one. |
 | `/reset` | Same as `/new` — drops the current conversation binding for this chat scope. |
 | `/stop` | Stop the currently active reply without clearing queued messages. |

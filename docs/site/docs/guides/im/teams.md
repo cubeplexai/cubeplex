@@ -223,6 +223,7 @@ Once linked, messages run as that user, with the same skills, memory, and tools 
 
 | Command | Effect |
 |---|---|
+| `/help` | Show a brief summary of the supported `/` commands. |
 | `/link <email>` | Link your Teams / Web Chat identity to your CubePlex account. |
 | `/new` | Start a fresh conversation; your next message begins a new one. |
 | `/reset` | Same as `/new`. |

@@ -1,4 +1,4 @@
-"""Shared ``/stop``, ``/steer``, ``/models``, and ``/model`` command parsing and execution for IM."""
+"""Shared ``/help``, ``/stop``, ``/steer``, ``/models``, and ``/model`` command parsing and execution for IM."""
 
 from __future__ import annotations
 
@@ -42,11 +42,22 @@ from cubeplex.streams.run_events import get_active_run
 if TYPE_CHECKING:
     from cubeplex.streams.run_manager import RunManager
 
+_HELP_RE = _re.compile(r"^\s*/help\s*$", _re.IGNORECASE)
 _STOP_RE = _re.compile(r"^\s*/stop\s*$", _re.IGNORECASE)
 _STEER_RE = _re.compile(r"^\s*/steer(?:$|\s+(?P<body>.*))$", _re.IGNORECASE | _re.DOTALL)
 _MODELS_RE = _re.compile(r"^\s*/models\s*$", _re.IGNORECASE)
 _MODEL_RE = _re.compile(r"^\s*/model(?:$|\s+(?P<body>.*))$", _re.IGNORECASE)
 
+HELP_REPLY = (
+    "📖 可用命令：\n"
+    "• /help — 查看可用命令说明\n"
+    "• /new（或 /reset）— 开始新对话\n"
+    "• /stop — 停止当前正在进行的回复\n"
+    "• /steer <内容> — 向当前正在进行的回复中途补充指令\n"
+    "• /models — 查看可用模型预设列表\n"
+    "• /model [名称] — 查看或切换当前会话使用的模型\n"
+    "• /link <邮箱> — 绑定当前账号到 CubePlex"
+)
 STOP_NO_ACTIVE_REPLY = "ℹ️ 当前没有正在进行的回复。"
 STOP_SUCCESS_REPLY = "⏹️ 已停止当前回复。"
 STEER_USAGE_REPLY = "ℹ️ 用法：/steer <补充内容>"
@@ -59,6 +70,11 @@ STEER_QUEUE_FULL_REPLY = "⚠️ 当前补充消息队列已满，请稍后再�
 STEER_TOO_LARGE_REPLY = "⚠️ 补充内容过长，请精简后再试。"
 STEER_IDLE_FALLBACK_SLASH_REPLY = "ℹ️ 当前没有正在进行的回复，已作为新消息发送。"
 MODELS_EMPTY_REPLY = "⚠️ 当前组织尚未配置可用模型预设。"
+
+
+@dataclass(frozen=True, slots=True)
+class HelpCommand:
+    """Parsed ``/help`` command."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,12 +101,14 @@ class SwitchModelCommand:
     model: str
 
 
-ControlCommand = StopCommand | SteerCommand | ListModelsCommand | SwitchModelCommand
+ControlCommand = HelpCommand | StopCommand | SteerCommand | ListModelsCommand | SwitchModelCommand
 
 
 def parse_control_command(text: str) -> ControlCommand | None:
-    """Parse ``/stop``, ``/steer``, ``/models``, or ``/model`` from IM message text."""
+    """Parse ``/help``, ``/stop``, ``/steer``, ``/models``, or ``/model`` from IM message text."""
     raw = text or ""
+    if _HELP_RE.match(raw):
+        return HelpCommand()
     if _STOP_RE.match(raw):
         return StopCommand()
     if _MODELS_RE.match(raw):
@@ -589,7 +607,7 @@ async def maybe_handle_control_command(
     rejection_notifier: RejectionNotifier | None = None,
     require_linked_member: bool = False,
 ) -> bool:
-    """Intercept ``/stop`` or ``/steer <content>`` before ``ingest_inbound_event``.
+    """Intercept ``/help``, ``/stop``, ``/steer <content>``, ``/models``, or ``/model`` before ``ingest_inbound_event``.
 
     Returns ``True`` if the event was completely handled (including duplicates
     and identity rejections) and should NOT be passed to ``ingest_inbound_event``.
@@ -608,6 +626,18 @@ async def maybe_handle_control_command(
             return True
 
         live_account = await session.get(IMConnectorAccount, account.id) or account
+
+        if isinstance(cmd, HelpCommand):
+            committed = await _commit_terminal_receipt(
+                session,
+                account=live_account,
+                platform_event_id=event.platform_event_id,
+                receipt_status="completed",
+            )
+            if committed:
+                await _safe_reply(reply, HELP_REPLY)
+            return True
+
         effective_user_id: str = live_account.acting_user_id
 
         if identity_resolver is not None and rejection_notifier is not None:

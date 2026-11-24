@@ -131,6 +131,7 @@ In the Slack app settings open **Slash Commands** and create each command you wa
 
 | Command | Short description (example) | Usage hint |
 |---|---|---|
+| `/help` | Show available IM commands | *(empty)* |
 | `/link` | Link Slack identity to CubePlex | `you@example.com` |
 | `/new` | Start a fresh CubePlex conversation | *(empty)* |
 | `/reset` | Same as `/new` | *(empty)* |
@@ -148,6 +149,7 @@ With **Socket Mode** enabled you do **not** need a working public Request URL â€
 
 | Command | Effect |
 |---|---|
+| `/help` | Show a brief summary of the supported `/` commands. Replies privately for the slash form. |
 | `/link <email>` | Link your Slack identity to your CubePlex account (see [Step 8](#step-8--link-your-identity)). Replies privately (ephemeral). |
 | `/new` | Start a fresh conversation; your next message begins a new one. Replies privately for the slash form. |
 | `/reset` | Same as `/new`. |

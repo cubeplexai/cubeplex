@@ -20,6 +20,7 @@ from sqlalchemy.pool import NullPool
 from cubeplex.credentials.dependencies import build_credential_service
 from cubeplex.im.bot_settings import IMBotSettings, store_bot_settings
 from cubeplex.im.control_commands import (
+    HELP_REPLY,
     STEER_ACTOR_CONFLICT_REPLY,
     STEER_SUCCESS_REPLY,
     STEER_USAGE_REPLY,
@@ -1209,3 +1210,97 @@ async def test_im_models_and_model_switch_persists_and_applies_to_worker(
             )
         ).scalar_one()
         assert adm.resolved_execution["model_key"] == target_preset.key
+
+
+async def test_help_command_e2e_idempotent_and_wecom(
+    _im_env: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount, Any],
+) -> None:
+    from cubeplex.im.wecom.ingress import handle_inbound_callback
+
+    maker, acct, app = _im_env
+    replies: list[str] = []
+
+    async def reply(text: str) -> None:
+        replies.append(text)
+
+    notifier = _FakeRejectionNotifier()
+    help_evt = InboundEvent(
+        platform="feishu",
+        platform_event_id=f"evt-help-1-{acct.id[-6:]}",
+        account_external_id=acct.external_account_id,
+        channel_id="oc_help_e2e",
+        scope_key=make_channel_scope(),
+        scope_kind="channel",
+        sender_ref="ou_unlinked",
+        sender_open_id="ou_unlinked",
+        text="/help",
+        reply_to_id="om_h1",
+        inbound_message_id="om_h1",
+    )
+
+    # 1. Works even for an unlinked sender and creates no conversation/topic.
+    assert (
+        await maybe_handle_control_command(
+            help_evt,
+            account=acct,
+            session_maker=maker,
+            run_manager=app.state.run_manager,
+            reply=reply,
+            identity_resolver=_FakeIdentityResolver({}),
+            rejection_notifier=notifier,
+        )
+        is True
+    )
+    assert replies == [HELP_REPLY]
+    assert notifier.rejections == []
+
+    # 2. Duplicate /help event is idempotent and sends no duplicate reply.
+    assert (
+        await maybe_handle_control_command(
+            help_evt,
+            account=acct,
+            session_maker=maker,
+            run_manager=app.state.run_manager,
+            reply=reply,
+            identity_resolver=_FakeIdentityResolver({}),
+            rejection_notifier=notifier,
+        )
+        is True
+    )
+    assert replies == [HELP_REPLY]
+
+    async with maker() as session:
+        convs = (
+            (await session.execute(select(Conversation).where(Conversation.org_id == acct.org_id)))
+            .scalars()
+            .all()
+        )
+        assert convs == []
+
+    # 3. WeCom ingress handles /help via durable command response delivery.
+    wecom_gw = MagicMock()
+    wecom_gw.send_passive = AsyncMock(return_value={"errcode": 0})
+    wecom_gw.send_proactive = AsyncMock(return_value={"errcode": 0})
+    raw_help = {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": f"req-help-1-{acct.id[-6:]}"},
+        "body": {
+            "msgid": f"msg-help-1-{acct.id[-6:]}",
+            "aibotid": acct.external_account_id,
+            "chatid": "oc_help_e2e",
+            "chattype": "group",
+            "from": {"userid": "ou_unlinked"},
+            "msgtype": "text",
+            "text": {"content": "/help"},
+        },
+    }
+    await handle_inbound_callback(
+        raw_help,
+        account=acct,
+        session_maker=maker,
+        gateway=wecom_gw,
+        run_manager=app.state.run_manager,
+    )
+    wecom_gw.send_passive.assert_awaited_once()
+    sent_payload = wecom_gw.send_passive.call_args.args[1]
+    assert sent_payload["markdown"]["content"] == HELP_REPLY

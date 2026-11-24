@@ -95,6 +95,7 @@ The DingTalk bot recognizes these as text messages (in a group, @ the bot first)
 
 | Command | Aliases | Effect |
 |---|---|---|
+| `/help` | — | Show a brief summary of the supported `/` commands. |
 | `link <email>` | `/link <email>` | Link your DingTalk identity to your CubePlex account (see [Identity linking](./overview.md#identity-linking)). |
 | `/new` | `/reset`, `新对话` | Start a fresh conversation; your next message begins a new one. |
 | `/stop` | — | Stop the currently active reply without clearing queued messages. |
