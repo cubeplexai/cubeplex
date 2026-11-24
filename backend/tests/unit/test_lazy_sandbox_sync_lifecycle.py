@@ -418,3 +418,41 @@ async def test_event_service_swallow_exception() -> None:
     result = await lazy.execute("true")
     # Execute completes successfully even though event write blew up
     assert result.output == ""
+
+
+@pytest.mark.asyncio
+async def test_attachment_hydrator_runs_once_and_rehydrates_on_recreate() -> None:
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[])
+    sandbox = MagicMock()
+    sandbox.id = "sbx-1"
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)
+    sandbox.upload = AsyncMock()
+    sandbox.sync_archive = AsyncMock()
+    sandbox.execute = AsyncMock(
+        side_effect=[
+            MagicMock(output="ok1", exit_code=0),
+            MagicMock(output="ok2", exit_code=0),
+            RuntimeError("sandbox died"),
+            MagicMock(output="ok3", exit_code=0),
+        ]
+    )
+
+    hydrator = AsyncMock()
+    lazy = _make_lazy(catalog, sandbox)
+    lazy.set_attachment_hydrator(hydrator)
+
+    assert lazy.initialized is False
+    hydrator.assert_not_awaited()
+
+    await lazy.execute("first")
+    assert hydrator.await_count == 1
+    assert hydrator.await_args is not None
+    assert hydrator.await_args.args == (sandbox,)
+
+    await lazy.execute("second")
+    assert hydrator.await_count == 1
+
+    # Third execute fails and recreates the sandbox — hydrator should run again.
+    await lazy.execute("third")
+    assert hydrator.await_count == 2

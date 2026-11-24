@@ -35,11 +35,19 @@ class AttachmentHydrator:
         self.sandbox = sandbox
         self.objectstore = objectstore
 
-    async def hydrate(self, *, conversation_id: str, file_ids: list[str]) -> dict[str, str]:
+    async def hydrate(
+        self,
+        *,
+        conversation_id: str,
+        file_ids: list[str],
+        include_images: bool = False,
+    ) -> dict[str, str]:
         """Materialize each file_id into the sandbox if not already present.
 
-        Image attachments are skipped: ``view_images`` reads them from
-        ObjectStore, and staging would cold-start a LazySandbox.
+        Image attachments are skipped by default: ``view_images`` reads them
+        from ObjectStore, and eager staging would cold-start a LazySandbox.
+        Pass ``include_images=True`` when the sandbox is already live or
+        waking on demand.
 
         Returns: mapping {file_id -> sandbox_path} for files actually staged.
         Raises:  AttachmentHydrationError on first failure (run should abort).
@@ -56,7 +64,7 @@ class AttachmentHydrator:
             # Images are read by view_images from ObjectStore. Staging them
             # onto the sandbox FS would cold-start a LazySandbox before the
             # LLM turn starts (and the e2e "reply OK" path does not need it).
-            if row.kind == "image":
+            if row.kind == "image" and not include_images:
                 continue
 
             # shlex.quote prevents shell metacharacters in the user-supplied
