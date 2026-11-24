@@ -111,17 +111,39 @@ def _backend_secret(docs: list[dict[str, Any]]) -> dict[str, Any]:
     return dict(parsed["production"])
 
 
-def test_default_opensandbox_preserves_existing_contract(tmp_path: Path) -> None:
+def test_default_cubepod_minimal_does_not_require_opensandbox_or_api_key(tmp_path: Path) -> None:
     docs = _render_docs(
         tmp_path,
         {
             "backend": {
+                "sandbox": {
+                    "cubepod": {"base_url": "http://cubepod-gateway:8080"},
+                }
+            }
+        },
+    )
+    sandbox_cfg = _backend_config(docs)["sandbox"]
+    assert sandbox_cfg["enabled"] is True
+    assert sandbox_cfg["provider"] == "cubepod"
+    assert sandbox_cfg["cubepod"] == {
+        "base_url": "http://cubepod-gateway:8080",
+        "default_template": "cubeplex-ubuntu24-desktop",
+    }
+    assert "sandbox" not in _backend_secret(docs)
+
+
+def test_opensandbox_preserves_existing_contract(tmp_path: Path) -> None:
+    docs = _render_docs(
+        tmp_path,
+        {
+            "backend": {
+                "sandbox": {"provider": "opensandbox"},
                 "secrets": {
                     "sandbox": {
                         "domain": "opensandbox.example.svc.cluster.local:80",
                         "api_key": "opensandbox-key",
                     }
-                }
+                },
             }
         },
     )
@@ -140,31 +162,15 @@ def test_default_opensandbox_preserves_existing_contract(tmp_path: Path) -> None
 def test_opensandbox_requires_domain_and_api_key(tmp_path: Path) -> None:
     proc = _run_template(
         tmp_path,
-        {"backend": {"secrets": {"sandbox": {"api_key": "opensandbox-key"}}}},
-    )
-    assert proc.returncode != 0
-    assert "backend.secrets.sandbox.domain" in (proc.stderr or proc.stdout)
-
-
-def test_cubepod_minimal_does_not_require_opensandbox_or_api_key(tmp_path: Path) -> None:
-    docs = _render_docs(
-        tmp_path,
         {
             "backend": {
-                "sandbox": {
-                    "provider": "cubepod",
-                    "cubepod": {"base_url": "http://cubepod-gateway:8080"},
-                }
+                "sandbox": {"provider": "opensandbox"},
+                "secrets": {"sandbox": {"api_key": "opensandbox-key"}},
             }
         },
     )
-    sandbox_cfg = _backend_config(docs)["sandbox"]
-    assert sandbox_cfg["provider"] == "cubepod"
-    assert sandbox_cfg["cubepod"] == {
-        "base_url": "http://cubepod-gateway:8080",
-        "default_template": "cubeplex-ubuntu24-desktop",
-    }
-    assert "sandbox" not in _backend_secret(docs)
+    assert proc.returncode != 0
+    assert "backend.secrets.sandbox.domain" in (proc.stderr or proc.stdout)
 
 
 def test_cubepod_full_renders_optional_api_key_warm_pool_and_template(tmp_path: Path) -> None:

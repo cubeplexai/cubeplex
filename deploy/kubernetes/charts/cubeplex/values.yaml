@@ -36,12 +36,12 @@ backend:
     activeDeadlineSeconds: 3600
   service:
     port: 8000
-  # Sandbox execution is required. Defaults to the bundled OpenSandbox
-  # provider; set opensandbox.enabled=false and backend.secrets.sandbox.domain
-  # for an external OpenSandbox endpoint, or set sandbox.provider="cubepod"
-  # (with opensandbox.enabled=false and sandbox.cubepod.base_url) for CubePod.
+  # Sandbox execution is required. Defaults to CubePod (requires
+  # backend.sandbox.cubepod.base_url in values.local.yaml). To use the bundled
+  # OpenSandbox subchart instead, set sandbox.provider="opensandbox",
+  # opensandbox.enabled=true, and backend.secrets.sandbox.{domain,api_key}.
   sandbox:
-    provider: "opensandbox" # "opensandbox" | "cubepod" | "local"
+    provider: "cubepod" # "cubepod" | "opensandbox" | "local"
     use_server_proxy: false
     cubepod:
       base_url: ""
@@ -283,7 +283,7 @@ egress:
 # fast-sandbox stay off: CubePlex panels do not use the OpenSandbox gateway,
 # and the egress webhook matches batchsandbox pods only.
 opensandbox:
-  enabled: true
+  enabled: false
   base:
     fastSandbox:
       namespaces:

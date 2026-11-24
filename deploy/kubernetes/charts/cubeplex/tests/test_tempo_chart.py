@@ -18,6 +18,9 @@ pytestmark = pytest.mark.skipif(shutil.which("helm") is None, reason="helm not o
 _STUB_VALUES: dict[str, Any] = {
     "opensandbox": {"enabled": False},
     "backend": {
+        "sandbox": {
+            "cubepod": {"base_url": "http://cubepod-gateway:8080"},
+        },
         "secrets": {
             "auth": {
                 "jwt_secret": "a" * 64,

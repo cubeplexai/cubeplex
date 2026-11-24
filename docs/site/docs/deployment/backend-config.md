@@ -214,7 +214,7 @@ sandbox:
   enabled: true
   provider: "opensandbox" # "opensandbox" | "cubepod" | "local"
   domain: "…"             # OpenSandbox API host:port (no scheme)
-  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.9.5"
+  image: "ghcr.io/cubeplexai/cubeplex-sandbox:v0.10.0"
   api_key: "…"
   command_default_timeout_seconds: 3600 # default for the new managed-task reservation layer
   use_server_proxy: false # true when the backend can't reach sandbox pods/ports directly

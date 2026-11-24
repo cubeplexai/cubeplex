@@ -188,8 +188,8 @@ Set `image` only to override:
 ```yaml
 image:
   # Pin a different image version than the chart's appVersion:
-  backend:  { tag: "v0.9.5" }
-  frontend: { tag: "v0.9.5" }
+  backend:  { tag: "v0.10.0" }
+  frontend: { tag: "v0.10.0" }
 ```
 
 For a self-built / private-registry image, also set the location:
@@ -284,11 +284,27 @@ that's rejected, and rejected loudly: it fails the pod at startup
 visible immediately in `kubectl get pods` instead of surfacing later as a
 `no_default_preset` 500 on the first chat message.
 
-### 4.5 Required OpenSandbox provider
+### 4.5 Sandbox provider (CubePod default / OpenSandbox)
 
-OpenSandbox is the container runtime where agent tools (bash, read, …)
-execute. The backend requires it at startup and rejects incomplete
-configuration.
+The Helm chart defaults `backend.sandbox.provider` to `"cubepod"` (with
+`opensandbox.enabled: false`), which connects to a CubePod gateway:
+
+```yaml
+backend:
+  sandbox:
+    provider: "cubepod"
+    cubepod:
+      base_url: "http://cubepod-gateway:8080"
+      # default_template: "cubeplex-ubuntu24-desktop"
+      # warm_pool: ""
+  secrets:
+    sandbox:
+      cubepod:
+        api_key: "..."                  # optional Bearer token
+```
+
+To use OpenSandbox instead (bundled subchart or external), set
+`backend.sandbox.provider: "opensandbox"` and configure `backend.secrets.sandbox`:
 
 ```yaml
 backend:
@@ -298,10 +314,11 @@ backend:
       # image defaults to cubeplex-sandbox:v<chart version>; set only to override
       api_key: "..."
   sandbox:
+    provider: "opensandbox"
     use_server_proxy: false             # true when the cluster can't reach sandbox pods directly
 ```
 
-Two supported layouts:
+Two supported OpenSandbox layouts:
 
 | Layout | `values.local.yaml` |
 |---|---|
@@ -528,7 +545,7 @@ egress:
   sandboxNamespace: "opensandbox"
   webhook:
     image:
-      tag: "v0.9.5"             # same release version as backend/frontend
+      tag: "v0.10.0"             # same release version as backend/frontend
     # MUST exactly match opensandbox-server's configured egress.image.
     # Chart default. Docker Hub override: docker.io/opensandbox/egress:release-1.1.1
     egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:release-1.1.1"
@@ -709,7 +726,7 @@ needed, just your `values.local.yaml`:
 
 ```bash
 helm upgrade --install cubeplex oci://ghcr.io/cubeplexai/charts/cubeplex \
-  --version 0.9.5 \
+  --version 0.10.0 \
   --namespace cubeplex --create-namespace \
   --values values.local.yaml \
   --wait --timeout 10m
@@ -933,15 +950,16 @@ image:
   registry: "ghcr.io"
   repository: "cubeplexai"
   pullPolicy: "IfNotPresent"
-  backend:  { name: "cubeplex-backend",  tag: "" }     # tag required (e.g. v0.9.5)
-  frontend: { name: "cubeplex-frontend", tag: "" }     # tag required (e.g. v0.9.5)
+  backend:  { name: "cubeplex-backend",  tag: "" }     # tag required (e.g. v0.10.0)
+  frontend: { name: "cubeplex-frontend", tag: "" }     # tag required (e.g. v0.10.0)
 
 backend:
   replicaCount: 1
   service: { port: 8000 }
   sandbox:                          # see §4.5
-    enabled: <follows opensandbox.enabled>
+    provider: "cubepod"             # "cubepod" | "opensandbox" | "local"
     use_server_proxy: false
+    cubepod: { base_url, default_template, warm_pool }
   resources: { requests, limits }
   env: { ENV_FOR_DYNACONF: production }
   configOverrides:                  # ConfigMap, non-secret
@@ -1015,7 +1033,7 @@ tempo:                              # default on, see §4.12
   resources: { ... }
 
 opensandbox:
-  enabled: true
+  enabled: false
   base:
     fastSandbox:
       namespaces: { createSystem: false, create: false }
@@ -1030,10 +1048,13 @@ opensandbox:
 
 ```yaml
 image:
-  backend:  { tag: "v0.9.5" }
-  frontend: { tag: "v0.9.5" }
+  backend:  { tag: "v0.10.0" }
+  frontend: { tag: "v0.10.0" }
 
 backend:
+  sandbox:
+    cubepod:
+      base_url: "http://cubepod-gateway:8080"
   configOverrides:
     api:
       public_url: "http://cubeplex.local"
@@ -1062,16 +1083,10 @@ backend:
           models:
             - { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", input: ["text", "image"],
                 context_window: 128000, max_tokens: 16384 }
-    sandbox:
-      domain: "opensandbox-server.opensandbox-system.svc.cluster.local:80"
-      api_key: "<same value as the bundled OpenSandbox server API key>"
 
 postgres: { auth: { password: "<openssl rand -hex 16>" } }
 redis:    { auth: { password: "<openssl rand -hex 16>" } }
 rustfs:   { auth: { secretKey: "<openssl rand -hex 16>" } }
-
-opensandbox:
-  enabled: true
 ```
 
 A fuller annotated template lives at
