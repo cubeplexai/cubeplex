@@ -180,6 +180,7 @@ The bot understands these in any chat it's in:
 
 | Command | Aliases | Effect |
 |---|---|---|
+| `/help` | — | Show a brief summary of the supported `/` commands. |
 | `/link <email>` | `绑定 <email>` | Link your Feishu identity to your CubePlex account. |
 | `/new` | `/reset`, `新对话` | Start a fresh conversation; your next message begins a new one. |
 | `/stop` | — | Stop the currently active reply without clearing queued messages. |

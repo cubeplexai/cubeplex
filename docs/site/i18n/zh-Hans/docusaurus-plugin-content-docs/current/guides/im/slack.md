@@ -131,6 +131,7 @@ CubePlex 把 `/link`、`/new`、`/reset` 当作 **Slack 原生斜杠命令**处�
 
 | 命令 | 简短描述（示例） | Usage hint |
 |---|---|---|
+| `/help` | 查看可用 IM 命令说明 | （可空） |
 | `/link` | 将 Slack 身份关联到 CubePlex | `you@example.com` |
 | `/new` | 开始全新 CubePlex 对话 | （可空） |
 | `/reset` | 与 `/new` 相同 | （可空） |
@@ -148,6 +149,7 @@ CubePlex 把 `/link`、`/new`、`/reset` 当作 **Slack 原生斜杠命令**处�
 
 | 命令 | 效果 |
 |---|---|
+| `/help` | 查看支持的 `/` 命令简要说明。斜杠形式为私下回复。 |
 | `/link <email>` | 将 Slack 身份关联到 CubePlex 账户（参阅[步骤 8](#step-8--link-your-identity)）。仅你可见的私下回复。 |
 | `/new` | 开始全新对话；下一条消息会开始新对话。斜杠形式为私下回复。 |
 | `/reset` | 与 `/new` 相同。 |

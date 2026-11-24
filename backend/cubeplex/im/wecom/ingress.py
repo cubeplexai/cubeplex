@@ -182,6 +182,8 @@ async def handle_inbound_callback(
         return
 
     from cubeplex.im.control_commands import (
+        HELP_REPLY,
+        HelpCommand,
         ListModelsCommand,
         SteerCommand,
         StopCommand,
@@ -196,6 +198,30 @@ async def handle_inbound_callback(
     from cubeplex.im.identity import resolve_current_linked_member
 
     control_cmd = parse_control_command(event.text)
+    if isinstance(control_cmd, HelpCommand):
+
+        async def build_help_response(
+            _session: AsyncSession,
+            _user_id: str | None,
+        ) -> dict[str, Any]:
+            return {"kind": "text", "text": HELP_REPLY}
+
+        result = await ingest_command_response(
+            event,
+            account=account,
+            session_maker=session_maker,
+            build_response=build_help_response,
+        )
+        if result.receipt_id is not None and event.reply_to_id is not None:
+            await _deliver_command_response(
+                receipt_id=result.receipt_id,
+                req_id=event.reply_to_id,
+                chat_id=event.channel_id,
+                session_maker=session_maker,
+                gateway=gateway,
+            )
+        return
+
     if isinstance(control_cmd, StopCommand):
         stopped_target: tuple[str, str, str] | None = None
 

@@ -1,5 +1,5 @@
 # backend/cubeplex/im/discord/commands.py
-"""Discord slash commands: /new, /reset, /link, /stop, /steer, /models, and /model."""
+"""Discord slash commands: /help, /new, /reset, /link, /stop, /steer, /models, and /model."""
 
 from __future__ import annotations
 
@@ -9,7 +9,13 @@ from loguru import logger
 
 
 async def register_commands(bot: commands.Bot) -> None:
-    """Register /new, /reset, /link, /stop, /steer, /models, and /model slash commands."""
+    """Register /help, /new, /reset, /link, /stop, /steer, /models, and /model slash commands."""
+
+    @bot.tree.command(name="help", description="Show available commands")
+    async def cmd_help(interaction: discord.Interaction) -> None:
+        await _handle_control_slash(
+            interaction, bot, text="/help", failure_reply="获取命令帮助失败。"
+        )
 
     @bot.tree.command(name="new", description="Start a new conversation")
     async def cmd_new(interaction: discord.Interaction) -> None:
