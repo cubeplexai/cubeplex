@@ -797,6 +797,51 @@ async def _hydrate_attachments_into_sandbox(
         logger.warning("Failed to hydrate attachments into sandbox: {}", exc)
 
 
+async def _stage_run_attachments(
+    *,
+    org_id: str,
+    workspace_id: str,
+    conversation_id: str,
+    attachment_ids: list[str],
+    sandbox: Any,
+) -> None:
+    """Stage run attachments into the sandbox, deferring images on cold LazySandbox."""
+    if not attachment_ids or sandbox is None:
+        return
+
+    from cubeplex.sandbox.lazy import LazySandbox as _LazySandbox
+
+    if isinstance(sandbox, _LazySandbox) and not sandbox.initialized:
+
+        async def _lazy_hydrate_images(raw_sandbox: Any) -> None:
+            await _hydrate_attachments_into_sandbox(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+                attachment_ids=attachment_ids,
+                sandbox=raw_sandbox,
+                include_images=True,
+            )
+
+        sandbox.set_attachment_hydrator(_lazy_hydrate_images)
+        await _hydrate_attachments_into_sandbox(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+            attachment_ids=attachment_ids,
+            sandbox=sandbox,
+        )
+    else:
+        await _hydrate_attachments_into_sandbox(
+            org_id=org_id,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+            attachment_ids=attachment_ids,
+            sandbox=sandbox,
+            include_images=True,
+        )
+
+
 async def _build_attachment_content_blocks(
     *,
     org_id: str,
@@ -3419,37 +3464,13 @@ class RunManager:
             # Build attachment metadata blocks and inject into user message so
             # AttachmentHintMiddleware can render the [Attachments] hint.
             if attachments:
-                from cubeplex.sandbox.lazy import LazySandbox as _LazySandbox
-
-                if isinstance(sandbox, _LazySandbox) and not sandbox.initialized:
-
-                    async def _lazy_hydrate_images(raw_sandbox: Any) -> None:
-                        await _hydrate_attachments_into_sandbox(
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                            conversation_id=conversation_id,
-                            attachment_ids=attachments,
-                            sandbox=raw_sandbox,
-                            include_images=True,
-                        )
-
-                    sandbox.set_attachment_hydrator(_lazy_hydrate_images)
-                    await _hydrate_attachments_into_sandbox(
-                        org_id=ctx.org_id,
-                        workspace_id=ctx.workspace_id,
-                        conversation_id=conversation_id,
-                        attachment_ids=attachments,
-                        sandbox=sandbox,
-                    )
-                else:
-                    await _hydrate_attachments_into_sandbox(
-                        org_id=ctx.org_id,
-                        workspace_id=ctx.workspace_id,
-                        conversation_id=conversation_id,
-                        attachment_ids=attachments,
-                        sandbox=sandbox,
-                        include_images=True,
-                    )
+                await _stage_run_attachments(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    conversation_id=conversation_id,
+                    attachment_ids=attachments,
+                    sandbox=sandbox,
+                )
 
                 try:
                     _att_blocks = await _build_attachment_content_blocks(

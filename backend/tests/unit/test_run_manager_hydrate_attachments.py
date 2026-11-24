@@ -17,6 +17,7 @@ import pytest
 from cubeplex.streams.run_manager import (
     _build_attachment_content_blocks,
     _hydrate_attachments_into_sandbox,
+    _stage_run_attachments,
 )
 
 
@@ -211,3 +212,111 @@ async def test_swallows_hydrate_failure() -> None:
             p.stop()
 
     hydrate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_calls_hydrator_with_include_images_true() -> None:
+    hydrate = AsyncMock()
+    instance = MagicMock()
+    instance.hydrate = hydrate
+    hydrator_cls = MagicMock(return_value=instance)
+    patches = _patches(hydrator_cls)
+    for p in patches:
+        p.start()
+    try:
+        await _hydrate_attachments_into_sandbox(
+            org_id="o1",
+            workspace_id="w1",
+            conversation_id="c1",
+            attachment_ids=["img1"],
+            sandbox=MagicMock(),
+            include_images=True,
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+    hydrate.assert_awaited_once_with(
+        conversation_id="c1",
+        file_ids=["img1"],
+        include_images=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stage_run_attachments_registers_lazy_callback_for_cold_sandbox() -> None:
+    from cubeplex.sandbox.lazy import LazySandbox
+
+    lazy = MagicMock(spec=LazySandbox)
+    lazy.initialized = False
+    registered: list[Any] = []
+    lazy.set_attachment_hydrator = MagicMock(side_effect=registered.append)
+
+    hydrate = AsyncMock()
+    instance = MagicMock()
+    instance.hydrate = hydrate
+    hydrator_cls = MagicMock(return_value=instance)
+    patches = _patches(hydrator_cls)
+    for p in patches:
+        p.start()
+    try:
+        await _stage_run_attachments(
+            org_id="o1",
+            workspace_id="w1",
+            conversation_id="c1",
+            attachment_ids=["img1"],
+            sandbox=lazy,
+        )
+        # Eager pass skips images so cold LazySandbox doesn't wake up.
+        hydrate.assert_awaited_once_with(conversation_id="c1", file_ids=["img1"])
+        assert len(registered) == 1
+
+        # When the lazy sandbox wakes and invokes the callback, images are included.
+        raw_sandbox = MagicMock()
+        await registered[0](raw_sandbox)
+        assert hydrate.await_count == 2
+        hydrate.assert_awaited_with(
+            conversation_id="c1",
+            file_ids=["img1"],
+            include_images=True,
+        )
+    finally:
+        for p in patches:
+            p.stop()
+
+
+@pytest.mark.asyncio
+async def test_stage_run_attachments_includes_images_when_sandbox_live() -> None:
+    hydrate = AsyncMock()
+    instance = MagicMock()
+    instance.hydrate = hydrate
+    hydrator_cls = MagicMock(return_value=instance)
+    patches = _patches(hydrator_cls)
+    for p in patches:
+        p.start()
+    try:
+        await _stage_run_attachments(
+            org_id="o1",
+            workspace_id="w1",
+            conversation_id="c1",
+            attachment_ids=["img1"],
+            sandbox=MagicMock(),
+        )
+        hydrate.assert_awaited_once_with(
+            conversation_id="c1",
+            file_ids=["img1"],
+            include_images=True,
+        )
+
+        # None sandbox is a no-op.
+        await _stage_run_attachments(
+            org_id="o1",
+            workspace_id="w1",
+            conversation_id="c1",
+            attachment_ids=["img1"],
+            sandbox=None,
+        )
+        assert hydrate.await_count == 1
+    finally:
+        for p in patches:
+            p.stop()
