@@ -12,6 +12,7 @@ from cubeplex.services.artifact_bridge.registry import (
     register_function,
 )
 from cubeplex.services.artifact_bridge.types import (
+    ArtifactBridgeDisabled,
     ArtifactCallContext,
     ArtifactCallError,
     ArtifactCallFailed,
@@ -22,6 +23,7 @@ from cubeplex.services.artifact_bridge.types import (
 )
 
 __all__ = [
+    "ArtifactBridgeDisabled",
     "ArtifactCallContext",
     "ArtifactCallError",
     "ArtifactCallFailed",

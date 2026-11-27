@@ -18,6 +18,7 @@ from cubeplex.cache import RedisHandle
 from cubeplex.config import config
 from cubeplex.services.artifact_bridge.registry import get_function
 from cubeplex.services.artifact_bridge.types import (
+    ArtifactBridgeDisabled,
     ArtifactCallContext,
     ArtifactCallError,
     ArtifactCallFailed,
@@ -40,11 +41,10 @@ async def _enforce_rate_limit(
     """Per-user, per-artifact, per-function fixed-window counter."""
     bucket = int(time.time() // 60)
     key = f"{redis.key_prefix}:artbridge:{ctx.user_id}:{ctx.artifact.id}:{function.name}:{bucket}"
+    # SET NX seeds the TTL before INCR counts: a crash between the two leaves an
+    # expiring zero counter instead of a permanent key.
+    await redis.client.set(key, 0, ex=120, nx=True)
     count = await redis.client.incr(key)
-    if count == 1:
-        # Two windows' worth so the counter survives the boundary without a
-        # second round trip; the bucket suffix already rotates the key.
-        await redis.client.expire(key, 120)
     if count > limit:
         raise ArtifactCallRateLimited(function.name)
 
@@ -61,10 +61,14 @@ async def _invoke(
     except ValidationError as exc:
         raise ArtifactCallInvalidInput(str(exc)) from exc
 
-    limit = function.rate_limit_per_minute or int(_limit("rate_limit_per_minute", 20))
+    limit = function.rate_limit_per_minute
+    if limit is None:
+        limit = int(_limit("rate_limit_per_minute", 20))
     await _enforce_rate_limit(redis, ctx, function, limit)
 
-    timeout = function.timeout_seconds or _limit("timeout_seconds", 60)
+    timeout = function.timeout_seconds
+    if timeout is None:
+        timeout = _limit("timeout_seconds", 60)
     started = time.monotonic()
     try:
         async with asyncio.timeout(timeout):
@@ -97,5 +101,5 @@ async def dispatch(
 ) -> dict[str, Any]:
     """Invoke the named function on behalf of artifact HTML."""
     if not config.get("artifact_bridge.enabled", True):
-        raise ArtifactCallFailed("artifact bridge disabled")
+        raise ArtifactBridgeDisabled()
     return await _invoke(ctx, get_function(name), raw_args, redis=redis)

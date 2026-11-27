@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from cubeloop.providers.base import AssistantMessage, StreamEvent, TextContent
+from cubeloop.providers.base import AssistantMessage, TextContent
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -132,24 +132,6 @@ class _FakeSpec:
         self.max_tokens = 4096
 
 
-class _FakeProvider:
-    def __init__(self, bound: _FakeBoundModel) -> None:
-        self._bound = bound
-        self.last_kwargs: dict[str, Any] = {}
-
-    async def stream(self, **kwargs: Any) -> Any:
-        self.last_kwargs = kwargs
-
-        async def _generate() -> Any:
-            if self._bound.error is not None:
-                yield StreamEvent(type="error", error_message=self._bound.error)
-                return
-            yield StreamEvent(type="text_delta", delta=self._bound.reply)
-            yield StreamEvent(type="done")
-
-        return _generate()
-
-
 class _FakeBoundModel:
     """Stands in for a cubeloop BoundModel at the provider boundary."""
 
@@ -159,11 +141,12 @@ class _FakeBoundModel:
         self.error = error
         self.system_prompt: str | None = None
         self.max_output_tokens: int | None = None
-        self.provider = _FakeProvider(self)
+        self.options: Any | None = None
 
     async def generate(self, **kwargs: Any) -> AssistantMessage:
         self.system_prompt = kwargs["system_prompt"]
         self.max_output_tokens = kwargs["max_output_tokens"]
+        self.options = kwargs.get("options")
         content = [] if self.error is not None else [TextContent(text=self.reply)]
         return AssistantMessage(content=content, error_message=self.error)
 
@@ -242,10 +225,6 @@ def test_stranger_conversation_is_404(seed: _Seed, client: TestClient) -> None:
     assert res.status_code == 404
 
 
-def _system_prompt_seen(bound: _FakeBoundModel) -> str | None:
-    return bound.system_prompt or bound.provider.last_kwargs.get("system_prompt")
-
-
 def test_chat_returns_model_text(seed: _Seed, client: TestClient, fake_model: Any) -> None:
     bound = fake_model(reply="Revenue rose 12% in Q3.")
     res = client.post(
@@ -255,10 +234,9 @@ def test_chat_returns_model_text(seed: _Seed, client: TestClient, fake_model: An
     assert res.status_code == 200, res.text
     assert res.json()["result"] == {"text": "Revenue rose 12% in Q3."}
     # The artifact identity reaches the model, and output stays under the cap.
-    system = _system_prompt_seen(bound)
-    assert system is not None
-    assert "Quarterly chart" in system
-    assert bound.spec.max_tokens == min(
+    assert bound.system_prompt is not None
+    assert "Quarterly chart" in bound.system_prompt
+    assert bound.max_output_tokens == min(
         int(config.get("artifact_bridge.max_output_tokens", 1024)), 4096
     )
 
@@ -285,7 +263,9 @@ def test_chat_traced_path_returns_text(
     assert res.status_code == 200, res.text
     assert res.json()["result"] == {"text": "traced answer"}
     assert bound.system_prompt is not None and "Quarterly chart" in bound.system_prompt
-    assert bound.max_output_tokens == bound.spec.max_tokens
+    assert bound.max_output_tokens == min(
+        int(config.get("artifact_bridge.max_output_tokens", 1024)), 4096
+    )
 
 
 def test_chat_traced_path_error_is_502(
@@ -301,10 +281,10 @@ def test_chat_traced_path_error_is_502(
     assert "upstream 529 overloaded" not in res.json()["detail"]
 
 
-def test_chat_without_tracer_uses_provider_stream(
+def test_chat_without_tracer_still_answers(
     seed: _Seed, client: TestClient, fake_model: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_model(reply="streamed answer")
+    bound = fake_model(reply="streamed answer")
     monkeypatch.setattr(client.app.state, "tracer", None)
     res = client.post(
         f"{_base(seed.my_conv, seed.my_art)}/call/chat",
@@ -312,6 +292,26 @@ def test_chat_without_tracer_uses_provider_stream(
     )
     assert res.status_code == 200, res.text
     assert res.json()["result"] == {"text": "streamed answer"}
+    # Untraced calls must pass a cancellation signal so a dispatch timeout tears
+    # the provider producer down instead of leaking the upstream request.
+    assert bound.options is not None and bound.options.signal is not None
+
+
+def test_prompt_over_cap_is_400(seed: _Seed, client: TestClient) -> None:
+    over = int(config.get("artifact_bridge.max_prompt_chars", 8000)) + 1
+    res = client.post(
+        f"{_base(seed.my_conv, seed.my_art)}/call/chat",
+        json={"args": {"prompt": "x" * over}},
+    )
+    assert res.status_code == 400
+
+
+def test_blank_prompt_is_400(seed: _Seed, client: TestClient) -> None:
+    res = client.post(
+        f"{_base(seed.my_conv, seed.my_art)}/call/chat",
+        json={"args": {"prompt": "   "}},
+    )
+    assert res.status_code == 400
 
 
 def test_call_is_exempt_from_csrf(seed: _Seed, client: TestClient, fake_model: Any) -> None:

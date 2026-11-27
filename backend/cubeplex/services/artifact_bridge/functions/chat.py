@@ -3,14 +3,19 @@
 Same shape as ``services/conversation_title.py``: a single provider request, no
 agent loop, no persistence. Cache policy stays unset because a one-shot call has
 no prior context to mark (see backend/docs/prompt-cache-discipline.md).
+
+``max_prompt_chars`` / ``max_output_tokens`` are read once at import, so they
+also appear in the discovery schema; changing them needs a restart. The other
+limits (rate, timeout) are read per call in ``dispatch``.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, cast
 
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from cubeplex.config import config
 from cubeplex.llm.builder import build_chain_model
@@ -39,8 +44,16 @@ class ChatInput(BaseModel):
 
     prompt: str = Field(min_length=1, max_length=MAX_PROMPT_CHARS)
 
+    @field_validator("prompt")
+    @classmethod
+    def _reject_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("prompt must not be blank")
+        return value
+
 
 def _output_limit(bound: Any) -> int:
+    """Lowest per-leg ceiling, so a shorter-output fallback leg is not exceeded."""
     members = getattr(bound, "chain", None) or (bound,)
     return int(min(MAX_OUTPUT_TOKENS, *(member.spec.max_tokens for member in members)))
 
@@ -63,7 +76,6 @@ async def _chat(ctx: ArtifactCallContext, args: ChatInput) -> dict[str, Any]:
     preset = resolve_model_preset(snap, None)
     bound = build_chain_model(snap, preset)
     limit = _output_limit(bound)
-    bound.spec.max_tokens = limit
 
     system = _system_prompt(ctx)
     messages = [UserMessage(content=[TextContent(text=args.prompt)])]
@@ -86,23 +98,26 @@ async def _chat(ctx: ArtifactCallContext, args: ChatInput) -> dict[str, Any]:
             )
         return {"text": raw_text}
 
-    stream = await bound.provider.stream(
-        model=bound.spec,
-        messages=messages,
-        system_prompt=system,
-        options=StreamOptions(),
-    )
-    parts: list[str] = []
-    async for event in stream:
-        if event.type == "text_delta":
-            if event.delta:
-                parts.append(event.delta)
-        elif event.type == "error":
-            logger.warning("artifact chat provider error: {}", event.error_message)
-            raise ArtifactCallFailed("model call failed")
-        elif event.type == "done":
-            break
-    return {"text": "".join(parts)}
+    # ``bound.generate`` (not ``bound.provider.stream``) so a multi-model preset
+    # keeps its failover legs. The abort signal tears the producer down when the
+    # dispatch timeout cancels us — without it the upstream request keeps
+    # streaming after the caller has given up.
+    abort = asyncio.Event()
+    try:
+        response = await bound.generate(
+            messages=messages,
+            system_prompt=system,
+            options=StreamOptions(signal=abort),
+            max_output_tokens=limit,
+        )
+    except BaseException:
+        abort.set()
+        raise
+    if response.error_message is not None:
+        logger.warning("artifact chat provider error: {}", response.error_message)
+        raise ArtifactCallFailed("model call failed")
+    text = "".join(block.text for block in response.content if isinstance(block, TextContent))
+    return {"text": text}
 
 
 register_function(

@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from cubeplex.services.artifact_bridge import catalogue, get_function, register_function
+from cubeplex.services.artifact_bridge import registry as registry_module
 from cubeplex.services.artifact_bridge.types import (
     ArtifactFunction,
     ArtifactFunctionNotFound,
@@ -48,5 +49,8 @@ def test_duplicate_registration_is_rejected() -> None:
         handler=_noop,
     )
     register_function(function)
-    with pytest.raises(ValueError, match="already registered"):
-        register_function(function)
+    try:
+        with pytest.raises(ValueError, match="already registered"):
+            register_function(function)
+    finally:
+        registry_module._FUNCTIONS.pop(function.name, None)

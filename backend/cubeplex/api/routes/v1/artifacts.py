@@ -562,6 +562,7 @@ async def call_artifact_function(
     cookie name, and there is no state change for double-submit to protect.
     """
     from cubeplex.services.artifact_bridge import (
+        ArtifactBridgeDisabled,
         ArtifactCallContext,
         ArtifactCallFailed,
         ArtifactCallInvalidInput,
@@ -571,11 +572,6 @@ async def call_artifact_function(
     )
 
     artifact = await _require_artifact(session, ctx, conversation_id, artifact_id)
-    if not config.get("artifact_bridge.enabled", True):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Artifact bridge is disabled",
-        )
 
     call_ctx = ArtifactCallContext(
         org_id=ctx.org_id,
@@ -602,6 +598,11 @@ async def call_artifact_function(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many artifact calls; try again in a minute",
             headers={"Retry-After": "60"},
+        ) from None
+    except ArtifactBridgeDisabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Artifact bridge is disabled",
         ) from None
     except ArtifactCallFailed as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None

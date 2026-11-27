@@ -38,7 +38,11 @@ class ArtifactCallRateLimited(ArtifactCallError):
 
 
 class ArtifactCallFailed(ArtifactCallError):
-    """The function ran but produced no result (provider error, timeout, disabled)."""
+    """The function ran but produced no result (provider error, timeout)."""
+
+
+class ArtifactBridgeDisabled(ArtifactCallFailed):
+    """The bridge is switched off in configuration."""
 
 
 @dataclass(frozen=True)
@@ -71,3 +75,4 @@ class ArtifactFunction:
     handler: Callable[[ArtifactCallContext, Any], Awaitable[dict[str, Any]]]
     rate_limit_per_minute: int | None = None
     timeout_seconds: float | None = None
+    # None on either field means "use the artifact_bridge config default".

@@ -136,8 +136,9 @@ async def dispatch(ctx: ArtifactCallContext, name: str, raw_args: Mapping[str, A
   JSON-serialisable and marks required fields.
 - `backend/tests/unit/test_artifact_bridge_dispatch.py`: invalid args →
   `ArtifactCallInvalidInput`; handler exception → `ArtifactCallFailed`; timeout path
-  raises `ArtifactCallFailed`; rate-limit counter denies the N+1th call inside a
-  minute and allows it again in the next minute (fake Redis handle).
+  raises `ArtifactCallFailed`; rate limiting denies the N+1th call inside a minute,
+  allows it again in the next minute bucket (frozen clock), and keeps per-user /
+  per-artifact budgets separate (fake Redis handle).
 
 ---
 
@@ -158,11 +159,20 @@ ARTIFACT_CHAT_SYSTEM: str  # short, artifact-name-scoped system prompt
 ### Core logic
 - Mirror `services/conversation_title.py`: `load_llm_snapshot(session, org_id,
   encryption_backend)` → `resolve_model_preset(snap, None)` →
-  `build_chain_model(snap, preset)`, clamp `bound.spec.max_tokens` to the configured
-  ceiling, then either `tracer.oneshot(model=..., operation="artifact_chat",
-  metadata={"artifact_id", "conversation_id", "org_id"}).generate(...)` when a tracer
-  is present or `bound.provider.stream(...)` directly when it is not. Collect
-  `text_delta` events; raise `ArtifactCallFailed` on `error` events.
+  `build_chain_model(snap, preset)`, then either `tracer.oneshot(model=...,
+  operation="artifact_chat", metadata={"artifact_id", "conversation_id", "org_id"}).generate(...)`
+  when a tracer is present, or `bound.generate(...)` directly when it is not.
+- Both paths call through the polymorphic bound-model API with an explicit
+  `max_output_tokens` ceiling (the lowest per-leg ceiling, so a shorter-output
+  fallback leg is not exceeded) rather than mutating `bound.spec.max_tokens` —
+  mutating the spec only reaches `chain[0]` on a multi-model preset and leaves the
+  fallback legs uncapped. Going through `bound.generate` (not
+  `bound.provider.stream`) keeps failover legs working.
+- The untraced path passes `StreamOptions(signal=asyncio.Event())` and sets that
+  event on any exception, so the dispatch timeout tears the provider producer down
+  instead of leaving the upstream request streaming after the caller gave up.
+- Provider failures surface as `ArtifactCallFailed("model call failed")`; the raw
+  provider message is logged, never returned.
 - `cache_policy_factory=None` semantics as in title-gen: a one-shot call has no prior
   context, so no cache breakpoints are inserted (see
   `backend/docs/prompt-cache-discipline.md`).
@@ -206,14 +216,16 @@ async def call_artifact_function(
   `request.app.state.encryption_backend` + `request.app.state.tracer` and delegates to
   `dispatch()`. Error mapping: `ArtifactFunctionNotFound` → 404,
   `ArtifactCallInvalidInput` → 400 with the validation message, `ArtifactCallRateLimited`
-  → 429 + `Retry-After`, `ArtifactCallFailed` → 502.
+  → 429 + `Retry-After`, `ArtifactBridgeDisabled` → 503, `ArtifactCallFailed` → 502.
+  The enabled check lives in `dispatch()` only, so one code path owns the 503.
 - Body model is `{"args": {}}` (defaults to `{}`) so the function schema owns its own
   fields; unknown top-level keys are ignored by the route.
 
 ### Tests
 - `backend/tests/e2e/test_artifact_bridge_routes.py`: 404 for an artifact belonging to
-  another conversation; 404 for an unknown function name; 400 for a bad `args` payload;
-  `GET .../functions` lists `chat` with a schema; a stranger's workspace is 404.
+  another conversation; 404 for an unknown function name; 400 for a bad `args` payload,
+  for a blank prompt, and for a prompt over `max_prompt_chars`; `GET .../functions`
+  lists `chat` with a schema; a stranger's workspace is 404.
 - `backend/tests/e2e/test_artifact_bridge_chat.py` covers the happy path end to end.
 
 ---

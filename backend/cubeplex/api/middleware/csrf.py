@@ -8,7 +8,10 @@ unauthenticated routes still work).
 
 One exception: the artifact bridge call endpoint (``POST
 .../artifacts/{id}/call/{fn}``) is exempt. It is read-only, and the caller is
-agent-authored HTML that cannot know the configurable CSRF cookie name.
+agent-authored HTML that cannot know the configurable CSRF cookie name. The
+exemption is sound only while the session cookie stays ``SameSite=Lax`` (or
+``Strict``): under ``auth.cookie_samesite: none`` a third-party page could POST
+to the exempt path and spend model budget blind. Revisit if that ever changes.
 """
 
 import json
@@ -27,7 +30,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 # Full-match only: a future mutating POST under a neighbouring path stays
 # protected.
 _READ_ONLY_CALL_PATH = re.compile(
-    r"/api/v1/ws/[^/]+/conversations/[^/]+/artifacts/[^/]+/call/[^/]+"
+    r"/api/v1/ws/[^/]+/conversations/[^/]+/artifacts/[^/]+/call/[^/]+/?"
 )
 
 
