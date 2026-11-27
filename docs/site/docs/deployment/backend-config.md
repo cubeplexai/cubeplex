@@ -89,12 +89,12 @@ an auth signing secret is a known placeholder or has fewer than 32 characters:
 `sandbox.enabled` must be `true` (agent tool execution), and additional sandbox
 settings are required based on `sandbox.provider`:
 
-- **`opensandbox` (default):** `sandbox.domain`, `sandbox.image`, and
-  `sandbox.api_key` are required (placeholder values are rejected).
-- **`cubepod`:** `sandbox.cubepod.base_url` and
+- **`cubepod` (deployment default):** `sandbox.cubepod.base_url` and
   `sandbox.cubepod.default_template` (defaults to `cubeplex-ubuntu24-desktop`)
   are required. `sandbox.cubepod.api_key` is optional (placeholder values are
   rejected if set).
+- **`opensandbox`:** `sandbox.domain`, `sandbox.image`, and
+  `sandbox.api_key` are required (placeholder values are rejected).
 - **`local`:** intended for local development and testing only (runs commands
   in a local directory on the backend process without container isolation); no
   external endpoint or API key is required.
@@ -250,7 +250,7 @@ sandbox:
 | Key | Default | Notes |
 |---|---|---|
 | `sandbox.enabled` | `true` | Required. The backend refuses to start if it is not `true`. |
-| `sandbox.provider` | `opensandbox` | Sandbox runtime provider: `opensandbox`, `cubepod`, or `local` (`local` is for local dev/testing only without container isolation). Environment override: `CUBEPLEX_SANDBOX__PROVIDER`. |
+| `sandbox.provider` | `cubepod` (deploy) / `opensandbox` (`config.yaml`) | Sandbox runtime provider: `cubepod`, `opensandbox`, or `local` (`local` is for local dev/testing only without container isolation). Helm `values.yaml` and Docker Compose example configs default to `cubepod`. Environment override: `CUBEPLEX_SANDBOX__PROVIDER`. |
 | `sandbox.domain` / `image` / `api_key` | — | OpenSandbox only. All three are required when `sandbox.provider` is `opensandbox` (placeholder values are rejected). Environment overrides: `CUBEPLEX_SANDBOX__DOMAIN`, `CUBEPLEX_SANDBOX__IMAGE`, `CUBEPLEX_SANDBOX__API_KEY`. |
 | `sandbox.use_server_proxy` | `true` | OpenSandbox only. Set `false` for direct pod access; `true` for Docker-bridge / isolated networks. |
 | `sandbox.secure_access` | `false` | OpenSandbox only. Enables Kubernetes ingress-gateway signed URLs when `true`. **Must be `false`** on docker-runtime OpenSandbox. |

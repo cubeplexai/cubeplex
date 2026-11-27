@@ -6,8 +6,8 @@ title: Kubernetes（Helm）
 # 用 Kubernetes 部署 CubePlex
 
 一条 `helm upgrade --install` 命令即可将 CubePlex（backend + frontend +
-Postgres + Redis + rustfs + Tempo + alibaba OpenSandbox 全家桶）部署到已有的
-Kubernetes 集群中。
+Postgres + Redis + rustfs + Tempo，另含可选的 OpenSandbox subchart）部署到已有的
+Kubernetes 集群中，沙箱默认连接外部 CubePod。
 
 backend Deployment 需要两个标准 Kubernetes Pod 特性：**init container**
 （用于数据库迁移步骤）和 **subPath volume mount**（用于从 ConfigMap/Secret
@@ -58,9 +58,10 @@ Namespace: cubeplex
 │  + PVC       │  + PVC      │  + PVC + Job  │  + PVC           │
 │              │             │  (bucket init)│  仅 ClusterIP    │
 ├──────────────┴─────────────┴───────────────┴──────────────────┤
-│  opensandbox（内置 subchart）                                  │
+│  opensandbox（可选 subchart，默认关闭）                        │
 └───────────────────────────────────────────────────────────────┘
                                             │
+                                            ├── CubePod 网关（默认沙箱）
                                             └── LLM providers（外部）
 ```
 

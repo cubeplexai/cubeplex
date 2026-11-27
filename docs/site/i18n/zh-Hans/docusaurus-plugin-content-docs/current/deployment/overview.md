@@ -14,7 +14,7 @@ backend / frontend 容器镜像**——只是编排方式不同。
 |---|---|---|
 | 适用场景 | 单机部署——快速自托管、小团队、内部演示 | 多节点集群、生产规模、自动扩缩容 |
 | 编排方式 | `docker compose up -d` | `helm upgrade --install` |
-| 内置基础设施 | Postgres、Redis、rustfs（S3 兼容对象存储）、OpenSandbox、Tempo | Postgres、Redis、rustfs、Tempo、alibaba OpenSandbox 全家桶 |
+| 内置基础设施 | Postgres、Redis、rustfs（S3 兼容对象存储）、Tempo（另含可选 OpenSandbox 服务） | Postgres、Redis、rustfs、Tempo（另含可选 OpenSandbox subchart） |
 | 指南 | [Docker Compose 安装指南](./docker-compose.md) | [Kubernetes 安装指南](./kubernetes.md) |
 
 如果不确定选哪个，从 Docker Compose 开始——它更简单，除了跨多机的水平扩展外，
@@ -22,12 +22,13 @@ backend / frontend 容器镜像**——只是编排方式不同。
 
 ## Agent 沙箱
 
-CubePlex 在 [OpenSandbox](https://github.com/alibaba/OpenSandbox) 沙箱里执行
-agent 的工具调用（bash、文件读写等）。它是每种部署方式的必需组成部分：Docker
-Compose 会部署该服务，Helm 默认打包它。Helm 也可以改为连接外部托管的
-OpenSandbox，但 backend 始终要求非空的 endpoint、沙箱镜像和 API key。沙箱镜像
-默认走 Docker Hub（`opensandbox/*`）和 GHCR（`ghcr.io/cubeplexai/cubeplex-sandbox`）；
-国内镜像源在各指南中就地标注。
+CubePlex 在隔离沙箱中执行 agent 的工具调用（bash、文件读写等）。Helm chart
+与 Docker Compose 示例配置默认将 `sandbox.provider` 设为
+**[CubePod](https://github.com/cubeplexai/cubepod)**（通过
+`sandbox.cubepod.base_url` 连接外部 CubePod 网关），同时也支持
+[OpenSandbox](https://github.com/alibaba/OpenSandbox)（可使用可选的内置服务 /
+subchart，或外部端点）。沙箱镜像默认走 GHCR（`ghcr.io/cubeplexai/cubeplex-sandbox`）
+和 Docker Hub（使用 OpenSandbox 时的 `opensandbox/*`）；国内镜像源在各指南中就地标注。
 
 ## LLM Provider 配置
 

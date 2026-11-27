@@ -258,7 +258,7 @@ Tool and middleware order is intentional: it affects the stable prompt prefix an
 | Durable checkpoints and application data   | PostgreSQL + CubeLoop Postgres checkpointer                   |
 | Files and artifacts                        | S3-compatible object storage                                |
 | Conversation search                        | PostgreSQL PGroonga lexical search with pgvector embeddings |
-| Sandboxes                                  | OpenSandbox when enabled                                    |
+| Sandboxes                                  | CubePod or OpenSandbox when enabled                         |
 
 ## Where to make changes
 

@@ -50,7 +50,7 @@ CubePlex is a cloud-native platform for **long-lived, team-owned Agents**. A Wor
 - **One Agent across every entry point** — Use the same Workspace Agent from the web, Slack, Discord, Teams, Feishu, DingTalk, WeCom, and more, while each conversation keeps its own participants and execution context.
 - **Durable, governed execution** — Isolated persistent sandboxes and organization controls make ongoing Agent work inspectable, repeatable, and manageable.
 
-CubePlex's Agent runtime is built on [CubeLoop](https://github.com/cubeplexai/cubeloop), an async-native agent framework for multi-provider model access, tool execution, streaming, middleware, and durable checkpoints. Workspace sandboxes are isolated execution environments with persistent working state; external model providers, MCP servers, and IM platforms remain outside CubePlex's trust boundary.
+CubePlex's Agent runtime is built on [CubeLoop](https://github.com/cubeplexai/cubeloop), an async-native agent framework for multi-provider model access, tool execution, streaming, middleware, and durable checkpoints. Workspace sandboxes run on [CubePod](https://github.com/cubeplexai/cubepod) by default (with OpenSandbox also supported), providing isolated execution environments with persistent working state; external model providers, MCP servers, and IM platforms remain outside CubePlex's trust boundary.
 
 ## Demos
 

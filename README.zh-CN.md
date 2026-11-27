@@ -53,7 +53,7 @@ CubePlex 是一个面向**长期运行、由团队共同拥有的 Agent** 的云
 - **跨入口使用同一个 Agent** — 可从 Web、Slack、Discord、Teams、飞书、钉钉、企业微信等入口访问同一个工作空间 Agent；每段对话仍保有独立的参与者和执行上下文。
 - **持久且可治理的执行环境** — 隔离的持久化沙箱和组织级控制，让持续的 Agent 工作可检查、可复用、可管理。
 
-CubePlex 的 Agent 运行时基于 [CubeLoop](https://github.com/cubeplexai/cubeloop) 构建；CubeLoop 是一个异步原生 Agent 框架，支持多模型提供商访问、工具执行、流式输出、中间件和持久化检查点。工作空间沙箱提供相互隔离、状态可持久化的执行环境；外部模型提供商、MCP 服务器和即时通信平台位于 CubePlex 的信任边界之外。
+CubePlex 的 Agent 运行时基于 [CubeLoop](https://github.com/cubeplexai/cubeloop) 构建；CubeLoop 是一个异步原生 Agent 框架，支持多模型提供商访问、工具执行、流式输出、中间件和持久化检查点。工作空间沙箱默认基于 [CubePod](https://github.com/cubeplexai/cubepod) 运行（同时支持 OpenSandbox），提供相互隔离、状态可持久化的执行环境；外部模型提供商、MCP 服务器和即时通信平台位于 CubePlex 的信任边界之外。
 
 ## 演示
 

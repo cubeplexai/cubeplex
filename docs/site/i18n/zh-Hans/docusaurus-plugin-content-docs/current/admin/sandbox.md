@@ -5,7 +5,7 @@ title: 沙箱
 
 # 沙箱
 
-CubePlex 通过 OpenSandbox 在隔离的沙箱中执行由代理生成的代码。沙箱提供了一个安全环境，代理可以在其中运行代码、安装软件包并与文件交互，而不会影响你的主机基础设施。
+CubePlex 在隔离的沙箱中执行由代理生成的代码（默认基于 [CubePod](https://github.com/cubeplexai/cubepod)，也支持 OpenSandbox）。沙箱提供了一个安全环境，代理可以在其中运行代码、安装软件包并与文件交互，而不会影响你的主机基础设施。
 
 沙箱配置分布在两个管理页面中：**Admin > Sandbox**（`/admin/sandbox`）用于配置策略，**Admin > Sandbox Environment**（`/admin/sandbox-env`）用于配置环境变量和密钥。
 

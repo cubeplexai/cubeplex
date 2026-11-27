@@ -101,9 +101,9 @@
     <text x="1560" y="492" text-anchor="middle" class="sub">tools and connected services</text>
 
   <rect x="1396" y="643" width="328" height="160" rx="9" class="sandbox"/>
-    <text x="1560" y="673" text-anchor="middle" class="name" style="font-size:19px">OpenSandbox service</text>
+    <text x="1560" y="673" text-anchor="middle" class="name" style="font-size:19px">CubePod / Sandbox service</text>
     <text x="1560" y="695" text-anchor="middle" class="sub">remote sandbox control plane</text>
-    <text x="1560" y="716" text-anchor="middle" class="tiny mono">Docker or Kubernetes execution</text>
+    <text x="1560" y="716" text-anchor="middle" class="tiny mono">CubePod (default) or OpenSandbox</text>
 
   <path d="M390 327H446V399H502" class="line-blue"/>
   <path d="M390 424H446V399H502" class="line-blue"/>
@@ -140,7 +140,7 @@
     <text x="1092" y="1027" text-anchor="middle" class="tiny mono">RustFS in Docker Compose</text>
   <rect x="1222" y="954" width="502" height="96" rx="9" class="key"/>
     <text x="1473" y="997" text-anchor="middle" class="name" style="font-size:17px">Deploy on Docker Compose or Kubernetes with Helm</text>
-    <text x="1473" y="1019" text-anchor="middle" class="sub">the same frontend and backend images; optional OpenSandbox integration</text>
+    <text x="1473" y="1019" text-anchor="middle" class="sub">the same frontend and backend images; CubePod or OpenSandbox integration</text>
 
   <path d="M612 837V954" class="line-gray"/>
   <path d="M852 837V954" class="line-gray"/>

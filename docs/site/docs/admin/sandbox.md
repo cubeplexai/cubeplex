@@ -5,7 +5,7 @@ title: Sandbox
 
 # Sandbox
 
-CubePlex executes agent-generated code in an isolated sandbox powered by OpenSandbox. The sandbox provides a secure environment where the agent can run code, install packages, and interact with files without affecting your host infrastructure.
+CubePlex executes agent-generated code in an isolated sandbox (powered by [CubePod](https://github.com/cubeplexai/cubepod) by default, or OpenSandbox). The sandbox provides a secure environment where the agent can run code, install packages, and interact with files without affecting your host infrastructure.
 
 Sandbox configuration is split across two admin pages: **Admin > Sandbox** (`/admin/sandbox`) for policies and **Admin > Sandbox Environment** (`/admin/sandbox-env`) for environment variables and secrets.
 

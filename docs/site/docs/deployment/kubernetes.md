@@ -6,8 +6,8 @@ title: Kubernetes (Helm)
 # CubePlex on Kubernetes
 
 A single `helm upgrade --install` deploys CubePlex (backend + frontend +
-Postgres + Redis + rustfs + Tempo + the alibaba OpenSandbox umbrella) to
-an existing Kubernetes cluster.
+Postgres + Redis + rustfs + Tempo, plus an optional OpenSandbox subchart) to
+an existing Kubernetes cluster, connecting to CubePod by default for sandboxes.
 
 The backend Deployment requires two standard Kubernetes Pod features: **init
 containers** (used for the database migration step) and **subPath volume
@@ -60,9 +60,10 @@ Namespace: cubeplex
 │  + PVC       │  + PVC      │  + PVC + Job  │  + PVC           │
 │              │             │  (bucket init)│  ClusterIP only  │
 ├──────────────┴─────────────┴───────────────┴──────────────────┤
-│  opensandbox (bundled subchart)                               │
+│  opensandbox (optional subchart, disabled by default)           │
 └───────────────────────────────────────────────────────────────┘
                                             │
+                                            ├── CubePod gateway (default sandbox)
                                             └── LLM providers (external)
 ```
 

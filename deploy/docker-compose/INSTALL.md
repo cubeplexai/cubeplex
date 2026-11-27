@@ -9,9 +9,9 @@ unless `TEMPO_ENABLED=false`.
 **The full, maintained install guide lives on the docs site:**
 [cubeplex.ai/docs/deployment/docker-compose](https://cubeplex.ai/docs/deployment/docker-compose)
 
-It covers prerequisites, building images, the four required config files
-(`.env`, `opensandbox.toml`, and two YAML files), bringing the stack up/down,
-verification, and troubleshooting.
+It covers prerequisites, building images, the configuration files
+(`.env`, two YAML files, and `opensandbox.toml` for the bundled OpenSandbox
+service), bringing the stack up/down, verification, and troubleshooting.
 
 This directory holds the scripts and config templates the guide walks
 through: `compose.yaml`, `compose.tempo.yaml`, `.env.example`,

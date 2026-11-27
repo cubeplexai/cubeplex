@@ -7,7 +7,7 @@ title: Docker Compose
 
 `docker compose -f compose.yaml -f compose.tempo.yaml up -d` 在单台主机上
 部署 CubePlex（backend + frontend + Postgres + Redis + rustfs S3 存储 +
-OpenSandbox + Tempo）。它使用和 Kubernetes 部署模式完全相同的容器镜像，只是
+Tempo + 可选 OpenSandbox）。它使用和 Kubernetes 部署模式完全相同的容器镜像，只是
 编排方式不同。`scripts/up.sh` 会带上这两个文件，除非 `.env` 里
 `TEMPO_ENABLED=false`。
 
@@ -74,16 +74,16 @@ deploy/kubernetes/scripts/build-and-push.sh
 
 </details>
 
-## 4. 配置（`.env` + OpenSandbox + 两个 YAML 文件）
+## 4. 配置（`.env` + 两个 YAML 文件 + `opensandbox.toml`）
 
 四个文件，均已在 `.gitignore` 中：
 
 | 文件 | 作用 |
 |---|---|
 | `.env` | 镜像 tag、主机端口映射、基础设施密码。由 `docker compose` 直接读取，用于 `compose.yaml` 中的变量替换。 |
-| `config/config.production.local.yaml` | 非密钥的运行时配置（模式、公开 URL、cookie 安全性、sandbox 开关）。挂载进 backend。 |
+| `config/config.production.local.yaml` | 非密钥的运行时配置（模式、公开 URL、cookie 安全性、sandbox 提供商）。挂载进 backend。 |
 | `config/config.production.secrets.yaml` | 密钥——JWT / CSRF / vault 密钥材料、基础设施密码（必须与 `.env` 一致）、LLM provider API key。挂载进 backend。 |
-| `config/opensandbox.toml` | OpenSandbox server 配置；其 API key 必须和 backend 密钥文件中的 `sandbox.api_key` 一致。 |
+| `config/opensandbox.toml` | OpenSandbox server 配置；`up.sh` 启动内置 `opensandbox-server` 服务时会检查该文件，使用 `sandbox.provider: "opensandbox"` 时其 API key 必须和 backend 密钥文件中的 `sandbox.api_key` 一致。 |
 
 本节只覆盖启动所需的 key。完整的后端配置字段、分层规则和环境变量映射，见
 [后端配置参考](./backend-config.md)。
@@ -134,7 +134,8 @@ $EDITOR config/config.production.local.yaml
 | `frontend_base_url` | `http://localhost:3000` | backend 重定向浏览器时使用。 |
 | `deployment.mode` | `single_tenant` | `single_tenant` 在首个用户注册时自动创建组织；`multi_tenant` 需要显式的组织引导流程。 |
 | `auth.cookie_secure` | `false` | 纯 HTTP 环境下必须保持 `false`，否则客户端会静默丢弃认证 cookie。 |
-| `sandbox.enabled` | `true` | 必填。它必须保持为 true，且 `sandbox.{domain,image,api_key}` 都已配置，否则 backend 拒绝启动。 |
+| `sandbox.enabled` | `true` | 必填。必须保持为 true，且当前启用的提供商（默认 `cubepod`，或 `opensandbox`）配置完整，否则 backend 拒绝启动。 |
+| `sandbox.provider` | `cubepod` | `config.production.local.yaml.example` 的默认值。连接 `sandbox.cubepod.base_url`（例如 `http://cubepod-gateway:8080`）；如需使用内置 `opensandbox-server` 则设为 `"opensandbox"`。 |
 
 :::note
 `database.host`、`redis.url`、`objectstore.endpoint` 使用 Docker DNS 名称
@@ -309,11 +310,28 @@ docker compose -f deploy/docker-compose/compose.yaml logs bucket-init
 如果 rustfs 无法访问，检查 rustfs 容器的健康检查——rustfs 在 `:9001` 上
 提供了一个控制台，可以本地访问确认它是否已启动。
 
-## 8. 必需的 OpenSandbox runtime
+## 8. 沙箱运行时（CubePod 默认 / OpenSandbox）
 
-CubePlex 在沙箱中执行 agent 的工具调用（bash、文件读写等）。基础 compose
-文件会以 **Docker runtime 模式**部署 alibaba 的
-[OpenSandbox](https://github.com/alibaba/OpenSandbox) 生命周期服务器。
+CubePlex 在沙箱中执行 agent 的工具调用（bash、文件读写等）。示例配置
+（`config.production.local.yaml.example`）默认将 `sandbox.provider` 设为
+**[CubePod](https://github.com/cubeplexai/cubepod)**：
+
+```yaml
+sandbox:
+  enabled: true
+  provider: "cubepod"
+  cubepod:
+    base_url: "http://cubepod-gateway:8080"
+    default_template: "cubeplex-ubuntu24-desktop"
+    # warm_pool: ""
+```
+
+如果 CubePod 网关启用了 Bearer 鉴权，可在 `config.production.secrets.yaml` 中
+配置可选的 `sandbox.cubepod.api_key`。
+
+如需改用内置的 **Docker runtime 模式** [OpenSandbox](https://github.com/alibaba/OpenSandbox)
+服务，请在 `config.production.local.yaml` 中设置 `sandbox.provider: "opensandbox"`，
+并在 `config.production.secrets.yaml` 中配置 `sandbox.{domain,image,api_key}`。
 
 ### 服务
 

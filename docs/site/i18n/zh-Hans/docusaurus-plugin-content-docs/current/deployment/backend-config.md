@@ -83,11 +83,11 @@ production:
 `sandbox.enabled` 必须为 `true`（agent 工具执行），且需根据 `sandbox.provider`
 额外设置对应配置：
 
-- **`opensandbox`（默认）：** 必须设置 `sandbox.domain`、`sandbox.image` 和
-  `sandbox.api_key`（拒绝占位符）。
-- **`cubepod`：** 必须设置 `sandbox.cubepod.base_url` 和
+- **`cubepod`（部署默认）：** 必须设置 `sandbox.cubepod.base_url` 和
   `sandbox.cubepod.default_template`（默认为 `cubeplex-ubuntu24-desktop`）。
   `sandbox.cubepod.api_key` 可选（若填写则拒绝占位符）。
+- **`opensandbox`：** 必须设置 `sandbox.domain`、`sandbox.image` 和
+  `sandbox.api_key`（拒绝占位符）。
 - **`local`：** 仅用于本地开发与测试（直接在后端进程所在目录中执行命令，
   无容器隔离）；不需要外部地址或 API key。
 
@@ -238,7 +238,7 @@ sandbox:
 | Key | 默认 | 说明 |
 |---|---|---|
 | `sandbox.enabled` | `true` | 必填。不是 `true` 时 backend 会拒绝启动。 |
-| `sandbox.provider` | `opensandbox` | 沙箱运行时提供商：`opensandbox`、`cubepod` 或 `local`（`local` 仅用于本地开发与测试，无容器隔离）。环境变量覆盖：`CUBEPLEX_SANDBOX__PROVIDER`。 |
+| `sandbox.provider` | `cubepod`（部署默认）/ `opensandbox`（`config.yaml`） | 沙箱运行时提供商：`cubepod`、`opensandbox` 或 `local`（`local` 仅用于本地开发与测试，无容器隔离）。Helm `values.yaml` 与 Docker Compose 示例配置均默认使用 `cubepod`。环境变量覆盖：`CUBEPLEX_SANDBOX__PROVIDER`。 |
 | `sandbox.domain` / `image` / `api_key` | — | 仅 OpenSandbox 使用。当 `sandbox.provider` 为 `opensandbox` 时三项均必填（拒绝占位符）。环境变量覆盖：`CUBEPLEX_SANDBOX__DOMAIN`、`CUBEPLEX_SANDBOX__IMAGE`、`CUBEPLEX_SANDBOX__API_KEY`。 |
 | `sandbox.use_server_proxy` | `true` | 仅 OpenSandbox 使用。直连 pod 设 `false`；Docker 桥接 / 隔离网络设 `true`。 |
 | `sandbox.secure_access` | `false` | 仅 OpenSandbox 使用。设为 `true` 时启用 Kubernetes ingress 网关签名 URL。docker-runtime OpenSandbox 下**必须 `false`**。 |

@@ -6,10 +6,10 @@ title: Docker Compose
 # CubePlex on Docker Compose
 
 `docker compose -f compose.yaml -f compose.tempo.yaml up -d` deploys CubePlex
-(backend + frontend + Postgres + Redis + rustfs S3 store + OpenSandbox +
-Tempo) on a single host. It uses the same container images as the Kubernetes
-deployment mode — only the orchestration differs. `scripts/up.sh` passes both
-files unless `.env` has `TEMPO_ENABLED=false`.
+(backend + frontend + Postgres + Redis + rustfs S3 store + Tempo + optional
+OpenSandbox) on a single host. It uses the same container images as the
+Kubernetes deployment mode — only the orchestration differs. `scripts/up.sh`
+passes both files unless `.env` has `TEMPO_ENABLED=false`.
 
 ## 1. Prerequisites
 
@@ -78,16 +78,16 @@ Then point `IMAGE_REGISTRY`, `IMAGE_REPO`, `BACKEND_TAG`, and `FRONTEND_TAG` in
 
 </details>
 
-## 4. Configure (`.env` + OpenSandbox + two YAML files)
+## 4. Configure (`.env` + two YAML files + `opensandbox.toml`)
 
 Four files, all gitignored:
 
 | File | What it does |
 |---|---|
 | `.env` | Image tags, host port mappings, infra passwords. Read directly by `docker compose` for variable substitution in `compose.yaml`. |
-| `config/config.production.local.yaml` | Non-secret runtime config (mode, public URL, cookie security, sandbox toggle). Mounted into the backend. |
+| `config/config.production.local.yaml` | Non-secret runtime config (mode, public URL, cookie security, sandbox provider). Mounted into the backend. |
 | `config/config.production.secrets.yaml` | Secrets — JWT/CSRF/vault material, infra passwords (must match `.env`), LLM provider API keys. Mounted into the backend. |
-| `config/opensandbox.toml` | OpenSandbox server configuration. Its API key must match `sandbox.api_key` in the backend secrets file. |
+| `config/opensandbox.toml` | OpenSandbox server configuration. Required by `up.sh` when bringing up the bundled `opensandbox-server` service; its API key must match `sandbox.api_key` if using `sandbox.provider: "opensandbox"`. |
 
 This section covers the keys needed to boot. For every backend config key,
 the layering rules, and the env-var mapping, see the
@@ -139,7 +139,8 @@ $EDITOR config/config.production.local.yaml
 | `frontend_base_url` | `http://localhost:3000` | Where the backend redirects browsers. |
 | `deployment.mode` | `single_tenant` | `single_tenant` auto-creates an org on first user registration; `multi_tenant` requires explicit org bootstrap. |
 | `auth.cookie_secure` | `false` | Must stay `false` on plain HTTP — otherwise clients silently drop the auth cookie. |
-| `sandbox.enabled` | `true` | Required. The backend refuses to start unless it remains true and `sandbox.{domain,image,api_key}` are all configured. |
+| `sandbox.enabled` | `true` | Required. The backend refuses to start unless it remains true and the active provider (`cubepod` by default, or `opensandbox`) is configured. |
+| `sandbox.provider` | `cubepod` | Default in `config.production.local.yaml.example`. Connects to `sandbox.cubepod.base_url` (for example `http://cubepod-gateway:8080`); set `"opensandbox"` to use the bundled `opensandbox-server`. |
 
 :::note
 `database.host`, `redis.url`, and `objectstore.endpoint` use Docker DNS names
@@ -331,12 +332,29 @@ docker compose -f deploy/docker-compose/compose.yaml logs bucket-init
 If rustfs isn't reachable, check the rustfs container's healthcheck — rustfs
 publishes a console on `:9001` you can hit locally to confirm it's up.
 
-## 8. Required OpenSandbox runtime
+## 8. Sandbox runtime (CubePod default / OpenSandbox)
 
 CubePlex executes agent tool calls (bash, file read/write, …) inside a
-sandbox. The base compose file deploys alibaba's
-[OpenSandbox](https://github.com/alibaba/OpenSandbox) lifecycle server in
-**Docker runtime mode**.
+sandbox. The example config (`config.production.local.yaml.example`) defaults
+`sandbox.provider` to **[CubePod](https://github.com/cubeplexai/cubepod)**:
+
+```yaml
+sandbox:
+  enabled: true
+  provider: "cubepod"
+  cubepod:
+    base_url: "http://cubepod-gateway:8080"
+    default_template: "cubeplex-ubuntu24-desktop"
+    # warm_pool: ""
+```
+
+Set an optional `sandbox.cubepod.api_key` in `config.production.secrets.yaml`
+if your CubePod gateway requires Bearer authentication.
+
+To use the bundled [OpenSandbox](https://github.com/alibaba/OpenSandbox)
+service in **Docker runtime mode** instead, set `sandbox.provider: "opensandbox"`
+in `config.production.local.yaml` and configure `sandbox.{domain,image,api_key}`
+in `config.production.secrets.yaml`.
 
 ### Service
 

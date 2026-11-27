@@ -1,8 +1,9 @@
 # CubePlex on Kubernetes (Helm)
 
 One `helm upgrade --install` deploys the CubePlex backend, frontend, and
-the infrastructure they need (Postgres, Redis, rustfs, Tempo, and the
-alibaba OpenSandbox umbrella) into a single namespace. Tempo is ClusterIP-only
+the infrastructure they need (Postgres, Redis, rustfs, and Tempo) into a
+single namespace, and connects to CubePod by default for sandboxes (with an
+optional bundled alibaba OpenSandbox subchart). Tempo is ClusterIP-only
 and not on Ingress.
 
 - **English install guide:** [cubeplex.ai/docs/deployment/kubernetes](https://cubeplex.ai/docs/deployment/kubernetes)

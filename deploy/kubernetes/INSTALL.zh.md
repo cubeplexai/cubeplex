@@ -1,9 +1,9 @@
 # CubePlex 部署手册
 
 一条 `helm upgrade --install` 命令即可将 CubePlex（backend + frontend +
-Postgres + Redis + rustfs + Tempo + alibaba OpenSandbox 全家桶）部署到已有的
-Kubernetes 集群中。Tempo 仅 ClusterIP、不上 Ingress；见 Kubernetes 安装指南
-§4.12。
+Postgres + Redis + rustfs + Tempo）部署到已有的 Kubernetes 集群中，沙箱默认连接
+外部 CubePod（也可按需启用内置的 alibaba OpenSandbox 全家桶）。Tempo 仅
+ClusterIP、不上 Ingress；见 Kubernetes 安装指南 §4.12。
 
 **完整的、持续维护的安装指南在文档站点上：**
 [cubeplex.ai/docs/zh-Hans/deployment/kubernetes](https://cubeplex.ai/docs/zh-Hans/deployment/kubernetes)
