@@ -5,9 +5,14 @@ On every safe request (GET/HEAD/OPTIONS), set the CSRF cookie (default
 mutating request (POST/PUT/PATCH/DELETE), require the cookie value to match the
 `X-CSRF-Token` header. Skip enforcement if there is no auth cookie present (so
 unauthenticated routes still work).
+
+One exception: the artifact bridge call endpoint (``POST
+.../artifacts/{id}/call/{fn}``) is exempt. It is read-only, and the caller is
+agent-authored HTML that cannot know the configurable CSRF cookie name.
 """
 
 import json
+import re
 import secrets
 from http.cookies import SimpleCookie
 
@@ -18,6 +23,16 @@ from cubeplex.config import config
 
 CSRF_HEADER = "x-csrf-token"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+# Full-match only: a future mutating POST under a neighbouring path stays
+# protected.
+_READ_ONLY_CALL_PATH = re.compile(
+    r"/api/v1/ws/[^/]+/conversations/[^/]+/artifacts/[^/]+/call/[^/]+"
+)
+
+
+def _is_read_only_call(path: str, method: str) -> bool:
+    return method == "POST" and _READ_ONLY_CALL_PATH.fullmatch(path) is not None
 
 
 class CSRFMiddleware:
@@ -37,7 +52,11 @@ class CSRFMiddleware:
         cookies = _parse_cookies(scope["headers"])
         has_auth = self.auth_cookie in cookies
         csrf_cookie = cookies.get(self.csrf_cookie)
-        if method not in SAFE_METHODS and has_auth:
+        if (
+            method not in SAFE_METHODS
+            and has_auth
+            and not _is_read_only_call(scope["path"], method)
+        ):
             csrf_header = _get_header(scope["headers"], CSRF_HEADER.encode())
             if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
                 await _send_403(send, "CSRF token missing or mismatched")

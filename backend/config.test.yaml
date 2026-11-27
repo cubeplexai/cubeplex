@@ -146,3 +146,11 @@ test:
   lifecycle:
     graceful_drain_timeout_seconds: 5
     dev_double_signal_force_exit: false
+
+  # Artifact call bridge: high rate limit so the suite is never throttled.
+  artifact_bridge:
+    enabled: true
+    max_prompt_chars: 8000
+    max_output_tokens: 1024
+    timeout_seconds: 30
+    rate_limit_per_minute: 1000

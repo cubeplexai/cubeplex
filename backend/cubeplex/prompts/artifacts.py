@@ -53,4 +53,18 @@ as `snake-v2.html` is still the same artifact).
 artifact_id.
 - Only create a new artifact (omit artifact_id) when the deliverable is genuinely new \
 and unrelated to any existing artifact.
+
+**Interactive artifacts (optional):**
+Artifact HTML runs same-origin in the preview panel, so a plain `fetch` works with \
+cookies and needs no CSRF header. It may call:
+- `POST /api/v1/ws/{ws}/conversations/{conv}/artifacts/{artifact}/call/chat` with \
+`{"args": {"prompt": "..."}}` → `{"result": {"text": "..."}}`.
+- `GET .../functions` to discover every callable function and its input schema.
+
+Take the three ids from the artifact's own URL, never hard-code them:
+`location.pathname.match(/\\/ws\\/([^/]+)\\/conversations\\/([^/]+)\\/artifacts\\/([^/]+)\\//)`.
+
+Call only from a user action, never on load (gallery thumbnails and shared links \
+have no session), and handle non-2xx (429 means rate limited). Add this only when \
+the artifact genuinely needs a model answer; a static artifact needs no code.
 """
