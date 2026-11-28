@@ -356,3 +356,127 @@ def test_disabled_bridge_returns_503(seed: _Seed, client: TestClient) -> None:
     assert listed.status_code == 200
     assert listed.json()["functions"] == []
     assert called.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Accessed independently of the chat session it was made in
+#
+# The common path is: an artifact is listed in the *workspace gallery*
+# (``/api/v1/ws/{ws}/artifacts``) and opened from there, not from the
+# conversation that produced it. A teammate who was never in that chat sees it
+# because they are a conversation participant. Both the listing and the bridge
+# call must work for them.
+# ---------------------------------------------------------------------------
+
+_SHARED_CONV = f"conv-bs-{_SUFFIX}"
+_SHARED_ART = f"art-bs-{_SUFFIX}"
+_PARTICIPANT_ROW = f"cpm-bs-{_SUFFIX}"
+
+
+@pytest_asyncio.fixture
+async def shared_artifact(
+    client: TestClient, ws_member_client: TestClient
+) -> AsyncIterator[tuple[str, str]]:
+    """Artifact in an admin-created group conversation the member participates in."""
+    admin_id = client.get("/api/v1/auth/me").json()["id"]
+    member_id = ws_member_client.get("/api/v1/auth/me").json()["id"]
+
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO conversations (id, org_id, workspace_id,"
+                    " creator_user_id, title, has_messages, is_group_chat,"
+                    " reasoning, attributes, created_at, updated_at)"
+                    " VALUES (:id, :org, :ws, :uid, 'shared bridge', true, true,"
+                    " '{}'::jsonb, '{}'::jsonb, NOW(), NOW())"
+                    " ON CONFLICT (id) DO NOTHING"
+                ),
+                {"id": _SHARED_CONV, "org": DEFAULT_ORG_ID, "ws": DEFAULT_WS_ID, "uid": admin_id},
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO conversation_participants (id, org_id, workspace_id,"
+                    " conversation_id, user_id, joined_at, created_at, updated_at)"
+                    " VALUES (:id, :org, :ws, :conv, :uid, NOW(), NOW(), NOW())"
+                    " ON CONFLICT (id) DO NOTHING"
+                ),
+                {
+                    "id": _PARTICIPANT_ROW,
+                    "org": DEFAULT_ORG_ID,
+                    "ws": DEFAULT_WS_ID,
+                    "conv": _SHARED_CONV,
+                    "uid": member_id,
+                },
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO artifacts (id, org_id, workspace_id, conversation_id,"
+                    " name, artifact_type, path, entry_file, mime_type, description,"
+                    " version, created_at, updated_at)"
+                    " VALUES (:id, :org, :ws, :conv, 'Shared chart', 'website',"
+                    " 'index.html', 'index.html', 'text/html', 'Team chart',"
+                    " 1, NOW(), NOW())"
+                    " ON CONFLICT (id) DO NOTHING"
+                ),
+                {
+                    "id": _SHARED_ART,
+                    "org": DEFAULT_ORG_ID,
+                    "ws": DEFAULT_WS_ID,
+                    "conv": _SHARED_CONV,
+                },
+            )
+            await session.commit()
+        yield _SHARED_CONV, _SHARED_ART
+    finally:
+        async with maker() as session:
+            await session.execute(text("DELETE FROM artifacts WHERE id = :id"), {"id": _SHARED_ART})
+            await session.execute(
+                text("DELETE FROM conversation_participants WHERE id = :id"),
+                {"id": _PARTICIPANT_ROW},
+            )
+            await session.execute(
+                text("DELETE FROM conversations WHERE id = :id"), {"id": _SHARED_CONV}
+            )
+            await session.commit()
+        await engine.dispose()
+
+
+def test_participant_sees_artifact_in_workspace_gallery(
+    shared_artifact: tuple[str, str], ws_member_client: TestClient
+) -> None:
+    """Gallery listing is what makes the artifact reachable outside its chat."""
+    _, art_id = shared_artifact
+    res = ws_member_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/artifacts")
+    assert res.status_code == 200, res.text
+    ids = {a["id"] for a in res.json()["artifacts"]}
+    assert art_id in ids
+
+
+def test_participant_can_call_chat_from_gallery_path(
+    shared_artifact: tuple[str, str], ws_member_client: TestClient, fake_model: Any
+) -> None:
+    """A participant who never chatted in the conversation can still interact.
+
+    This is the gallery flow: list -> open panel -> artifact JS calls the bridge
+    with the conversation id taken from the preview URL.
+    """
+    conv_id, art_id = shared_artifact
+    fake_model(reply="Q3 revenue grew 12%.")
+    res = ws_member_client.post(
+        f"{_base(conv_id, art_id)}/call/chat",
+        json={"args": {"prompt": "How did revenue go?"}},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["result"] == {"text": "Q3 revenue grew 12%."}
+
+
+def test_participant_functions_discovery_works(
+    shared_artifact: tuple[str, str], ws_member_client: TestClient
+) -> None:
+    conv_id, art_id = shared_artifact
+    res = ws_member_client.get(f"{_base(conv_id, art_id)}/functions")
+    assert res.status_code == 200, res.text
+    assert "chat" in {entry["name"] for entry in res.json()["functions"]}
