@@ -82,7 +82,7 @@ export function ArtifactLibraryCard({
         'bg-card transition-all hover:border-primary/30 hover:shadow-sm',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       )}
-      data-testid="artifact-card"
+      data-testid={`artifact-card-${artifact.id}`}
     >
       <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
         {showImage ? (

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Interactive artifact</title>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 1rem; }
+      #out { margin-top: 1rem; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Ask about the numbers</h1>
+    <input id="q" data-testid="artifact-input" aria-label="Question" />
+    <button id="ask" data-testid="artifact-ask">Ask</button>
+    <div id="out" data-testid="artifact-output">idle</div>
+    <script>
+      // Mirrors the snippet in ARTIFACT_PROMPT: ids come from the preview URL,
+      // the call is same-origin (cookies ride along, no CSRF header needed).
+      function bridgeUrl(fn) {
+        const m = location.pathname.match(
+          /\/ws\/([^/]+)\/conversations\/([^/]+)\/artifacts\/([^/]+)\//,
+        )
+        if (!m) return null
+        return `/api/v1/ws/${m[1]}/conversations/${m[2]}/artifacts/${m[3]}/${fn}`
+      }
+
+      const out = document.getElementById('out')
+
+      document.getElementById('ask').addEventListener('click', async () => {
+        const url = bridgeUrl('call/chat')
+        out.textContent = 'thinking…'
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              args: { prompt: document.getElementById('q').value },
+            }),
+          })
+          if (!res.ok) {
+            out.textContent = `error: ${res.status}`
+            return
+          }
+          const body = await res.json()
+          out.textContent = body.result.text
+        } catch (err) {
+          out.textContent = `threw: ${err}`
+        }
+      })
+    </script>
+  </body>
+</html>

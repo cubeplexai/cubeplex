@@ -4,7 +4,7 @@ import io
 import mimetypes
 import secrets
 import tarfile
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import quote
 
 import orjson
@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.auth.context import RequestContext
@@ -20,6 +20,7 @@ from cubeplex.auth.dependencies import require_member
 from cubeplex.cache import RedisHandle, redis_dep
 from cubeplex.config import config
 from cubeplex.db import get_session
+from cubeplex.models import Artifact
 from cubeplex.objectstore import get_objectstore_client
 from cubeplex.objectstore.artifact_paths import (
     artifact_file_key_candidates,
@@ -62,6 +63,21 @@ async def _require_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
+
+
+async def _require_artifact(
+    session: AsyncSession, ctx: RequestContext, conversation_id: str, artifact_id: str
+) -> Artifact:
+    """Load an artifact that belongs to ``conversation_id`` or raise 404."""
+    await _require_conversation(session, ctx, conversation_id)
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    artifact = await repo.get_by_id(artifact_id)
+    if not artifact or artifact.conversation_id != conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact {artifact_id} not found",
+        )
+    return artifact
 
 
 @router.get("")
@@ -500,3 +516,94 @@ async def preview_artifact_file(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+class ArtifactCallBody(BaseModel):
+    """Request body for invoking a bridge function from artifact HTML."""
+
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/{artifact_id}/functions")
+async def list_artifact_functions(
+    conversation_id: str,
+    artifact_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, object]:
+    """List the functions artifact HTML may call for this artifact.
+
+    This is the discovery surface: a new bridge capability shows up here with no
+    prompt change and no client change.
+    """
+    from cubeplex.services.artifact_bridge import catalogue
+
+    await _require_artifact(session, ctx, conversation_id, artifact_id)
+    if not config.get("artifact_bridge.enabled", True):
+        return {"functions": []}
+    return {"functions": catalogue()}
+
+
+@router.post("/{artifact_id}/call/{fn_name}")
+async def call_artifact_function(
+    conversation_id: str,
+    artifact_id: str,
+    fn_name: str,
+    body: ArtifactCallBody,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rh: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, object]:
+    """Invoke one registered bridge function on behalf of artifact HTML.
+
+    Read-only — no DB writes — so the CSRF middleware exempts this exact path
+    (see api/middleware/csrf.py): artifact JS cannot read the configurable CSRF
+    cookie name, and there is no state change for double-submit to protect.
+    """
+    from cubeplex.services.artifact_bridge import (
+        ArtifactBridgeDisabled,
+        ArtifactCallContext,
+        ArtifactCallFailed,
+        ArtifactCallInvalidInput,
+        ArtifactCallRateLimited,
+        ArtifactFunctionNotFound,
+        dispatch,
+    )
+
+    artifact = await _require_artifact(session, ctx, conversation_id, artifact_id)
+
+    call_ctx = ArtifactCallContext(
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+        role=ctx.role,
+        conversation_id=conversation_id,
+        artifact=artifact,
+        session=session,
+        encryption_backend=getattr(request.app.state, "encryption_backend", None),
+        tracer=getattr(request.app.state, "tracer", None),
+    )
+    try:
+        result = await dispatch(call_ctx, fn_name, body.args, redis=rh)
+    except ArtifactFunctionNotFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown artifact function {fn_name!r}",
+        ) from None
+    except ArtifactCallInvalidInput as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except ArtifactCallRateLimited:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many artifact calls; try again in a minute",
+            headers={"Retry-After": "60"},
+        ) from None
+    except ArtifactBridgeDisabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Artifact bridge is disabled",
+        ) from None
+    except ArtifactCallFailed as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from None
+    return {"result": result}

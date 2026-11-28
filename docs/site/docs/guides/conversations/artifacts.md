@@ -89,6 +89,31 @@ code blocks keep their normal formatting. Downloads retain the Markdown source.
 
 At the top of the chat area, a collapsible **Artifacts** bar shows all artifacts created in the current conversation. Click to expand the gallery and quickly jump to any artifact without scrolling through the message history.
 
+## Interactive artifacts
+
+A website artifact can ask the model a question while you are viewing it. For
+example, a chart artifact can carry a text box and an **Ask** button: type a
+question, click the button, and the answer appears inside the artifact.
+
+Ask for this when you create the artifact — "build a chart artifact with a box
+where I can ask questions about the data". The agent writes the input and the
+call into the artifact's HTML, so the interaction belongs to that version. When
+you ask for a new version, mention it again or the rebuild will be static.
+
+How it behaves:
+
+- Each interaction sends one question to the organization's configured model and
+  returns one answer. The exchange is not added to the conversation transcript,
+  and the model does not see earlier artifact questions.
+- Only artifacts opened in the panel or the expanded preview can call the model.
+  Gallery thumbnails and public share links render without your session, so
+  interactive controls there do nothing.
+- Calls are rate limited per artifact. If the artifact reports too many
+  requests, wait a minute and try again.
+- Artifacts may only call the functions the platform exposes (`chat` today). The
+  functions available to an artifact are listed by `GET .../functions`; new ones
+  appear without changing the artifact.
+
 ## Versioning
 
 The agent can update an artifact across multiple turns. When you say "make the header blue" or "add a footer to the page," the agent creates a **new version** of the existing artifact rather than a separate artifact.

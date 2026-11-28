@@ -361,6 +361,19 @@ default:
       max_decoded_long_edge: 16384
       batch_max: 8
 
+  # Artifact call bridge: the functions agent-authored artifact HTML may invoke
+  # at runtime (currently `chat`). Limits are enforced centrally in
+  # cubeplex/services/artifact_bridge/dispatch.py.
+  artifact_bridge:
+    enabled: true
+    # Longest prompt an artifact may send, in characters.
+    max_prompt_chars: 8000
+    # Ceiling on output tokens regardless of the preset's own max_tokens.
+    max_output_tokens: 1024
+    timeout_seconds: 60
+    # Per user, per artifact, per function, per minute.
+    rate_limit_per_minute: 20
+
   # Graceful Restart and Lifecycle Configuration
   lifecycle:
     graceful_drain_timeout_seconds: 3600

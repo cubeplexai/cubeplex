@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -98,6 +99,24 @@ async def test_artifact_prompt_appended_to_system_prompt() -> None:
     assert "Artifacts" in out  # from ARTIFACT_PROMPT
     assert "save_artifact" in out  # from ARTIFACT_PROMPT
     assert "Existing artifacts" not in out
+
+
+@pytest.mark.asyncio
+async def test_artifact_prompt_only_names_registered_functions() -> None:
+    """The authoring prompt tells the agent to call bridge functions by name.
+
+    Names it advertises must exist in the registry, or the agent hands users
+    fetch code that 404s. Renaming a function without updating the prompt fails
+    here.
+    """
+    from cubeplex.services.artifact_bridge import get_function
+
+    mw = _make_middleware()
+    out = await mw.transform_system_prompt("Base.", ctx=object(), signal=None)
+    advertised = set(re.findall(r"/call/([A-Za-z0-9_-]+)", out))
+    assert advertised, "ARTIFACT_PROMPT no longer advertises any bridge function"
+    for name in advertised:
+        assert get_function(name) is not None
 
 
 @pytest.mark.asyncio
