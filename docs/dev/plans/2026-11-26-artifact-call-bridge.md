@@ -295,8 +295,10 @@ async def call_artifact_function(
   discoverable without a prompt change.
 
 ### Tests
-- No unit test; asserted indirectly by the `chat` e2e test (system prompt contents) and
-  by a manual check in the verification section.
+- `backend/tests/unit/test_artifacts.py::test_artifact_prompt_only_names_registered_functions`
+  — every `/call/<name>` the prompt advertises must resolve in the registry, so
+  renaming a function cannot leave the authoring contract stale.
+- Browser coverage: `frontend/packages/web/__tests__/e2e/interactive-artifact.spec.ts`.
 
 ---
 
@@ -320,13 +322,34 @@ Run from the worktree backend (`../.worktree.env` sourced as needed):
 
 ```bash
 uv run pytest tests/unit/test_artifact_bridge_registry.py tests/unit/test_artifact_bridge_dispatch.py \
-  tests/unit/test_csrf_middleware.py --no-cov -q
-uv run pytest tests/e2e/test_artifact_bridge_routes.py tests/e2e/test_artifact_bridge_chat.py --no-cov -q
+  tests/unit/test_csrf_middleware.py tests/unit/test_artifacts.py --no-cov -q
+uv run pytest tests/e2e/test_artifact_bridge.py --no-cov -q
 ```
 
-Manual check (worktree ports from `.worktree.env`): ask the agent for a small artifact
-with an input box and a button, open the panel, click, and confirm the answer renders.
-Also confirm the gallery thumbnail still renders and does not fire a request.
+Browser E2E (`interactive-artifact.spec.ts`) — the artifact is opened from the
+**workspace gallery**, not from its conversation, because that is how a shared
+artifact is usually reached:
+
+```bash
+# backend in the test env so registration goes through onboarding
+cd backend && ENV_FOR_DYNACONF=test uv run python main.py
+# PR lane: proves the in-iframe fetch clears sandbox + cookies + CSRF + scoping
+cd frontend && ENV_FOR_DYNACONF=test npx playwright test interactive-artifact --grep-invert @real-llm
+# full path with a model (stub when no credentials are available)
+cd backend && uv run python scripts/fake_openai_sse.py --port 8099 &
+CUBEPLEX_E2E_LLM_BASE_URL=http://127.0.0.1:8099/v1 CUBEPLEX_E2E_REAL_LLM=true \
+  npx playwright test interactive-artifact --grep @real-llm
+```
+
+The gallery-to-panel path works because `workspace artifacts page.tsx` seeds every
+listed artifact into `useArtifactStore`, so `ArtifactPanel` can resolve it without
+its conversation being open. Artifacts are only created by the agent, so the spec
+seeds rows + object bytes via `backend/scripts/seed_interactive_artifact.py`
+(`make seed-interactive-artifact WS=… USER=… HTML=…`).
+
+Manual check: ask the agent for an artifact with an input box and a button, open it
+from the gallery, click, and confirm the answer renders. Confirm the gallery
+thumbnail still renders and does not fire a request (opaque-origin sandbox).
 
 ### Local environment notes (this machine had no infra)
 - Postgres/Redis/rustfs were started with rootless podman:

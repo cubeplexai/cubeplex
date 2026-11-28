@@ -1,4 +1,4 @@
-.PHONY: help install dev-install format lint lint-fix type-check test test-real-llm test-cov test-e2e test-e2e-ci migrate start cleanup-sandboxes check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
+.PHONY: help install dev-install format lint lint-fix type-check test test-real-llm test-cov test-e2e test-e2e-ci migrate start cleanup-sandboxes seed-interactive-artifact check check-ci clean pre-commit-install pre-commit-install-all pre-commit-run
 
 help:
 	@echo "Available commands:"
@@ -83,6 +83,12 @@ start:
 
 cleanup-sandboxes:
 	uv run python scripts/cleanup_sandboxes.py
+
+# Seed a website artifact that calls the artifact bridge (browser E2E fixture).
+# Usage: make seed-interactive-artifact WS=ws-... USER=usr-... HTML=/path/to.html
+seed-interactive-artifact:
+	uv run python scripts/seed_interactive_artifact.py \
+		--workspace-id "$(WS)" --user-id "$(USER)" --html-file "$(HTML)"
 
 check: format lint type-check
 	@echo "✓ All checks passed"
